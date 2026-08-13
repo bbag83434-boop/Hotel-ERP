@@ -3,6 +3,7 @@ import { prisma } from '../config/database';
 import { AppError } from '../utils/response.utils';
 import { AuditService } from './audit.service';
 import { AccountingService } from './accounting.service';
+import { ApprovalService } from './approval.service';
 
 export class RestaurantService {
   // ==========================================
@@ -824,7 +825,6 @@ export class RestaurantService {
 
       if (approvalRequired) {
         try {
-          const { ApprovalService } = await import('./approval.service');
           await ApprovalService.createApprovalRequest(
             companyId,
             {

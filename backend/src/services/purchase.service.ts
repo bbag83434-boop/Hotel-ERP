@@ -2,6 +2,7 @@ import { prisma } from '../config/database';
 import { AppError } from '../utils/response.utils';
 import { AuditService } from './audit.service';
 import { AccountingService } from './accounting.service';
+import { ApprovalService } from './approval.service';
 import { Prisma, PRStatus, PRPriority, POStatus, GRNStatus, QCStatus, SupplierTxType } from '@prisma/client';
 
 export class PurchaseService {
@@ -305,7 +306,6 @@ export class PurchaseService {
 
     // Wire Real Approval Center (Section 13)
     try {
-      const { ApprovalService } = await import('./approval.service');
       await ApprovalService.createApprovalRequest(
         companyId,
         {
