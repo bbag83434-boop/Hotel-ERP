@@ -142,6 +142,8 @@ export const purchaseApi = {
     receiveDate?: string;
     invoiceNumber?: string;
     invoiceAmount?: number;
+    taxAmount?: number;
+    freightAmount?: number;
     notes?: string;
     status?: string;
     items: Array<{

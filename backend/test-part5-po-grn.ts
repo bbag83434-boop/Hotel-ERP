@@ -522,12 +522,13 @@ async function runPart5Tests() {
       [branchA.id]
     );
 
+    const test21InvoiceNo = `INV-SUPP-${Date.now()}`;
     const grnSupplierTest = await PurchaseService.createGoodsReceiveNote({
       companyId: company.id,
       branchId: branchA.id,
       warehouseId: warehouseA.id,
       poId: poSupplierTest.id,
-      invoiceNumber: 'INV-SUPP-999',
+      invoiceNumber: test21InvoiceNo,
       invoiceAmount: 500,
       receiverId: user.id,
       userBranchIds: [branchA.id],
@@ -608,6 +609,117 @@ async function runPart5Tests() {
     assert(
       balInventoryCheck !== null && Number(balInventoryCheck.quantity) > 0 && latestStockLedger?.movementType === 'GRN',
       'TEST 24: Existing inventory integration confirmed (StockBalance and StockLedger active in warehouse)'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 25: Duplicate Supplier Invoice Number Check (Blocked)
+    // ----------------------------------------------------------------------------------
+    let duplicateInvoiceBlocked = false;
+    let duplicateErrorMsg = '';
+    try {
+      await PurchaseService.createGoodsReceiveNote({
+        companyId: company.id,
+        branchId: branchA.id,
+        warehouseId: warehouseA.id,
+        supplierId: supplier.id,
+        invoiceNumber: test21InvoiceNo, // Attempt to reuse invoice number from TEST 21
+        invoiceAmount: 500,
+        receiverId: user.id,
+        userBranchIds: [branchA.id],
+        status: 'QC_PASSED',
+        items: [{ itemId: item1.id, receivedQty: 10, acceptedQty: 10, unitPrice: 50 }]
+      });
+    } catch (err: any) {
+      duplicateInvoiceBlocked = true;
+      duplicateErrorMsg = err.message;
+    }
+    assert(
+      duplicateInvoiceBlocked && duplicateErrorMsg === 'Duplicate supplier invoice detected.',
+      'TEST 25: Duplicate supplier invoice strictly blocked with "Duplicate supplier invoice detected."'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 26: 3-Way Price Verification: PO Value Exceeded (+₹500 variance)
+    // ----------------------------------------------------------------------------------
+    const poVarianceTest = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 100, unitPrice: 100 }] // PO Base = 10,000
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    const grnVariance = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poVarianceTest.id,
+      invoiceNumber: `INV-VAR-${Date.now()}`,
+      invoiceAmount: 12800,
+      taxAmount: 1800,
+      freightAmount: 500,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [
+        {
+          poItemId: poVarianceTest.items[0].id,
+          itemId: item1.id,
+          receivedQty: 100,
+          acceptedQty: 100,
+          unitPrice: 105 // Invoice Base = 10,500 (+500 difference)
+        }
+      ]
+    });
+    assert(
+      grnVariance.notes?.includes('PO_VALUE_EXCEEDED') === true,
+      'TEST 26: 3-Way match flagged variance (PO Base: 10000, Invoice Base: 10500 -> PO_VALUE_EXCEEDED)'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 27: 3-Way Price Verification: Amount Matched
+    // ----------------------------------------------------------------------------------
+    const poMatchTest = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 50, unitPrice: 100 }] // PO Base = 5000
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    const grnMatched = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poMatchTest.id,
+      invoiceNumber: `INV-MATCH-${Date.now()}`,
+      invoiceAmount: 5900,
+      taxAmount: 900,
+      freightAmount: 0,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [
+        {
+          poItemId: poMatchTest.items[0].id,
+          itemId: item1.id,
+          receivedQty: 50,
+          acceptedQty: 50,
+          unitPrice: 100 // Invoice Base = 5000 (Exact match)
+        }
+      ]
+    });
+    assert(
+      grnMatched.notes?.includes('AMOUNT_MATCHED') === true,
+      'TEST 27: 3-Way match flagged exact price match (PO Base: 5000, Invoice Base: 5000 -> AMOUNT_MATCHED)'
     );
 
     console.log('\n==================================================');

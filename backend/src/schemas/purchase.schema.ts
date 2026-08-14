@@ -110,7 +110,10 @@ export const createGoodsReceiveSchema = z.object({
     poId: z.string().uuid().optional().nullable(),
     receiveDate: z.string().optional(),
     invoiceNumber: z.string().optional(),
+    invoiceDate: z.string().optional(),
     invoiceAmount: z.number().nonnegative().optional(),
+    taxAmount: z.number().nonnegative().optional().default(0),
+    freightAmount: z.number().nonnegative().optional().default(0),
     notes: z.string().optional(),
     status: z.enum(['RECEIVED', 'QC_PASSED']).optional().default('QC_PASSED'),
     items: z.array(

@@ -950,7 +950,22 @@ export class PurchaseService {
       throw new AppError('Supplier not found', 404);
     }
 
-    // 3. Execute in Prisma Atomic Transaction with Concurrency Row-Locking
+    // 3. Duplicate Supplier Invoice Check
+    if (params.invoiceNumber && params.invoiceNumber.trim() !== '') {
+      const cleanInvoiceNumber = params.invoiceNumber.trim();
+      const existingInvoice = await prisma.goodsReceiveNote.findFirst({
+        where: {
+          companyId,
+          supplierId: resolvedSupplierId,
+          invoiceNumber: { equals: cleanInvoiceNumber, mode: 'insensitive' }
+        }
+      });
+      if (existingInvoice) {
+        throw new AppError('Duplicate supplier invoice detected.', 400);
+      }
+    }
+
+    // 4. Execute in Prisma Atomic Transaction with Concurrency Row-Locking
     return prisma.$transaction(async (tx) => {
       // Row lock the PurchaseOrder to prevent concurrent duplicate receiving races
       if (params.poId) {
@@ -971,8 +986,9 @@ export class PurchaseService {
       const grnCount = await tx.goodsReceiveNote.count({ where: { companyId } });
       const grnNumber = `GRN-${new Date().getFullYear()}-${String(grnCount + 1).padStart(5, '0')}`;
 
-      // Calculate total accepted amount and validate QC balancing & over-receiving
-      let calculatedTotal = new Prisma.Decimal(0);
+      // Calculate base values, tax, freight, and validate QC balancing & over-receiving
+      let poBaseTotal = new Prisma.Decimal(0);
+      let invoiceBaseTotal = new Prisma.Decimal(0);
 
       for (const item of params.items) {
         const itemRecord = await tx.item.findFirst({ where: { id: item.itemId, companyId } });
@@ -1000,7 +1016,7 @@ export class PurchaseService {
           );
         }
 
-        // Strict PO item over-receiving prevention
+        // Strict PO item over-receiving prevention & price verification
         if (item.poItemId && params.poId) {
           const poItem = await tx.purchaseOrderItem.findFirst({
             where: { id: item.poItemId, poId: params.poId }
@@ -1016,14 +1032,30 @@ export class PurchaseService {
               400
             );
           }
-        }
 
-        calculatedTotal = calculatedTotal.plus(acceptedQty.times(unitPrice));
+          const poLineBase = acceptedQty.times(poItem.unitPrice);
+          const invoiceLineBase = acceptedQty.times(unitPrice);
+          poBaseTotal = poBaseTotal.plus(poLineBase);
+          invoiceBaseTotal = invoiceBaseTotal.plus(invoiceLineBase);
+        } else {
+          invoiceBaseTotal = invoiceBaseTotal.plus(acceptedQty.times(unitPrice));
+          poBaseTotal = poBaseTotal.plus(acceptedQty.times(unitPrice));
+        }
       }
 
+      const taxAmount = new Prisma.Decimal(params.taxAmount || 0);
+      const freightAmount = new Prisma.Decimal(params.freightAmount || 0);
+      const calculatedGrandTotal = invoiceBaseTotal.plus(taxAmount).plus(freightAmount);
       const totalAmount = params.invoiceAmount !== undefined && params.invoiceAmount > 0
         ? new Prisma.Decimal(params.invoiceAmount)
-        : calculatedTotal;
+        : calculatedGrandTotal;
+
+      const variance = invoiceBaseTotal.minus(poBaseTotal);
+      const isPOValueExceeded = variance.greaterThan(0);
+      const priceVerificationStatus = isPOValueExceeded ? 'PO_VALUE_EXCEEDED' : 'AMOUNT_MATCHED';
+      const notesWithAudit = params.notes
+        ? `${params.notes} | Verification: ${priceVerificationStatus} (PO Base: ${poBaseTotal}, Inv Base: ${invoiceBaseTotal})`
+        : `Verification: ${priceVerificationStatus} (PO Base: ${poBaseTotal}, Inv Base: ${invoiceBaseTotal})`;
 
       // 1. Create GRN Header
       const grn = await tx.goodsReceiveNote.create({
@@ -1038,7 +1070,7 @@ export class PurchaseService {
           invoiceNumber: params.invoiceNumber,
           status: isImmediateConfirm ? 'QC_PASSED' : 'RECEIVED',
           totalAmount,
-          notes: params.notes,
+          notes: notesWithAudit,
           receivedById: receiverId
         }
       });
