@@ -39,7 +39,7 @@ app.use((0, cors_1.default)({
             callback(null, true);
         }
         else {
-            callback(new Error(`CORS not allowed for this origin: ${origin}`));
+            callback(null, false);
         }
     },
     credentials: true,
