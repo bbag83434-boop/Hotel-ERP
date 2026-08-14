@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="goldGradMask" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbe38e" />
+      <stop offset="35%" stop-color="#d4a437" />
+      <stop offset="100%" stop-color="#9a6e18" />
+    </linearGradient>
+  </defs>
+
+  <!-- Full Bleed Solid Dark Background for Adaptive Masking -->
+  <rect x="0" y="0" width="512" height="512" fill="#0c0c0e" />
+
+  <!-- Safe Zone Circular/Rounded Badge (within 80% safe area, radius ~170 centered at 256) -->
+  <rect x="96" y="96" width="320" height="320" rx="72" fill="url(#goldGradMask)" />
+
+  <!-- Bold Clean 'H' Letterform in dark theme color -->
+  <path d="M188 156 H236 V231 H276 V156 H324 V356 H276 V281 H236 V356 H188 Z" fill="#0c0c0e" />
+</svg>
