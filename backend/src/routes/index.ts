@@ -12,12 +12,14 @@ import hrRoutes from './hr.routes';
 import approvalRoutes from './approval.routes';
 import dashboardRoutes from './dashboard.routes';
 import aiRoutes from './ai.routes';
+import routingRoutes from './routing.routes';
 
 const router = Router();
 
 // Sub-routes under API_PREFIX (/api/v1)
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
+router.use('/routing', routingRoutes);
 router.use('/inventory', inventoryRoutes);
 router.use('/purchasing', purchaseRoutes);
 router.use('/production', productionRoutes);

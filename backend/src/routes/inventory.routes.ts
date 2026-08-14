@@ -23,6 +23,9 @@ router.post('/categories', validate(createCategorySchema), InventoryController.c
 // Units
 router.get('/units', InventoryController.getUnits);
 router.post('/units', validate(createUnitSchema), InventoryController.createUnit);
+router.post('/units/convert', InventoryController.convertUnit);
+router.get('/units/supported', InventoryController.getSupportedUnits);
+
 
 // Items Master
 router.get('/items', InventoryController.getItems);

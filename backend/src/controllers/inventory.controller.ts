@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { InventoryService } from '../services/inventory.service';
+import { UnitConversionService } from '../services/unitConversion.service';
 import { sendSuccess, AppError } from '../utils/response.utils';
 import { prisma } from '../config/database';
 
@@ -75,6 +76,32 @@ export class InventoryController {
       next(error);
     }
   }
+
+  public static async convertUnit(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { amount, fromUnit, toUnit, customPackFactor } = req.body;
+      const result = UnitConversionService.convert(
+        Number(amount),
+        String(fromUnit),
+        String(toUnit),
+        customPackFactor ? Number(customPackFactor) : undefined
+      );
+      return sendSuccess(res, result, 'Unit converted successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async getSupportedUnits(_req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const units = UnitConversionService.getSupportedUnits();
+      return sendSuccess(res, units, 'Supported conversion dictionary retrieved');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+
 
   // Items / Products Master
   public static async getItems(req: AuthenticatedRequest, res: Response, next: NextFunction) {
