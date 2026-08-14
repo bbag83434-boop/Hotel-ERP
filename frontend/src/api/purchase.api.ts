@@ -94,9 +94,14 @@ export const purchaseApi = {
     deliveryDate?: string;
     taxAmount?: number;
     notes?: string;
+    status?: POStatus;
     items: Array<{ itemId: string; orderedQty: number; unitPrice: number; notes?: string }>;
   }): Promise<PurchaseOrder> => {
     const res = await apiClient.post('/purchasing/orders', data);
+    return res.data.data;
+  },
+  updatePurchaseOrderStatus: async (id: string, data: { status: POStatus; reason?: string }): Promise<PurchaseOrder> => {
+    const res = await apiClient.post(`/purchasing/orders/${id}/status`, data);
     return res.data.data;
   },
 
@@ -105,16 +110,21 @@ export const purchaseApi = {
     branchId?: string;
     warehouseId?: string;
     supplierId?: string;
+    poId?: string;
     page?: number;
     limit?: number;
   }): Promise<{ grns: GoodsReceiveNote[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> => {
     const res = await apiClient.get('/purchasing/grn', { params });
     return { grns: res.data.data, pagination: res.data.meta };
   },
+  getGoodsReceiveNoteById: async (id: string): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.get(`/purchasing/grn/${id}`);
+    return res.data.data;
+  },
   createGoodsReceiveNote: async (data: {
     branchId: string;
     warehouseId: string;
-    supplierId: string;
+    supplierId?: string;
     poId?: string | null;
     receiveDate?: string;
     invoiceNumber?: string;

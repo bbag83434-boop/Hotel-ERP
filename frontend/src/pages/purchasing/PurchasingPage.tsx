@@ -29,7 +29,7 @@ import { useAuth } from '../../context/AuthContext';
 
 export const PurchasingPage: React.FC = () => {
   const { user, selectedBranchId } = useAuth();
-  const [activeTab, setActiveTab] = useState<'requests' | 'orders' | 'grn' | 'suppliers'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'orders' | 'grn' | 'suppliers'>('suppliers');
 
   // Data lists
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);

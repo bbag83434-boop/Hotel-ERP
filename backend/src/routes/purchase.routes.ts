@@ -9,6 +9,7 @@ import {
   approvePurchaseRequestSchema,
   rejectPurchaseRequestSchema,
   createPurchaseOrderSchema,
+  updatePOStatusSchema,
   createGoodsReceiveSchema
 } from '../schemas/purchase.schema';
 
@@ -22,7 +23,7 @@ router.post('/suppliers', validate(createSupplierSchema), PurchaseController.cre
 router.put('/suppliers/:id', validate(updateSupplierSchema), PurchaseController.updateSupplier);
 router.get('/suppliers/:id/ledger', PurchaseController.getSupplierLedger);
 
-// Purchase Requests
+// Purchase Requests / Requisitions
 router.get('/requests', PurchaseController.getPurchaseRequests);
 router.post('/requests', validate(createPurchaseRequestSchema), PurchaseController.createPurchaseRequest);
 router.post('/requests/:id/approve', validate(approvePurchaseRequestSchema), PurchaseController.approvePurchaseRequest);
@@ -32,9 +33,11 @@ router.post('/requests/:id/reject', validate(rejectPurchaseRequestSchema), Purch
 router.get('/orders', PurchaseController.getPurchaseOrders);
 router.get('/orders/:id', PurchaseController.getPurchaseOrderById);
 router.post('/orders', validate(createPurchaseOrderSchema), PurchaseController.createPurchaseOrder);
+router.post('/orders/:id/status', validate(updatePOStatusSchema), PurchaseController.updatePurchaseOrderStatus);
 
 // Goods Receive Notes (GRN)
 router.get('/grn', PurchaseController.getGoodsReceiveNotes);
+router.get('/grn/:id', PurchaseController.getGoodsReceiveNoteById);
 router.post('/grn', validate(createGoodsReceiveSchema), PurchaseController.createGoodsReceiveNote);
 
 export default router;

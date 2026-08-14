@@ -559,67 +559,192 @@ export class PurchaseService {
       deliveryDate?: string;
       taxAmount?: number;
       notes?: string;
+      status?: POStatus;
       items: Array<{ itemId: string; orderedQty: number; unitPrice: number; notes?: string }>;
     },
     actorId?: string,
+    userBranchIds?: string[],
     ipAddress?: string,
     userAgent?: string
   ) {
+    if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(branchId)) {
+      throw new AppError('Unauthorized: You do not have access to create purchase orders for this branch', 403);
+    }
+
+    const [supplier, branch] = await Promise.all([
+      prisma.supplier.findFirst({ where: { id: data.supplierId, companyId } }),
+      prisma.branch.findFirst({ where: { id: branchId, companyId } })
+    ]);
+
+    if (!supplier) {
+      throw new AppError('Invalid supplier selected. Supplier does not exist.', 404);
+    }
+    if (!branch) {
+      throw new AppError('Invalid branch selected.', 404);
+    }
+
+    // Verify linked Purchase Request / Requisition if provided
+    let linkedPR = null;
+    if (data.requestId) {
+      linkedPR = await prisma.purchaseRequest.findFirst({
+        where: { id: data.requestId, companyId },
+        include: { items: true }
+      });
+      if (!linkedPR) {
+        throw new AppError('Referenced purchase requisition does not exist in this company', 404);
+      }
+    }
+
     const poCount = await prisma.purchaseOrder.count({ where: { companyId } });
     const poNumber = `PO-${new Date().getFullYear()}-${String(poCount + 1).padStart(5, '0')}`;
 
-    const totalAmount = data.items.reduce((sum, it) => {
-      return sum.plus(new Prisma.Decimal(it.orderedQty).times(new Prisma.Decimal(it.unitPrice)));
-    }, new Prisma.Decimal(0));
+    // Verify items and calculate totals strictly on backend
+    let totalAmount = new Prisma.Decimal(0);
+    const preparedItems: Array<{ itemId: string; orderedQty: Prisma.Decimal; unitPrice: Prisma.Decimal; totalPrice: Prisma.Decimal; notes?: string }> = [];
 
-    const taxAmount = new Prisma.Decimal(data.taxAmount || 0);
-    const grandTotal = totalAmount.plus(taxAmount);
-
-    const po = await prisma.purchaseOrder.create({
-      data: {
-        companyId,
-        branchId,
-        supplierId: data.supplierId,
-        requestId: data.requestId || null,
-        poNumber,
-        status: 'ISSUED',
-        deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : null,
-        totalAmount,
-        taxAmount,
-        grandTotal,
-        notes: data.notes,
-        createdById: actorId,
-        items: {
-          create: data.items.map((it) => {
-            const qty = new Prisma.Decimal(it.orderedQty);
-            const price = new Prisma.Decimal(it.unitPrice);
-            return {
-              itemId: it.itemId,
-              orderedQty: qty,
-              unitPrice: price,
-              totalPrice: qty.times(price),
-              notes: it.notes
-            };
-          })
-        }
-      },
-      include: {
-        items: { include: { item: true } },
-        supplier: true
+    for (const it of data.items) {
+      const itemRecord = await prisma.item.findFirst({ where: { id: it.itemId, companyId } });
+      if (!itemRecord) {
+        throw new AppError(`Item with ID "${it.itemId}" not found in Item Master`, 404);
       }
-    });
+      const qty = new Prisma.Decimal(it.orderedQty);
+      if (qty.lessThanOrEqualTo(0)) {
+        throw new AppError(`Ordered quantity for "${itemRecord.name}" must be greater than 0`, 400);
+      }
+      const price = new Prisma.Decimal(it.unitPrice >= 0 ? it.unitPrice : itemRecord.costPrice.toNumber());
+      const lineTotal = qty.times(price);
+      totalAmount = totalAmount.plus(lineTotal);
+
+      preparedItems.push({
+        itemId: it.itemId,
+        orderedQty: qty,
+        unitPrice: price,
+        totalPrice: lineTotal,
+        notes: it.notes
+      });
+    }
+
+    const taxAmount = new Prisma.Decimal(Math.max(0, data.taxAmount || 0));
+    const grandTotal = totalAmount.plus(taxAmount);
+    const poStatus: POStatus = data.status || 'ISSUED';
+
+    const po = await prisma.$transaction(async (tx) => {
+      const createdPO = await tx.purchaseOrder.create({
+        data: {
+          companyId,
+          branchId,
+          supplierId: data.supplierId,
+          requestId: data.requestId || null,
+          poNumber,
+          status: poStatus,
+          deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : null,
+          totalAmount,
+          taxAmount,
+          grandTotal,
+          notes: data.notes,
+          createdById: actorId,
+          items: {
+            create: preparedItems.map((pi) => ({
+              itemId: pi.itemId,
+              orderedQty: pi.orderedQty,
+              unitPrice: pi.unitPrice,
+              totalPrice: pi.totalPrice,
+              notes: pi.notes
+            }))
+          }
+        },
+        include: {
+          items: { include: { item: { include: { unit: true } } } },
+          supplier: true,
+          branch: true
+        }
+      });
+
+      // Update linked requisition status to ORDERED if linked
+      if (data.requestId) {
+        await tx.purchaseRequest.update({
+          where: { id: data.requestId },
+          data: { status: 'ORDERED' }
+        });
+      }
+
+      return createdPO;
+    }, { maxWait: 10000, timeout: 30000 });
 
     await AuditService.log({
       userId: actorId,
       action: 'PURCHASE_ORDER_CREATE',
       entity: 'PurchaseOrder',
       entityId: po.id,
-      details: { poNumber, supplier: po.supplier.name, grandTotal: grandTotal.toString() },
+      details: {
+        poNumber,
+        supplier: supplier.name,
+        grandTotal: grandTotal.toString(),
+        itemCount: data.items.length,
+        status: poStatus,
+        requestId: data.requestId
+      },
       ipAddress,
       userAgent
     });
 
     return po;
+  }
+
+  public static async updatePurchaseOrderStatus(
+    companyId: string,
+    poId: string,
+    newStatus: POStatus,
+    reason?: string,
+    actorId?: string,
+    userBranchIds?: string[],
+    ipAddress?: string,
+    userAgent?: string
+  ) {
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { id: poId, companyId },
+      include: { grns: true, branch: true }
+    });
+
+    if (!po) {
+      throw new AppError('Purchase Order not found', 404);
+    }
+
+    if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(po.branchId)) {
+      throw new AppError('Unauthorized: You do not have access to modify purchase orders for this branch', 403);
+    }
+
+    // Guard against invalid status transitions
+    if (newStatus === 'CANCELLED') {
+      if (po.status === 'RECEIVED' || po.status === 'PARTIALLY_RECEIVED' || po.grns.length > 0) {
+        throw new AppError('Cannot cancel a Purchase Order that has already received goods', 400);
+      }
+    }
+
+    const updated = await prisma.purchaseOrder.update({
+      where: { id: poId },
+      data: {
+        status: newStatus,
+        notes: reason ? `${po.notes ? po.notes + ' | ' : ''}Status update: ${reason}` : po.notes
+      },
+      include: {
+        items: { include: { item: true } },
+        supplier: true,
+        branch: true
+      }
+    });
+
+    await AuditService.log({
+      userId: actorId,
+      action: 'PURCHASE_ORDER_STATUS_UPDATE',
+      entity: 'PurchaseOrder',
+      entityId: poId,
+      details: { poNumber: po.poNumber, oldStatus: po.status, newStatus, reason },
+      ipAddress,
+      userAgent
+    });
+
+    return updated;
   }
 
   // -------------------------------------------------------------
@@ -630,7 +755,7 @@ export class PurchaseService {
     companyId: string;
     branchId: string;
     warehouseId: string;
-    supplierId: string;
+    supplierId?: string;
     poId?: string | null;
     receiveDate?: string;
     invoiceNumber?: string;
@@ -648,30 +773,120 @@ export class PurchaseService {
       qcNotes?: string;
     }>;
     receiverId?: string;
+    userBranchIds?: string[];
     ipAddress?: string;
     userAgent?: string;
   }) {
-    const { companyId, branchId, warehouseId, supplierId, poId, receiverId, ipAddress, userAgent } = params;
+    const { companyId, branchId, warehouseId, receiverId, userBranchIds, ipAddress, userAgent } = params;
 
-    const [wh, supplier] = await Promise.all([
-      prisma.warehouse.findFirst({ where: { id: warehouseId, companyId } }),
-      prisma.supplier.findFirst({ where: { id: supplierId, companyId } })
-    ]);
-
-    if (!wh || !supplier) {
-      throw new AppError('Invalid warehouse or supplier', 404);
+    // 1. Validate Warehouse & Branch Isolation
+    const wh = await prisma.warehouse.findFirst({ where: { id: warehouseId, companyId } });
+    if (!wh) {
+      throw new AppError('Invalid warehouse specified', 404);
+    }
+    if (wh.branchId && !wh.isCentral && wh.branchId !== branchId) {
+      throw new AppError('Warehouse does not belong to the specified branch', 400);
+    }
+    if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(branchId)) {
+      throw new AppError('Unauthorized: You do not have access to receive goods at this branch', 403);
     }
 
-    // Execute in Prisma Atomic Transaction
+    // 2. Resolve & Validate PO and Supplier
+    let resolvedSupplierId = params.supplierId;
+    let linkedPO: any = null;
+
+    if (params.poId) {
+      linkedPO = await prisma.purchaseOrder.findFirst({
+        where: { id: params.poId, companyId },
+        include: { items: true, supplier: true }
+      });
+      if (!linkedPO) {
+        throw new AppError('Referenced Purchase Order not found', 404);
+      }
+      if (linkedPO.status === 'CANCELLED') {
+        throw new AppError('Cannot receive goods against a CANCELLED Purchase Order', 400);
+      }
+      // Supplier inherited directly from PO to enforce reference consistency
+      resolvedSupplierId = linkedPO.supplierId;
+    }
+
+    if (!resolvedSupplierId) {
+      throw new AppError('Supplier must be specified directly or referenced through a Purchase Order', 400);
+    }
+
+    const supplier = await prisma.supplier.findFirst({ where: { id: resolvedSupplierId, companyId } });
+    if (!supplier) {
+      throw new AppError('Supplier not found', 404);
+    }
+
+    // 3. Execute in Prisma Atomic Transaction with Concurrency Row-Locking
     return prisma.$transaction(async (tx) => {
+      // Row lock the PurchaseOrder to prevent concurrent duplicate receiving races
+      if (params.poId) {
+        await tx.$queryRaw`
+          SELECT "id", "status"::text FROM "purchase_orders"
+          WHERE "id" = ${params.poId}
+          FOR UPDATE
+        `;
+      }
+
+      // Row lock target warehouse
+      await tx.$queryRaw`
+        SELECT "id" FROM "warehouses"
+        WHERE "id" = ${warehouseId}
+        FOR UPDATE
+      `;
+
       const grnCount = await tx.goodsReceiveNote.count({ where: { companyId } });
       const grnNumber = `GRN-${new Date().getFullYear()}-${String(grnCount + 1).padStart(5, '0')}`;
 
-      // Calculate total accepted amount
+      // Calculate total accepted amount and validate QC balancing & over-receiving
       let totalAmount = new Prisma.Decimal(0);
+
       for (const item of params.items) {
+        const itemRecord = await tx.item.findFirst({ where: { id: item.itemId, companyId } });
+        if (!itemRecord) {
+          throw new AppError(`Item "${item.itemId}" not found in Item Master`, 404);
+        }
+
+        const receivedQty = new Prisma.Decimal(item.receivedQty);
         const acceptedQty = new Prisma.Decimal(item.acceptedQty);
-        const unitPrice = new Prisma.Decimal(item.unitPrice);
+        const rejectedQty = new Prisma.Decimal(item.rejectedQty || 0);
+        const unitPrice = new Prisma.Decimal(item.unitPrice >= 0 ? item.unitPrice : itemRecord.costPrice.toNumber());
+
+        if (receivedQty.lessThanOrEqualTo(0)) {
+          throw new AppError(`Received quantity for item "${itemRecord.name}" must be greater than 0`, 400);
+        }
+        if (acceptedQty.lessThan(0) || rejectedQty.lessThan(0)) {
+          throw new AppError(`Accepted and rejected quantities for item "${itemRecord.name}" cannot be negative`, 400);
+        }
+
+        // Strict Quality Check (QC) balancing rule
+        if (!acceptedQty.plus(rejectedQty).equals(receivedQty)) {
+          throw new AppError(
+            `QC validation failed for "${itemRecord.name}": Accepted quantity (${acceptedQty}) + Rejected quantity (${rejectedQty}) must equal total Received quantity (${receivedQty})`,
+            400
+          );
+        }
+
+        // Strict PO item over-receiving prevention
+        if (item.poItemId && params.poId) {
+          const poItem = await tx.purchaseOrderItem.findFirst({
+            where: { id: item.poItemId, poId: params.poId }
+          });
+          if (!poItem) {
+            throw new AppError(`PO Line Item "${item.poItemId}" does not belong to Purchase Order "${linkedPO.poNumber}"`, 400);
+          }
+
+          const newTotalReceived = poItem.receivedQty.plus(acceptedQty);
+          if (newTotalReceived.greaterThan(poItem.orderedQty)) {
+            throw new AppError(
+              `Over-receiving blocked for item "${itemRecord.name}": Total received (${newTotalReceived}) cannot exceed ordered quantity (${poItem.orderedQty})`,
+              400
+            );
+          }
+        }
+
         totalAmount = totalAmount.plus(acceptedQty.times(unitPrice));
       }
 
@@ -681,8 +896,8 @@ export class PurchaseService {
           companyId,
           branchId,
           warehouseId,
-          supplierId,
-          poId: poId || null,
+          supplierId: resolvedSupplierId,
+          poId: params.poId || null,
           grnNumber,
           receiveDate: params.receiveDate ? new Date(params.receiveDate) : new Date(),
           invoiceNumber: params.invoiceNumber,
@@ -714,13 +929,13 @@ export class PurchaseService {
             totalPrice: itemTotalPrice,
             batchNumber: item.batchNumber,
             expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
-            qcStatus: item.qcStatus || 'PASSED',
+            qcStatus: item.qcStatus || (rejectedQty.greaterThan(0) && acceptedQty.isZero() ? 'FAILED' : 'PASSED'),
             qcNotes: item.qcNotes
           }
         });
 
         if (acceptedQty.greaterThan(0)) {
-          // A. Update Stock Balance in target Warehouse (Section 8 automation)
+          // A. Increase Stock Balance in target Warehouse atomically
           const stockBalance = await tx.stockBalance.upsert({
             where: {
               warehouseId_itemId: {
@@ -738,7 +953,7 @@ export class PurchaseService {
             }
           });
 
-          // B. Update Item cost price to latest purchase price
+          // B. Update Item Master cost price to latest purchase price
           await tx.item.update({
             where: { id: item.itemId },
             data: { costPrice: unitPrice }
@@ -765,7 +980,7 @@ export class PurchaseService {
         }
 
         // D. Update PO Item received quantity if linked to PO
-        if (item.poItemId) {
+        if (item.poItemId && params.poId) {
           await tx.purchaseOrderItem.update({
             where: { id: item.poItemId },
             data: {
@@ -775,69 +990,71 @@ export class PurchaseService {
         }
       }
 
-      // 3. Update PO status if linked
-      if (poId) {
-        const poItems = await tx.purchaseOrderItem.findMany({ where: { poId } });
-        const allReceived = poItems.every((poi) => poi.receivedQty.greaterThanOrEqualTo(poi.orderedQty));
+      // 3. Update PO status accurately based on cumulative received quantities
+      if (params.poId) {
+        const poItems = await tx.purchaseOrderItem.findMany({ where: { poId: params.poId } });
+        const allReceived = poItems.length > 0 && poItems.every((poi) => poi.receivedQty.greaterThanOrEqualTo(poi.orderedQty));
         const someReceived = poItems.some((poi) => poi.receivedQty.greaterThan(0));
 
+        const updatedPOStatus: POStatus = allReceived ? 'RECEIVED' : someReceived ? 'PARTIALLY_RECEIVED' : 'ISSUED';
+
         await tx.purchaseOrder.update({
-          where: { id: poId },
-          data: {
-            status: allReceived ? 'RECEIVED' : someReceived ? 'PARTIALLY_RECEIVED' : 'ISSUED'
-          }
+          where: { id: params.poId },
+          data: { status: updatedPOStatus }
         });
       }
 
       // 4. Update Supplier Payable Balance & record in Supplier Ledger
-      const updatedSupplier = await tx.supplier.update({
-        where: { id: supplierId },
-        data: {
-          balance: { increment: totalAmount }
-        }
-      });
-
-      await tx.supplierLedger.create({
-        data: {
-          supplierId,
-          transactionType: 'INVOICE',
-          debit: new Prisma.Decimal(0),
-          credit: totalAmount,
-          balance: updatedSupplier.balance,
-          referenceType: 'GRN',
-          referenceId: grn.id,
-          description: `Goods received on ${grnNumber}${params.invoiceNumber ? ` (Inv: ${params.invoiceNumber})` : ''}`
-        }
-      });
-
-      // 5. Create Purchase Invoice record
-      const invoiceNumber = `INV-${grnNumber}`;
-      await tx.purchaseInvoice.create({
-        data: {
-          companyId,
-          supplierId,
-          grnId: grn.id,
-          invoiceNumber,
-          totalAmount,
-          paidAmount: new Prisma.Decimal(0),
-          status: 'UNPAID',
-          notes: params.invoiceNumber ? `Supplier Invoice: ${params.invoiceNumber}` : undefined
-        }
-      });
-
-      // 6. Post Double-Entry General Ledger & Accounts Payable via AccountingService
-      try {
-        await AccountingService.recordPurchaseGrnJournal({
-          companyId,
-          branchId: wh.branchId,
-          supplierId,
-          grnId: grn.id,
-          grnNumber,
-          totalAmount,
-          actorId: receiverId
+      if (totalAmount.greaterThan(0)) {
+        const updatedSupplier = await tx.supplier.update({
+          where: { id: resolvedSupplierId },
+          data: {
+            balance: { increment: totalAmount }
+          }
         });
-      } catch (accErr) {
-        console.warn('Auto AP/GL Posting non-fatal notice:', accErr);
+
+        await tx.supplierLedger.create({
+          data: {
+            supplierId: resolvedSupplierId,
+            transactionType: 'INVOICE',
+            debit: new Prisma.Decimal(0),
+            credit: totalAmount,
+            balance: updatedSupplier.balance,
+            referenceType: 'GRN',
+            referenceId: grn.id,
+            description: `Goods received on ${grnNumber}${params.invoiceNumber ? ` (Inv: ${params.invoiceNumber})` : ''}`
+          }
+        });
+
+        // 5. Create Purchase Invoice record
+        const invoiceNumber = `INV-${grnNumber}`;
+        await tx.purchaseInvoice.create({
+          data: {
+            companyId,
+            supplierId: resolvedSupplierId,
+            grnId: grn.id,
+            invoiceNumber,
+            totalAmount,
+            paidAmount: new Prisma.Decimal(0),
+            status: 'UNPAID',
+            notes: params.invoiceNumber ? `Supplier Invoice: ${params.invoiceNumber}` : undefined
+          }
+        });
+
+        // 6. Post Double-Entry General Ledger & Accounts Payable via AccountingService
+        try {
+          await AccountingService.recordPurchaseGrnJournal({
+            companyId,
+            branchId: wh.branchId,
+            supplierId: resolvedSupplierId,
+            grnId: grn.id,
+            grnNumber,
+            totalAmount,
+            actorId: receiverId
+          });
+        } catch (accErr) {
+          console.warn('Auto AP/GL Posting non-fatal notice:', accErr);
+        }
       }
 
       await AuditService.log({
@@ -849,6 +1066,7 @@ export class PurchaseService {
           grnNumber,
           warehouse: wh.name,
           supplier: supplier.name,
+          poId: params.poId,
           totalAmount: totalAmount.toString(),
           itemCount: params.items.length
         },
@@ -860,9 +1078,33 @@ export class PurchaseService {
     }, { maxWait: 10000, timeout: 30000 });
   }
 
+  public static async getGoodsReceiveNoteById(companyId: string, id: string) {
+    const grn = await prisma.goodsReceiveNote.findFirst({
+      where: { id, companyId },
+      include: {
+        branch: true,
+        warehouse: true,
+        supplier: true,
+        po: { include: { items: { include: { item: true } } } },
+        receivedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+        items: {
+          include: {
+            item: { include: { unit: true, category: true } }
+          }
+        }
+      }
+    });
+
+    if (!grn) {
+      throw new AppError('Goods Receive Note not found', 404);
+    }
+
+    return grn;
+  }
+
   public static async getGoodsReceiveNotes(
     companyId: string,
-    params: { branchId?: string; warehouseId?: string; supplierId?: string; page?: number; limit?: number }
+    params: { branchId?: string; warehouseId?: string; supplierId?: string; poId?: string; page?: number; limit?: number }
   ) {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
@@ -872,7 +1114,8 @@ export class PurchaseService {
       companyId,
       ...(params.branchId ? { branchId: params.branchId } : {}),
       ...(params.warehouseId ? { warehouseId: params.warehouseId } : {}),
-      ...(params.supplierId ? { supplierId: params.supplierId } : {})
+      ...(params.supplierId ? { supplierId: params.supplierId } : {}),
+      ...(params.poId ? { poId: params.poId } : {})
     };
 
     const [total, grns] = await Promise.all([

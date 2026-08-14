@@ -202,15 +202,42 @@ export class PurchaseController {
       const companyId = await resolveCompanyId(req);
       const ipAddress = getClientIp(req);
       const userAgent = (req.headers['user-agent'] as string) || '';
+      const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+      const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
       const po = await PurchaseService.createPurchaseOrder(
         companyId,
         req.body.branchId,
         req.body,
         req.user?.userId,
+        userBranchIds,
         ipAddress,
         userAgent
       );
       return sendSuccess(res, po, 'Purchase order created successfully', 201);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async updatePurchaseOrderStatus(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+      const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
+      const po = await PurchaseService.updatePurchaseOrderStatus(
+        companyId,
+        id,
+        req.body.status,
+        req.body.reason,
+        req.user?.userId,
+        userBranchIds,
+        ipAddress,
+        userAgent
+      );
+      return sendSuccess(res, po, `Purchase order status updated to ${req.body.status}`);
     } catch (error) {
       next(error);
     }
@@ -222,6 +249,8 @@ export class PurchaseController {
       const companyId = await resolveCompanyId(req);
       const ipAddress = getClientIp(req);
       const userAgent = (req.headers['user-agent'] as string) || '';
+      const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+      const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
       const grn = await PurchaseService.createGoodsReceiveNote({
         companyId,
         branchId: req.body.branchId,
@@ -233,6 +262,7 @@ export class PurchaseController {
         notes: req.body.notes,
         items: req.body.items,
         receiverId: req.user?.userId,
+        userBranchIds,
         ipAddress,
         userAgent
       });
@@ -242,14 +272,26 @@ export class PurchaseController {
     }
   }
 
+  public static async getGoodsReceiveNoteById(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const grn = await PurchaseService.getGoodsReceiveNoteById(companyId, id);
+      return sendSuccess(res, grn, 'Goods receive note details');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   public static async getGoodsReceiveNotes(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = await resolveCompanyId(req);
-      const { branchId, warehouseId, supplierId, page, limit } = req.query;
+      const { branchId, warehouseId, supplierId, poId, page, limit } = req.query;
       const result = await PurchaseService.getGoodsReceiveNotes(companyId, {
         branchId: branchId as string,
         warehouseId: warehouseId as string,
         supplierId: supplierId as string,
+        poId: poId as string,
         page: page ? parseInt(page as string, 10) : 1,
         limit: limit ? parseInt(limit as string, 10) : 20
       });

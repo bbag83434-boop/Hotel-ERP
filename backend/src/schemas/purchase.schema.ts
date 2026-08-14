@@ -66,6 +66,7 @@ export const createPurchaseOrderSchema = z.object({
     deliveryDate: z.string().optional(),
     taxAmount: z.number().nonnegative().optional().default(0),
     notes: z.string().optional(),
+    status: z.enum(['DRAFT', 'ISSUED']).optional().default('ISSUED'),
     items: z.array(
       z.object({
         itemId: z.string().uuid('Item is required'),
@@ -77,11 +78,18 @@ export const createPurchaseOrderSchema = z.object({
   })
 });
 
+export const updatePOStatusSchema = z.object({
+  body: z.object({
+    status: z.enum(['DRAFT', 'ISSUED', 'CANCELLED']),
+    reason: z.string().optional()
+  })
+});
+
 export const createGoodsReceiveSchema = z.object({
   body: z.object({
     branchId: z.string().uuid('Branch is required'),
     warehouseId: z.string().uuid('Warehouse is required'),
-    supplierId: z.string().uuid('Supplier is required'),
+    supplierId: z.string().uuid().optional(),
     poId: z.string().uuid().optional().nullable(),
     receiveDate: z.string().optional(),
     invoiceNumber: z.string().optional(),
