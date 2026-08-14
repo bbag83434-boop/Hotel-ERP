@@ -21,7 +21,13 @@ app.use(
 // CORS configuration
 const allowedOrigins = env.CORS_ORIGIN.split(',').map((o) => o.trim().replace(/\/+$/, ''));
 const knownOrigins = [
-  'https://hotel-erp-1-o13c.onrender.com',
+  'https://hotel-erp-1-o13c.onrender.com', // 1, o, 1, 3, c
+  'https://hotel-erp-1-013c.onrender.com', // 1, 0, 1, 3, c
+  'https://hotel-erp-1-ol3c.onrender.com', // 1, o, l, 3, c
+  'https://hotel-erp-1-0l3c.onrender.com', // 1, 0, l, 3, c
+  'https://hotel-erp-l-o13c.onrender.com', // l, o, 1, 3, c
+  'https://hotel-erp-l-013c.onrender.com', // l, 0, 1, 3, c
+  'https://hotel-erp-l-ol3c.onrender.com', // l, o, l, 3, c
   'http://localhost:5173',
   'http://127.0.0.1:5173'
 ];
@@ -35,8 +41,18 @@ app.use(
   cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-      const normalizedOrigin = origin.replace(/\/+$/, '');
-      if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes('*')) {
+      const normalizedOrigin = origin.trim().replace(/\/+$/, '').toLowerCase();
+      
+      // 1. Check exact/known allowed origins (case-insensitive)
+      const isExplicitlyAllowed = allowedOrigins.some(
+        (o) => o.trim().replace(/\/+$/, '').toLowerCase() === normalizedOrigin
+      );
+
+      // 2. Wildcard or any *.onrender.com subdomain or localhost
+      const isRenderSubdomain = /^https:\/\/[a-z0-9-]+\.onrender\.com$/i.test(normalizedOrigin);
+      const isLocalhost = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalizedOrigin);
+
+      if (isExplicitlyAllowed || allowedOrigins.includes('*') || isRenderSubdomain || isLocalhost) {
         callback(null, true);
       } else {
         callback(null, false);
