@@ -547,7 +547,135 @@ export class PurchaseService {
       throw new AppError('Purchase Order not found', 404);
     }
 
-    return po;
+    const itemsWithMetrics = po.items.map((it) => {
+      const ordered = Number(it.orderedQty);
+      const received = Number(it.receivedQty);
+      const outstanding = Math.max(0, ordered - received);
+      return {
+        ...it,
+        orderedQty: ordered,
+        receivedQty: received,
+        outstandingQty: outstanding,
+        isFullyReceived: received >= ordered
+      };
+    });
+
+    const totalOrderedQty = itemsWithMetrics.reduce((sum, it) => sum + it.orderedQty, 0);
+    const totalReceivedQty = itemsWithMetrics.reduce((sum, it) => sum + it.receivedQty, 0);
+    const totalOutstandingQty = itemsWithMetrics.reduce((sum, it) => sum + it.outstandingQty, 0);
+
+    return {
+      ...po,
+      items: itemsWithMetrics,
+      metrics: {
+        totalOrderedQty,
+        totalReceivedQty,
+        totalOutstandingQty,
+        isFullyReceived: totalOutstandingQty === 0 && totalOrderedQty > 0
+      }
+    };
+  }
+
+  public static async updatePurchaseOrder(
+    companyId: string,
+    poId: string,
+    data: {
+      supplierId?: string;
+      deliveryDate?: string;
+      taxAmount?: number;
+      notes?: string;
+      items?: Array<{ itemId: string; orderedQty: number; unitPrice: number; notes?: string }>;
+    },
+    actorId?: string,
+    userBranchIds?: string[],
+    ipAddress?: string,
+    userAgent?: string
+  ) {
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { id: poId, companyId },
+      include: { items: true }
+    });
+    if (!po) {
+      throw new AppError('Purchase Order not found', 404);
+    }
+    if (po.status !== 'DRAFT') {
+      throw new AppError(`Cannot update Purchase Order with status "${po.status}". Only DRAFT purchase orders can be edited.`, 400);
+    }
+    if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(po.branchId)) {
+      throw new AppError('Unauthorized: You do not have access to edit purchase orders for this branch', 403);
+    }
+
+    const updatedPO = await prisma.$transaction(async (tx) => {
+      let totalAmount = po.totalAmount;
+      const taxAmount = data.taxAmount !== undefined ? new Prisma.Decimal(data.taxAmount) : po.taxAmount;
+
+      if (data.items && data.items.length > 0) {
+        await tx.purchaseOrderItem.deleteMany({ where: { poId: po.id } });
+        totalAmount = new Prisma.Decimal(0);
+        const preparedItems = [];
+        for (const it of data.items) {
+          const itemRecord = await tx.item.findFirst({ where: { id: it.itemId, companyId } });
+          if (!itemRecord) {
+            throw new AppError(`Item "${it.itemId}" not found in Item Master`, 404);
+          }
+          const qty = new Prisma.Decimal(it.orderedQty);
+          if (qty.lessThanOrEqualTo(0)) {
+            throw new AppError(`Ordered quantity for "${itemRecord.name}" must be greater than 0`, 400);
+          }
+          const price = new Prisma.Decimal(it.unitPrice >= 0 ? it.unitPrice : itemRecord.costPrice.toNumber());
+          const lineTotal = qty.times(price);
+          totalAmount = totalAmount.plus(lineTotal);
+          preparedItems.push({
+            itemId: it.itemId,
+            orderedQty: qty,
+            unitPrice: price,
+            totalPrice: lineTotal,
+            notes: it.notes
+          });
+        }
+        await tx.purchaseOrderItem.createMany({
+          data: preparedItems.map((pi) => ({
+            poId: po.id,
+            itemId: pi.itemId,
+            orderedQty: pi.orderedQty,
+            unitPrice: pi.unitPrice,
+            totalPrice: pi.totalPrice,
+            notes: pi.notes
+          }))
+        });
+      }
+
+      const grandTotal = totalAmount.plus(taxAmount);
+
+      return tx.purchaseOrder.update({
+        where: { id: po.id },
+        data: {
+          supplierId: data.supplierId || po.supplierId,
+          deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : po.deliveryDate,
+          totalAmount,
+          taxAmount,
+          grandTotal,
+          notes: data.notes !== undefined ? data.notes : po.notes
+        },
+        include: {
+          items: { include: { item: true } },
+          supplier: true,
+          branch: true
+        }
+      });
+    });
+
+    await AuditService.log({
+      userId: actorId,
+      action: 'PURCHASE_ORDER_UPDATE',
+      entity: 'PurchaseOrder',
+      entityId: po.id,
+      details: { poNumber: po.poNumber, updatedFields: Object.keys(data) },
+      ipAddress,
+      userAgent
+    });
+
+    return updatedPO;
   }
 
   public static async createPurchaseOrder(
@@ -760,6 +888,7 @@ export class PurchaseService {
     receiveDate?: string;
     invoiceNumber?: string;
     notes?: string;
+    status?: GRNStatus;
     items: Array<{
       poItemId?: string | null;
       itemId: string;
@@ -778,6 +907,7 @@ export class PurchaseService {
     userAgent?: string;
   }) {
     const { companyId, branchId, warehouseId, receiverId, userBranchIds, ipAddress, userAgent } = params;
+    const isImmediateConfirm = (params.status || 'QC_PASSED') === 'QC_PASSED';
 
     // 1. Validate Warehouse & Branch Isolation
     const wh = await prisma.warehouse.findFirst({ where: { id: warehouseId, companyId } });
@@ -901,7 +1031,7 @@ export class PurchaseService {
           grnNumber,
           receiveDate: params.receiveDate ? new Date(params.receiveDate) : new Date(),
           invoiceNumber: params.invoiceNumber,
-          status: 'QC_PASSED',
+          status: isImmediateConfirm ? 'QC_PASSED' : 'RECEIVED',
           totalAmount,
           notes: params.notes,
           receivedById: receiverId
@@ -934,7 +1064,8 @@ export class PurchaseService {
           }
         });
 
-        if (acceptedQty.greaterThan(0)) {
+        // Only increase stock and ledger when CONFIRMED (isImmediateConfirm = true)
+        if (isImmediateConfirm && acceptedQty.greaterThan(0)) {
           // A. Increase Stock Balance in target Warehouse atomically
           const stockBalance = await tx.stockBalance.upsert({
             where: {
@@ -979,8 +1110,8 @@ export class PurchaseService {
           });
         }
 
-        // D. Update PO Item received quantity if linked to PO
-        if (item.poItemId && params.poId) {
+        // D. Update PO Item received quantity if confirmed and linked to PO
+        if (isImmediateConfirm && item.poItemId && params.poId) {
           await tx.purchaseOrderItem.update({
             where: { id: item.poItemId },
             data: {
@@ -991,7 +1122,7 @@ export class PurchaseService {
       }
 
       // 3. Update PO status accurately based on cumulative received quantities
-      if (params.poId) {
+      if (isImmediateConfirm && params.poId) {
         const poItems = await tx.purchaseOrderItem.findMany({ where: { poId: params.poId } });
         const allReceived = poItems.length > 0 && poItems.every((poi) => poi.receivedQty.greaterThanOrEqualTo(poi.orderedQty));
         const someReceived = poItems.some((poi) => poi.receivedQty.greaterThan(0));
@@ -1004,8 +1135,8 @@ export class PurchaseService {
         });
       }
 
-      // 4. Update Supplier Payable Balance & record in Supplier Ledger
-      if (totalAmount.greaterThan(0)) {
+      // 4. Update Supplier Payable Balance & record in Supplier Ledger if confirmed
+      if (isImmediateConfirm && totalAmount.greaterThan(0)) {
         const updatedSupplier = await tx.supplier.update({
           where: { id: resolvedSupplierId },
           data: {
@@ -1059,7 +1190,7 @@ export class PurchaseService {
 
       await AuditService.log({
         userId: receiverId,
-        action: 'GOODS_RECEIVE_COMPLETED',
+        action: isImmediateConfirm ? 'GOODS_RECEIVE_COMPLETED' : 'GOODS_RECEIVE_DRAFT_CREATED',
         entity: 'GoodsReceiveNote',
         entityId: grn.id,
         details: {
@@ -1068,13 +1199,185 @@ export class PurchaseService {
           supplier: supplier.name,
           poId: params.poId,
           totalAmount: totalAmount.toString(),
-          itemCount: params.items.length
+          itemCount: params.items.length,
+          status: grn.status
         },
         ipAddress,
         userAgent
       });
 
       return grn;
+    }, { maxWait: 10000, timeout: 30000 });
+  }
+
+  public static async confirmGoodsReceiveNote(
+    companyId: string,
+    grnId: string,
+    actorId?: string,
+    userBranchIds?: string[],
+    ipAddress?: string,
+    userAgent?: string
+  ) {
+    const grn = await prisma.goodsReceiveNote.findFirst({
+      where: { id: grnId, companyId },
+      include: { items: true, warehouse: true, supplier: true }
+    });
+
+    if (!grn) {
+      throw new AppError('Goods Receive Note not found', 404);
+    }
+    if (grn.status !== 'RECEIVED') {
+      throw new AppError(`GRN cannot be confirmed. Current status is already "${grn.status}".`, 400);
+    }
+    if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(grn.branchId)) {
+      throw new AppError('Unauthorized: You do not have access to confirm goods receiving at this branch', 403);
+    }
+
+    return prisma.$transaction(async (tx) => {
+      // Row lock GRN, PO, and Warehouse
+      await tx.$queryRaw`
+        SELECT "id", "status"::text FROM "goods_receive_notes"
+        WHERE "id" = ${grnId}
+        FOR UPDATE
+      `;
+      if (grn.poId) {
+        await tx.$queryRaw`
+          SELECT "id", "status"::text FROM "purchase_orders"
+          WHERE "id" = ${grn.poId}
+          FOR UPDATE
+        `;
+      }
+      await tx.$queryRaw`
+        SELECT "id" FROM "warehouses"
+        WHERE "id" = ${grn.warehouseId}
+        FOR UPDATE
+      `;
+
+      // Process stock increments
+      for (const item of grn.items) {
+        const acceptedQty = item.acceptedQty;
+        const unitPrice = item.unitPrice;
+        const itemTotalPrice = acceptedQty.times(unitPrice);
+
+        if (acceptedQty.greaterThan(0)) {
+          // Increase stock balance
+          const stockBalance = await tx.stockBalance.upsert({
+            where: {
+              warehouseId_itemId: {
+                warehouseId: grn.warehouseId,
+                itemId: item.itemId
+              }
+            },
+            update: {
+              quantity: { increment: acceptedQty }
+            },
+            create: {
+              warehouseId: grn.warehouseId,
+              itemId: item.itemId,
+              quantity: acceptedQty
+            }
+          });
+
+          // Update Item Master cost price
+          await tx.item.update({
+            where: { id: item.itemId },
+            data: { costPrice: unitPrice }
+          });
+
+          // Create immutable StockLedger record
+          await tx.stockLedger.create({
+            data: {
+              warehouseId: grn.warehouseId,
+              itemId: item.itemId,
+              batchNumber: item.batchNumber,
+              expiryDate: item.expiryDate,
+              movementType: 'GRN',
+              changeQty: acceptedQty,
+              balanceQty: stockBalance.quantity,
+              unitCost: unitPrice,
+              totalCost: itemTotalPrice,
+              referenceType: 'GRN',
+              referenceId: grn.id,
+              notes: `Goods received from ${grn.supplier.name} (${grn.grnNumber})`,
+              createdById: actorId
+            }
+          });
+        }
+
+        // Update PO Item receivedQty
+        if (item.poItemId && grn.poId) {
+          await tx.purchaseOrderItem.update({
+            where: { id: item.poItemId },
+            data: { receivedQty: { increment: acceptedQty } }
+          });
+        }
+      }
+
+      // Update PO overall status
+      if (grn.poId) {
+        const poItems = await tx.purchaseOrderItem.findMany({ where: { poId: grn.poId } });
+        const allReceived = poItems.length > 0 && poItems.every((poi) => poi.receivedQty.greaterThanOrEqualTo(poi.orderedQty));
+        const someReceived = poItems.some((poi) => poi.receivedQty.greaterThan(0));
+
+        const updatedPOStatus: POStatus = allReceived ? 'RECEIVED' : someReceived ? 'PARTIALLY_RECEIVED' : 'ISSUED';
+        await tx.purchaseOrder.update({
+          where: { id: grn.poId },
+          data: { status: updatedPOStatus }
+        });
+      }
+
+      // Update Supplier balance & create SupplierLedger & invoice
+      if (grn.totalAmount.greaterThan(0)) {
+        const updatedSupplier = await tx.supplier.update({
+          where: { id: grn.supplierId },
+          data: { balance: { increment: grn.totalAmount } }
+        });
+
+        await tx.supplierLedger.create({
+          data: {
+            supplierId: grn.supplierId,
+            transactionType: 'INVOICE',
+            debit: new Prisma.Decimal(0),
+            credit: grn.totalAmount,
+            balance: updatedSupplier.balance,
+            referenceType: 'GRN',
+            referenceId: grn.id,
+            description: `Goods received on ${grn.grnNumber}${grn.invoiceNumber ? ` (Inv: ${grn.invoiceNumber})` : ''}`
+          }
+        });
+
+        const invoiceNumber = `INV-${grn.grnNumber}`;
+        await tx.purchaseInvoice.create({
+          data: {
+            companyId,
+            supplierId: grn.supplierId,
+            grnId: grn.id,
+            invoiceNumber,
+            totalAmount: grn.totalAmount,
+            paidAmount: new Prisma.Decimal(0),
+            status: 'UNPAID',
+            notes: grn.invoiceNumber ? `Supplier Invoice: ${grn.invoiceNumber}` : undefined
+          }
+        });
+      }
+
+      const updatedGRN = await tx.goodsReceiveNote.update({
+        where: { id: grnId },
+        data: { status: 'QC_PASSED' },
+        include: { items: true, warehouse: true, supplier: true }
+      });
+
+      await AuditService.log({
+        userId: actorId,
+        action: 'GOODS_RECEIVE_CONFIRMED',
+        entity: 'GoodsReceiveNote',
+        entityId: grn.id,
+        details: { grnNumber: grn.grnNumber, totalAmount: grn.totalAmount.toString() },
+        ipAddress,
+        userAgent
+      });
+
+      return updatedGRN;
     }, { maxWait: 10000, timeout: 30000 });
   }
 

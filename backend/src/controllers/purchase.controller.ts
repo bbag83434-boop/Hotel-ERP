@@ -219,6 +219,29 @@ export class PurchaseController {
     }
   }
 
+  public static async updatePurchaseOrder(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+      const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
+      const po = await PurchaseService.updatePurchaseOrder(
+        companyId,
+        id,
+        req.body,
+        req.user?.userId,
+        userBranchIds,
+        ipAddress,
+        userAgent
+      );
+      return sendSuccess(res, po, 'Draft Purchase Order updated successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   public static async updatePurchaseOrderStatus(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = await resolveCompanyId(req);
@@ -260,6 +283,7 @@ export class PurchaseController {
         receiveDate: req.body.receiveDate,
         invoiceNumber: req.body.invoiceNumber,
         notes: req.body.notes,
+        status: req.body.status,
         items: req.body.items,
         receiverId: req.user?.userId,
         userBranchIds,
@@ -267,6 +291,28 @@ export class PurchaseController {
         userAgent
       });
       return sendSuccess(res, grn, 'Goods Receive Note created & stock updated automatically', 201);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async confirmGoodsReceiveNote(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+      const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
+      const grn = await PurchaseService.confirmGoodsReceiveNote(
+        companyId,
+        id,
+        req.user?.userId,
+        userBranchIds,
+        ipAddress,
+        userAgent
+      );
+      return sendSuccess(res, grn, 'Goods Receive Note confirmed & warehouse stock increased successfully');
     } catch (error) {
       next(error);
     }

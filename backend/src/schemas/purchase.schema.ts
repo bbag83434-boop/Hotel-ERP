@@ -78,6 +78,23 @@ export const createPurchaseOrderSchema = z.object({
   })
 });
 
+export const updatePurchaseOrderSchema = z.object({
+  body: z.object({
+    supplierId: z.string().uuid('Supplier is required').optional(),
+    deliveryDate: z.string().optional(),
+    taxAmount: z.number().nonnegative().optional(),
+    notes: z.string().optional(),
+    items: z.array(
+      z.object({
+        itemId: z.string().uuid('Item is required'),
+        orderedQty: z.number().positive('Ordered quantity must be greater than 0'),
+        unitPrice: z.number().nonnegative('Unit price must be non-negative'),
+        notes: z.string().optional()
+      })
+    ).min(1, 'At least one item is required').optional()
+  })
+});
+
 export const updatePOStatusSchema = z.object({
   body: z.object({
     status: z.enum(['DRAFT', 'ISSUED', 'CANCELLED']),
@@ -94,6 +111,7 @@ export const createGoodsReceiveSchema = z.object({
     receiveDate: z.string().optional(),
     invoiceNumber: z.string().optional(),
     notes: z.string().optional(),
+    status: z.enum(['RECEIVED', 'QC_PASSED']).optional().default('QC_PASSED'),
     items: z.array(
       z.object({
         poItemId: z.string().uuid().optional().nullable(),

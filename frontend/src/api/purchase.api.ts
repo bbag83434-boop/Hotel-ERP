@@ -100,6 +100,19 @@ export const purchaseApi = {
     const res = await apiClient.post('/purchasing/orders', data);
     return res.data.data;
   },
+  updatePurchaseOrder: async (
+    id: string,
+    data: {
+      supplierId?: string;
+      deliveryDate?: string;
+      taxAmount?: number;
+      notes?: string;
+      items?: Array<{ itemId: string; orderedQty: number; unitPrice: number; notes?: string }>;
+    }
+  ): Promise<PurchaseOrder> => {
+    const res = await apiClient.put(`/purchasing/orders/${id}`, data);
+    return res.data.data;
+  },
   updatePurchaseOrderStatus: async (id: string, data: { status: POStatus; reason?: string }): Promise<PurchaseOrder> => {
     const res = await apiClient.post(`/purchasing/orders/${id}/status`, data);
     return res.data.data;
@@ -129,6 +142,7 @@ export const purchaseApi = {
     receiveDate?: string;
     invoiceNumber?: string;
     notes?: string;
+    status?: string;
     items: Array<{
       poItemId?: string | null;
       itemId: string;
@@ -143,6 +157,10 @@ export const purchaseApi = {
     }>;
   }): Promise<GoodsReceiveNote> => {
     const res = await apiClient.post('/purchasing/grn', data);
+    return res.data.data;
+  },
+  confirmGoodsReceiveNote: async (id: string): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.post(`/purchasing/grn/${id}/confirm`);
     return res.data.data;
   }
 };
