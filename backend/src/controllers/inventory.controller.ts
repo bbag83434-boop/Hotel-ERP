@@ -282,4 +282,177 @@ export class InventoryController {
       next(error);
     }
   }
+
+  // Store Requisitions & Multi-Stage Warehouse Transfers (Part 4)
+  public static async createRequisition(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const requisition = await InventoryService.createRequisition({
+        companyId,
+        fromWarehouseId: req.body.fromWarehouseId,
+        toWarehouseId: req.body.toWarehouseId,
+        departmentId: req.body.departmentId,
+        section: req.body.section,
+        priority: req.body.priority,
+        notes: req.body.notes,
+        submitImmediately: req.body.submitImmediately,
+        items: req.body.items,
+        actorId: req.user?.userId,
+        actorRole: req.user?.role,
+        userBranchIds: (req.user as any)?.branchIds,
+        ipAddress,
+        userAgent
+      });
+      return sendSuccess(res, requisition, 'Store requisition created successfully', 201);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async getRequisitions(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const { branchId, warehouseId, stage, search, page, limit } = req.query;
+      const result = await InventoryService.getRequisitions(companyId, {
+        branchId: branchId ? String(branchId) : undefined,
+        warehouseId: warehouseId ? String(warehouseId) : undefined,
+        stage: stage ? String(stage) : undefined,
+        search: search ? String(search) : undefined,
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+        userBranchIds: (req.user as any)?.branchIds
+      });
+      return sendSuccess(res, result, 'Store requisitions retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async getRequisitionById(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const requisition = await InventoryService.getRequisitionById(companyId, req.params.id);
+      return sendSuccess(res, requisition, 'Requisition retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async submitRequisition(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const result = await InventoryService.submitRequisition({
+        companyId,
+        requisitionId: req.params.id,
+        notes: req.body?.notes,
+        actorId: req.user?.userId,
+        ipAddress,
+        userAgent
+      });
+      return sendSuccess(res, result, 'Requisition submitted for approval');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async approveRequisition(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const result = await InventoryService.approveRequisition({
+        companyId,
+        requisitionId: req.params.id,
+        approverId: req.user?.userId || '',
+        approverRole: req.user?.role,
+        comment: req.body?.comment,
+        ipAddress,
+        userAgent
+      });
+      return sendSuccess(res, result, 'Requisition approved successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async rejectRequisition(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const result = await InventoryService.rejectRequisition({
+        companyId,
+        requisitionId: req.params.id,
+        rejecterId: req.user?.userId || '',
+        rejecterRole: req.user?.role,
+        reason: req.body.reason,
+        ipAddress,
+        userAgent
+      });
+      return sendSuccess(res, result, 'Requisition rejected');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async pickAndVerifyRequisition(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const result = await InventoryService.pickAndVerifyRequisition({
+        companyId,
+        requisitionId: req.params.id
+      });
+      return sendSuccess(res, result, 'Stock pick availability verified');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async dispatchRequisition(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const result = await InventoryService.dispatchRequisition({
+        companyId,
+        requisitionId: req.params.id,
+        dispatcherId: req.user?.userId || '',
+        actorRole: req.user?.role,
+        userBranchIds: (req.user as any)?.branchIds,
+        notes: req.body?.notes,
+        items: req.body?.items,
+        ipAddress,
+        userAgent
+      });
+      return sendSuccess(res, result, 'Transfer dispatched and marked in-transit');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async receiveTransfer(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const result = await InventoryService.receiveTransfer({
+        companyId,
+        transferId: req.params.id,
+        receiverId: req.user?.userId || '',
+        actorRole: req.user?.role,
+        userBranchIds: (req.user as any)?.branchIds,
+        notes: req.body?.notes,
+        items: req.body?.items,
+        ipAddress,
+        userAgent
+      });
+      return sendSuccess(res, result, 'Transfer received and destination stock incremented');
+    } catch (error) {
+      next(error);
+    }
+  }
 }

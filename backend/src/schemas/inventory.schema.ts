@@ -82,3 +82,64 @@ export const adjustStockSchema = z.object({
     reason: z.string().min(1, 'Reason for stock adjustment is required')
   })
 });
+
+export const createRequisitionSchema = z.object({
+  body: z.object({
+    fromWarehouseId: z.string().uuid('Source / issuing warehouse is required'),
+    toWarehouseId: z.string().uuid('Destination / requesting warehouse is required'),
+    departmentId: z.string().uuid().optional().nullable(),
+    section: z.string().optional(),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).default('MEDIUM'),
+    notes: z.string().optional(),
+    submitImmediately: z.boolean().optional().default(false),
+    items: z.array(
+      z.object({
+        itemId: z.string().uuid('Item ID is required'),
+        requestedQty: z.number().positive('Requested quantity must be greater than 0'),
+        notes: z.string().optional()
+      })
+    ).min(1, 'At least one item must be included in requisition')
+  })
+});
+
+export const submitRequisitionSchema = z.object({
+  body: z.object({
+    notes: z.string().optional()
+  }).optional()
+});
+
+export const approveRequisitionSchema = z.object({
+  body: z.object({
+    comment: z.string().optional()
+  }).optional()
+});
+
+export const rejectRequisitionSchema = z.object({
+  body: z.object({
+    reason: z.string().min(1, 'Rejection reason is required')
+  })
+});
+
+export const dispatchTransferSchema = z.object({
+  body: z.object({
+    notes: z.string().optional(),
+    items: z.array(
+      z.object({
+        itemId: z.string().uuid('Item ID is required'),
+        dispatchQty: z.number().positive('Dispatch quantity must be greater than 0')
+      })
+    ).optional()
+  }).optional()
+});
+
+export const receiveTransferSchema = z.object({
+  body: z.object({
+    notes: z.string().optional(),
+    items: z.array(
+      z.object({
+        itemId: z.string().uuid('Item ID is required'),
+        receivedQty: z.number().positive('Received quantity must be greater than 0')
+      })
+    ).optional()
+  }).optional()
+});

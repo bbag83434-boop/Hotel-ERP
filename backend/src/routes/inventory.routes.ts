@@ -9,7 +9,13 @@ import {
   updateItemSchema,
   createWarehouseSchema,
   transferStockSchema,
-  adjustStockSchema
+  adjustStockSchema,
+  createRequisitionSchema,
+  submitRequisitionSchema,
+  approveRequisitionSchema,
+  rejectRequisitionSchema,
+  dispatchTransferSchema,
+  receiveTransferSchema
 } from '../schemas/inventory.schema';
 
 const router = Router();
@@ -46,5 +52,16 @@ router.get('/ledger', InventoryController.getStockLedger);
 // Stock Transfers & Adjustments
 router.post('/transfer', validate(transferStockSchema), InventoryController.transferStock);
 router.post('/adjust', validate(adjustStockSchema), InventoryController.adjustStock);
+
+// Store Requisitions & Multi-Stage Warehouse Transfers (Part 4)
+router.get('/requisitions', InventoryController.getRequisitions);
+router.get('/requisitions/:id', InventoryController.getRequisitionById);
+router.post('/requisitions', validate(createRequisitionSchema), InventoryController.createRequisition);
+router.post('/requisitions/:id/submit', validate(submitRequisitionSchema), InventoryController.submitRequisition);
+router.post('/requisitions/:id/approve', validate(approveRequisitionSchema), InventoryController.approveRequisition);
+router.post('/requisitions/:id/reject', validate(rejectRequisitionSchema), InventoryController.rejectRequisition);
+router.get('/requisitions/:id/pick-verify', InventoryController.pickAndVerifyRequisition);
+router.post('/requisitions/:id/dispatch', validate(dispatchTransferSchema), InventoryController.dispatchRequisition);
+router.post('/transfers/:id/receive', validate(receiveTransferSchema), InventoryController.receiveTransfer);
 
 export default router;
