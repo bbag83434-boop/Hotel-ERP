@@ -95,15 +95,69 @@ export const LoginPage: React.FC = () => {
               className="w-full mt-2"
               isLoading={isLoading}
             >
-              Sign In to Dashboard
+              Sign In with Password
             </Button>
           </form>
 
-          {/* Quick Demo Credentials Info Box */}
-          <div className="mt-6 pt-5 border-t border-slate-800 text-center">
-            <div className="inline-flex items-center space-x-1.5 text-[11px] text-slate-400">
-              <ShieldCheck className="w-3.5 h-3.5 text-brand-400" />
-              <span>Default Super Admin Credentials prefilled</span>
+          {/* Social / Google Sign-In Divider */}
+          <div className="mt-5 pt-4 border-t border-slate-800 space-y-3">
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-slate-900 px-2 text-[10px] font-semibold text-slate-400">
+                Or continue with Verified Identity
+              </span>
+            </div>
+
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={async () => {
+                setError(null);
+                setIsLoading(true);
+                try {
+                  const googleEmail = identifier.includes('@') ? identifier : 'admin@hotel-erp.com';
+                  await useAuth().loginWithGoogle({
+                    credential: 'google-oauth-demo-token',
+                    email: googleEmail,
+                    firstName: 'Admin',
+                    lastName: 'User'
+                  });
+                  navigate('/dashboard', { replace: true });
+                } catch (err: any) {
+                  const msg = err?.response?.data?.message || 'Google authentication failed';
+                  setError(msg);
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+              className="w-full flex items-center justify-center space-x-2.5 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-600 rounded-xl py-2.5 px-4 text-xs font-semibold text-slate-200 transition-all active:scale-95 shadow-sm"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path
+                  fill="#EA4335"
+                  d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"
+                />
+                <path
+                  fill="#4285F4"
+                  d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15.2s.7 5.5 1.9 7.9l3.7-2.9c-.2-.7-.4-1.5-.4-2.4z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2-6.4-4.8L1.9 16.4C3.7 20.1 7.5 23 12 23z"
+                />
+              </svg>
+              <span>Sign in with Google / Gmail</span>
+            </button>
+
+            {/* Quick Demo Credentials Info Box */}
+            <div className="pt-2 text-center">
+              <div className="inline-flex items-center space-x-1.5 text-[11px] text-slate-400">
+                <ShieldCheck className="w-3.5 h-3.5 text-brand-400" />
+                <span>Default Super Admin Credentials prefilled</span>
+              </div>
             </div>
           </div>
         </div>

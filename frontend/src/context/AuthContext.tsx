@@ -4,6 +4,13 @@ import { authApi } from '../api/auth.api';
 
 interface AuthContextType extends AuthState {
   login: (identifier: string, password: string) => Promise<void>;
+  loginWithGoogle: (data: {
+    credential: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    avatarUrl?: string;
+  }) => Promise<void>;
   logout: () => Promise<void>;
   setSelectedBranchId: (branchId: string) => void;
   refreshUser: () => Promise<void>;
@@ -75,6 +82,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const loginWithGoogle = async (data: {
+    credential: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    avatarUrl?: string;
+  }) => {
+    setIsLoading(true);
+    try {
+      const res = await authApi.loginWithGoogle(data);
+      localStorage.setItem('accessToken', res.accessToken);
+      setAccessToken(res.accessToken);
+      setUser(res.user);
+
+      if (res.user.defaultBranch) {
+        setSelectedBranchIdState(res.user.defaultBranch.id);
+        localStorage.setItem('selectedBranchId', res.user.defaultBranch.id);
+      } else if (res.user.branches.length > 0) {
+        setSelectedBranchIdState(res.user.branches[0].id);
+        localStorage.setItem('selectedBranchId', res.user.branches[0].id);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await authApi.logout();
@@ -103,6 +136,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         selectedBranchId,
         login,
+        loginWithGoogle,
         logout,
         setSelectedBranchId,
         refreshUser
@@ -112,6 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     </AuthContext.Provider>
   );
 };
+
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

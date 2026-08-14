@@ -28,6 +28,29 @@ class AuthController {
             next(error);
         }
     }
+    static async googleLogin(req, res, next) {
+        try {
+            const { credential, email, firstName, lastName, avatarUrl } = req.body;
+            const ipAddress = req.ip || req.headers['x-forwarded-for'] || '';
+            const userAgent = req.headers['user-agent'] || '';
+            const result = await auth_service_1.AuthService.loginWithGoogle({ credential, email, firstName, lastName, avatarUrl }, ipAddress, userAgent);
+            // Set httpOnly cookie for refresh token
+            res.cookie('refreshToken', result.refreshToken, {
+                httpOnly: true,
+                secure: env_1.env.NODE_ENV === 'production',
+                sameSite: env_1.env.NODE_ENV === 'production' ? 'none' : 'lax',
+                domain: env_1.env.COOKIE_DOMAIN,
+                maxAge: 7 * 24 * 60 * 60 * 1000
+            });
+            return (0, response_utils_1.sendSuccess)(res, {
+                accessToken: result.accessToken,
+                user: result.user
+            }, 'Google login successful');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
     static async refreshToken(req, res, next) {
         try {
             const token = req.cookies?.refreshToken || req.body?.refreshToken;

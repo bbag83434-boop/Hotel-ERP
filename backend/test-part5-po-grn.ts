@@ -1018,6 +1018,228 @@ async function runPart5Tests() {
       'TEST 34: GRN created with validated supplier invoice attachment metadata & confirmed'
     );
 
+    // ----------------------------------------------------------------------------------
+    // TEST 35: Idempotency Key Duplicate PO Prevention
+    // ----------------------------------------------------------------------------------
+    const test35IdempKey = `IDEMP-PO-TEST-${Date.now()}`;
+    const poFirst = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        idempotencyKey: test35IdempKey,
+        items: [{ itemId: item1.id, orderedQty: 25, unitPrice: 50 }]
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    const poDuplicateSubmit = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        idempotencyKey: test35IdempKey,
+        items: [{ itemId: item1.id, orderedQty: 25, unitPrice: 50 }]
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    assert(
+      poFirst.id === poDuplicateSubmit.id && poDuplicateSubmit.poNumber === poFirst.poNumber,
+      'TEST 35: Idempotency key duplicate PO submit returns existing PO without creating duplicate record'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 36: Idempotency Key Duplicate GRN Prevention (No duplicate stock increase)
+    // ----------------------------------------------------------------------------------
+    const test36IdempKey = `IDEMP-GRN-TEST-${Date.now()}`;
+    const stockBefore36 = await prisma.stockBalance.findUnique({
+      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
+    });
+
+    const grnFirst = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      supplierId: supplier.id,
+      invoiceNumber: `INV-IDEMP-${Date.now()}`,
+      invoiceAmount: 500,
+      idempotencyKey: test36IdempKey,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [{ itemId: item1.id, receivedQty: 10, acceptedQty: 10, unitPrice: 50 }]
+    });
+
+    const grnDuplicateSubmit = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      supplierId: supplier.id,
+      invoiceNumber: `INV-IDEMP-RETRY-${Date.now()}`,
+      invoiceAmount: 500,
+      idempotencyKey: test36IdempKey,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [{ itemId: item1.id, receivedQty: 10, acceptedQty: 10, unitPrice: 50 }]
+    });
+
+    const stockAfter36 = await prisma.stockBalance.findUnique({
+      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
+    });
+
+    assert(
+      grnFirst.id === grnDuplicateSubmit.id &&
+        Number(stockAfter36?.quantity) === Number(stockBefore36?.quantity) + 10,
+      'TEST 36: Idempotency key network retry returns existing GRN with zero duplicate stock movements'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 37: Outlet A user receiving into Outlet B warehouse strictly rejected
+    // ----------------------------------------------------------------------------------
+    let crossOutletRejected = false;
+    try {
+      await PurchaseService.createGoodsReceiveNote({
+        companyId: company.id,
+        branchId: branchB.id,
+        warehouseId: warehouseB.id,
+        supplierId: supplier.id,
+        invoiceNumber: `INV-CROSS-${Date.now()}`,
+        invoiceAmount: 500,
+        receiverId: user.id,
+        userBranchIds: [branchA.id], // User only authorized for Branch A
+        status: 'QC_PASSED',
+        items: [{ itemId: item1.id, receivedQty: 10, acceptedQty: 10, unitPrice: 50 }]
+      });
+    } catch (e: any) {
+      crossOutletRejected = e.message.includes('Outlet A user cannot receive goods into Outlet B');
+    }
+    assert(crossOutletRejected, 'TEST 37: Outlet A user receiving into Outlet B warehouse strictly rejected with 403');
+
+    // ----------------------------------------------------------------------------------
+    // TEST 38: Inactive user receiving goods strictly rejected
+    // ----------------------------------------------------------------------------------
+    const inactiveUser = await prisma.user.create({
+      data: {
+        companyId: company.id,
+        email: `inactive-${Date.now()}@hotel.com`,
+        username: `inactive_${Date.now()}`,
+        passwordHash: 'dummy',
+        firstName: 'Inactive',
+        lastName: 'User',
+        isActive: false
+      }
+    });
+
+    let inactiveRejected = false;
+    try {
+      await PurchaseService.createGoodsReceiveNote({
+        companyId: company.id,
+        branchId: branchA.id,
+        warehouseId: warehouseA.id,
+        supplierId: supplier.id,
+        invoiceNumber: `INV-INACTIVE-${Date.now()}`,
+        invoiceAmount: 500,
+        receiverId: inactiveUser.id,
+        userBranchIds: [branchA.id],
+        status: 'QC_PASSED',
+        items: [{ itemId: item1.id, receivedQty: 10, acceptedQty: 10, unitPrice: 50 }]
+      });
+    } catch (e: any) {
+      inactiveRejected = e.message.includes('User account is inactive');
+    }
+    assert(inactiveRejected, 'TEST 38: Inactive user account receiving goods strictly blocked with 403');
+
+    // ----------------------------------------------------------------------------------
+    // TEST 39: Requisition Tracking Metrics (Requested = 100, Approved = 100, Ordered = 100, Received = 60, Outstanding = 40)
+    // ----------------------------------------------------------------------------------
+    const prTrack = await prisma.purchaseRequest.create({
+      data: {
+        companyId: company.id,
+        branchId: branchA.id,
+        requestNumber: `PR-TRACK-${Date.now()}`,
+        requestedById: user.id,
+        requiredDate: new Date(Date.now() + 86400000 * 3),
+        priority: 'HIGH',
+        status: 'APPROVED',
+        approvedById: user.id,
+        approvedAt: new Date(),
+        items: {
+          create: [{ itemId: item1.id, requestedQty: new Prisma.Decimal(100), estimatedPrice: new Prisma.Decimal(50) }]
+        }
+      }
+    });
+
+    const poTrack = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        requestId: prTrack.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 100, unitPrice: 50 }]
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    // Receive 60 KG
+    await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poTrack.id,
+      invoiceNumber: `INV-PR-STAGE1-${Date.now()}`,
+      invoiceAmount: 3000,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [{ poItemId: poTrack.items[0].id, itemId: item1.id, receivedQty: 60, acceptedQty: 60, unitPrice: 50 }]
+    });
+
+    const prTrackCheck1 = await PurchaseService.getPurchaseRequests(company.id, { branchId: branchA.id });
+    const prTrackItem1 = prTrackCheck1.requests.find((r) => r.id === prTrack.id);
+
+    assert(
+      prTrackItem1?.metrics?.requestedQty === 100 &&
+        prTrackItem1?.metrics?.approvedQty === 100 &&
+        prTrackItem1?.metrics?.orderedQty === 100 &&
+        prTrackItem1?.metrics?.receivedQty === 60 &&
+        prTrackItem1?.metrics?.outstandingQty === 40 &&
+        prTrackItem1?.metrics?.isCompleted === false,
+      'TEST 39A: Requisition partial tracking confirmed (Requested = 100, Approved = 100, Ordered = 100, Received = 60, Outstanding = 40, isCompleted: false)'
+    );
+
+    // Receive remaining 40 KG
+    await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poTrack.id,
+      invoiceNumber: `INV-PR-STAGE2-${Date.now()}`,
+      invoiceAmount: 2000,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [{ poItemId: poTrack.items[0].id, itemId: item1.id, receivedQty: 40, acceptedQty: 40, unitPrice: 50 }]
+    });
+
+    const prTrackCheck2 = await PurchaseService.getPurchaseRequests(company.id, { branchId: branchA.id });
+    const prTrackItem2 = prTrackCheck2.requests.find((r) => r.id === prTrack.id);
+
+    assert(
+      prTrackItem2?.metrics?.requestedQty === 100 &&
+        prTrackItem2?.metrics?.receivedQty === 100 &&
+        prTrackItem2?.metrics?.outstandingQty === 0 &&
+        prTrackItem2?.metrics?.isCompleted === true,
+      'TEST 39B: Requisition full completion confirmed (Requested = 100, Received = 100, Outstanding = 0, isCompleted: true)'
+    );
+
     console.log('\n==================================================');
     console.log(`PART 5 TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);
     console.log('==================================================\n');

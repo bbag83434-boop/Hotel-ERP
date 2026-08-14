@@ -63,6 +63,7 @@ export const PurchasingPage: React.FC = () => {
   const [showSupplierModal, setShowSupplierModal] = useState<boolean>(false);
   const [showLedgerModal, setShowLedgerModal] = useState<boolean>(false);
   const [selectedSupplierLedger, setSelectedSupplierLedger] = useState<{ supplier: Supplier; entries: SupplierLedgerEntry[] } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Form States
   const [prForm, setPrForm] = useState({
@@ -226,6 +227,7 @@ export const PurchasingPage: React.FC = () => {
 
   const handleCreatePO = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     const branchId = selectedBranchId || user?.branches[0]?.id;
     if (!branchId) return;
 
@@ -236,11 +238,13 @@ export const PurchasingPage: React.FC = () => {
     }
 
     try {
+      setIsSubmitting(true);
       await purchaseApi.createPurchaseOrder({
         branchId,
         supplierId: poForm.supplierId,
         deliveryDate: poForm.deliveryDate,
         taxAmount: Number(poForm.taxAmount),
+        idempotencyKey: `IDEMP-PO-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         notes: poForm.notes,
         items: validItems
       });
@@ -249,6 +253,8 @@ export const PurchasingPage: React.FC = () => {
       loadTabData();
     } catch (err: any) {
       setErrorMsg(err?.response?.data?.message || 'Failed to create PO');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -284,6 +290,7 @@ export const PurchasingPage: React.FC = () => {
 
   const handleCreateGRN = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     const branchId = selectedBranchId || user?.branches[0]?.id;
     if (!branchId) return;
 
@@ -294,6 +301,7 @@ export const PurchasingPage: React.FC = () => {
     }
 
     try {
+      setIsSubmitting(true);
       await purchaseApi.createGoodsReceiveNote({
         branchId,
         warehouseId: grnForm.warehouseId,
@@ -306,6 +314,7 @@ export const PurchasingPage: React.FC = () => {
         taxAmount: grnForm.taxAmount,
         freightAmount: grnForm.freightAmount,
         allowPriceVariance: grnForm.allowPriceVariance,
+        idempotencyKey: `IDEMP-GRN-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         invoiceAttachment: grnForm.invoiceAttachment || undefined,
         notes: grnForm.notes,
         items: validItems
@@ -315,6 +324,8 @@ export const PurchasingPage: React.FC = () => {
       loadTabData();
     } catch (err: any) {
       setErrorMsg(err?.response?.data?.message || 'Failed to register Goods Receipt');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 

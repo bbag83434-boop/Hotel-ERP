@@ -17,10 +17,12 @@ const hr_routes_1 = __importDefault(require("./hr.routes"));
 const approval_routes_1 = __importDefault(require("./approval.routes"));
 const dashboard_routes_1 = __importDefault(require("./dashboard.routes"));
 const ai_routes_1 = __importDefault(require("./ai.routes"));
+const routing_routes_1 = __importDefault(require("./routing.routes"));
 const router = (0, express_1.Router)();
 // Sub-routes under API_PREFIX (/api/v1)
 router.use('/auth', auth_routes_1.default);
 router.use('/users', user_routes_1.default);
+router.use('/routing', routing_routes_1.default);
 router.use('/inventory', inventory_routes_1.default);
 router.use('/purchasing', purchase_routes_1.default);
 router.use('/production', production_routes_1.default);

@@ -13,6 +13,8 @@ router.post('/categories', (0, validate_middleware_1.validate)(inventory_schema_
 // Units
 router.get('/units', inventory_controller_1.InventoryController.getUnits);
 router.post('/units', (0, validate_middleware_1.validate)(inventory_schema_1.createUnitSchema), inventory_controller_1.InventoryController.createUnit);
+router.post('/units/convert', inventory_controller_1.InventoryController.convertUnit);
+router.get('/units/supported', inventory_controller_1.InventoryController.getSupportedUnits);
 // Items Master
 router.get('/items', inventory_controller_1.InventoryController.getItems);
 router.get('/items/:id', inventory_controller_1.InventoryController.getItemById);

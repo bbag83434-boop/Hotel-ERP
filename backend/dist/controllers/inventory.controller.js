@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.InventoryController = void 0;
 const inventory_service_1 = require("../services/inventory.service");
+const unitConversion_service_1 = require("../services/unitConversion.service");
 const response_utils_1 = require("../utils/response.utils");
 const database_1 = require("../config/database");
 const resolveCompanyId = async (req) => {
@@ -61,6 +62,25 @@ class InventoryController {
             const userAgent = req.headers['user-agent'] || '';
             const unit = await inventory_service_1.InventoryService.createUnit(companyId, req.body, req.user?.userId, ipAddress, userAgent);
             return (0, response_utils_1.sendSuccess)(res, unit, 'Unit created', 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async convertUnit(req, res, next) {
+        try {
+            const { amount, fromUnit, toUnit, customPackFactor } = req.body;
+            const result = unitConversion_service_1.UnitConversionService.convert(Number(amount), String(fromUnit), String(toUnit), customPackFactor ? Number(customPackFactor) : undefined);
+            return (0, response_utils_1.sendSuccess)(res, result, 'Unit converted successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async getSupportedUnits(_req, res, next) {
+        try {
+            const units = unitConversion_service_1.UnitConversionService.getSupportedUnits();
+            return (0, response_utils_1.sendSuccess)(res, units, 'Supported conversion dictionary retrieved');
         }
         catch (error) {
             next(error);

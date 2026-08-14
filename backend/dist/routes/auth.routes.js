@@ -8,6 +8,7 @@ const auth_middleware_1 = require("../middlewares/auth.middleware");
 const rateLimiter_middleware_1 = require("../middlewares/rateLimiter.middleware");
 const router = (0, express_1.Router)();
 router.post('/login', rateLimiter_middleware_1.authRateLimiter, (0, validate_middleware_1.validate)(auth_schema_1.loginSchema), auth_controller_1.AuthController.login);
+router.post('/google', rateLimiter_middleware_1.authRateLimiter, (0, validate_middleware_1.validate)(auth_schema_1.googleLoginSchema), auth_controller_1.AuthController.googleLogin);
 router.post('/refresh', (0, validate_middleware_1.validate)(auth_schema_1.refreshTokenSchema), auth_controller_1.AuthController.refreshToken);
 router.post('/logout', auth_middleware_1.authenticate, auth_controller_1.AuthController.logout);
 router.get('/me', auth_middleware_1.authenticate, auth_controller_1.AuthController.getMe);

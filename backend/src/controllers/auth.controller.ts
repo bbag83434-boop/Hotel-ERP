@@ -35,6 +35,41 @@ export class AuthController {
     }
   }
 
+  public static async googleLogin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { credential, email, firstName, lastName, avatarUrl } = req.body;
+      const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string) || '';
+      const userAgent = req.headers['user-agent'] || '';
+
+      const result = await AuthService.loginWithGoogle(
+        { credential, email, firstName, lastName, avatarUrl },
+        ipAddress,
+        userAgent
+      );
+
+      // Set httpOnly cookie for refresh token
+      res.cookie('refreshToken', result.refreshToken, {
+        httpOnly: true,
+        secure: env.NODE_ENV === 'production',
+        sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
+        domain: env.COOKIE_DOMAIN,
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      return sendSuccess(
+        res,
+        {
+          accessToken: result.accessToken,
+          user: result.user
+        },
+        'Google login successful'
+      );
+    } catch (error) {
+      next(error);
+    }
+  }
+
+
   public static async refreshToken(req: Request, res: Response, next: NextFunction) {
     try {
       const token = req.cookies?.refreshToken || req.body?.refreshToken;

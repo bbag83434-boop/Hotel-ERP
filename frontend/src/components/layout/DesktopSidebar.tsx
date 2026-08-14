@@ -2,28 +2,23 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
-  ChefHat,
   Boxes,
   ShoppingCart,
-  UtensilsCrossed,
-  Hotel,
-  DollarSign,
-  Users,
-  ShieldCheck,
-  FileText
+  ShieldCheck
 } from 'lucide-react';
 
-const navigationItems = [
+export interface NavigationItem {
+  name: string;
+  path: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+// Active & implemented modules (Part 1 - Part 4 only)
+export const navigationItems: NavigationItem[] = [
   { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
   { name: 'Inventory & Stores', path: '/inventory', icon: Boxes },
-  { name: 'Purchasing & Vendors', path: '/purchasing', icon: ShoppingCart },
-  { name: 'Kitchen & Production', path: '/production', icon: ChefHat },
-  { name: 'Restaurant POS', path: '/restaurant', icon: UtensilsCrossed },
-  { name: 'Hotel PMS', path: '/hotel', icon: Hotel },
-  { name: 'Accounting & GST', path: '/accounting', icon: DollarSign },
-  { name: 'HR & Payroll', path: '/hr', icon: Users },
-  { name: 'Approval Center', path: '/approvals', icon: ShieldCheck },
-  { name: 'Reports & Analytics', path: '/reports', icon: FileText }
+  { name: 'Suppliers & Vendors', path: '/purchasing', icon: ShoppingCart },
+  { name: 'Approval Center', path: '/approvals', icon: ShieldCheck }
 ];
 
 export const DesktopSidebar: React.FC = () => {
@@ -32,7 +27,7 @@ export const DesktopSidebar: React.FC = () => {
       <div className="p-4 flex-1 space-y-6 overflow-y-auto">
         <div>
           <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-            Main Navigation
+            Operations & Stores
           </p>
           <nav className="space-y-1">
             {navigationItems.map((item) => {
@@ -61,7 +56,7 @@ export const DesktopSidebar: React.FC = () => {
       <div className="p-4 border-t border-slate-800">
         <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 text-xs text-slate-400">
           <p className="font-semibold text-slate-200">Hotel Management Cloud</p>
-          <p className="text-[10px] text-amber-400 mt-0.5 font-medium">India Edition • FY 2026-27</p>
+          <p className="text-[10px] text-amber-400 mt-0.5 font-medium">Core Enterprise • Active Parts 1–4</p>
         </div>
       </div>
     </aside>

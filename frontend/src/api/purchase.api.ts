@@ -95,6 +95,7 @@ export const purchaseApi = {
     taxAmount?: number;
     notes?: string;
     status?: POStatus;
+    idempotencyKey?: string;
     items: Array<{ itemId: string; orderedQty: number; unitPrice: number; notes?: string }>;
   }): Promise<PurchaseOrder> => {
     const res = await apiClient.post('/purchasing/orders', data);
@@ -146,6 +147,7 @@ export const purchaseApi = {
     taxAmount?: number;
     freightAmount?: number;
     allowPriceVariance?: boolean;
+    idempotencyKey?: string;
     invoiceAttachment?: {
       fileName: string;
       fileType: string;

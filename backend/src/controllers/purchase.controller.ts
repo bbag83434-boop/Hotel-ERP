@@ -204,10 +204,11 @@ export class PurchaseController {
       const userAgent = (req.headers['user-agent'] as string) || '';
       const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
       const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
+      const idempotencyKey = req.body.idempotencyKey || (req.headers['x-idempotency-key'] as string);
       const po = await PurchaseService.createPurchaseOrder(
         companyId,
         req.body.branchId,
-        req.body,
+        { ...req.body, idempotencyKey },
         req.user?.userId,
         userBranchIds,
         ipAddress,
@@ -274,6 +275,7 @@ export class PurchaseController {
       const userAgent = (req.headers['user-agent'] as string) || '';
       const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
       const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
+      const idempotencyKey = req.body.idempotencyKey || (req.headers['x-idempotency-key'] as string);
       const grn = await PurchaseService.createGoodsReceiveNote({
         companyId,
         branchId: req.body.branchId,
@@ -287,6 +289,7 @@ export class PurchaseController {
         taxAmount: req.body.taxAmount,
         freightAmount: req.body.freightAmount,
         allowPriceVariance: req.body.allowPriceVariance,
+        idempotencyKey,
         invoiceAttachment: req.body.invoiceAttachment,
         notes: req.body.notes,
         status: req.body.status,

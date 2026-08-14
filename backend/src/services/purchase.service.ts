@@ -377,7 +377,14 @@ export class PurchaseService {
               }
             }
           },
-          purchaseOrders: { select: { id: true, poNumber: true, status: true } }
+          purchaseOrders: {
+            select: {
+              id: true,
+              poNumber: true,
+              status: true,
+              items: { select: { id: true, itemId: true, orderedQty: true, receivedQty: true } }
+            }
+          }
         },
         skip,
         take: limit,
@@ -385,8 +392,53 @@ export class PurchaseService {
       })
     ]);
 
+    const enhancedRequests = requests.map((pr) => {
+      const itemsWithMetrics = pr.items.map((it) => {
+        const requested = Number(it.requestedQty);
+        let ordered = 0;
+        let received = 0;
+        for (const po of pr.purchaseOrders || []) {
+          for (const poItem of (po as any).items || []) {
+            if (poItem.itemId === it.itemId) {
+              ordered += Number(poItem.orderedQty || 0);
+              received += Number(poItem.receivedQty || 0);
+            }
+          }
+        }
+        const outstanding = Math.max(0, requested - received);
+        return {
+          ...it,
+          requestedQty: requested,
+          approvedQty: (pr.status === 'APPROVED' || pr.status === 'ORDERED') ? requested : 0,
+          orderedQty: ordered,
+          receivedQty: received,
+          outstandingQty: outstanding,
+          isCompleted: received >= requested && requested > 0
+        };
+      });
+
+      const totalRequestedQty = itemsWithMetrics.reduce((sum, it) => sum + it.requestedQty, 0);
+      const totalApprovedQty = (pr.status === 'APPROVED' || pr.status === 'ORDERED') ? totalRequestedQty : 0;
+      const totalOrderedQty = itemsWithMetrics.reduce((sum, it) => sum + it.orderedQty, 0);
+      const totalReceivedQty = itemsWithMetrics.reduce((sum, it) => sum + it.receivedQty, 0);
+      const totalOutstandingQty = Math.max(0, totalRequestedQty - totalReceivedQty);
+
+      return {
+        ...pr,
+        items: itemsWithMetrics,
+        metrics: {
+          requestedQty: totalRequestedQty,
+          approvedQty: totalApprovedQty,
+          orderedQty: totalOrderedQty,
+          receivedQty: totalReceivedQty,
+          outstandingQty: totalOutstandingQty,
+          isCompleted: totalOutstandingQty === 0 && totalRequestedQty > 0
+        }
+      };
+    });
+
     return {
-      requests,
+      requests: enhancedRequests,
       pagination: {
         page,
         limit,
@@ -830,6 +882,7 @@ export class PurchaseService {
       taxAmount?: number;
       notes?: string;
       status?: POStatus;
+      idempotencyKey?: string;
       items: Array<{ itemId: string; orderedQty: number; unitPrice: number; notes?: string }>;
     },
     actorId?: string,
@@ -839,6 +892,30 @@ export class PurchaseService {
   ) {
     if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(branchId)) {
       throw new AppError('Unauthorized: You do not have access to create purchase orders for this branch', 403);
+    }
+
+    if (actorId) {
+      const actor = await prisma.user.findFirst({ where: { id: actorId, companyId } });
+      if (actor && !actor.isActive) {
+        throw new AppError('Unauthorized: User account is inactive', 403);
+      }
+    }
+
+    if (data.idempotencyKey) {
+      const existingPO = await prisma.purchaseOrder.findFirst({
+        where: {
+          companyId,
+          notes: { contains: `[IDEMPOTENCY:${data.idempotencyKey}]` }
+        },
+        include: {
+          items: { include: { item: { include: { unit: true } } } },
+          supplier: true,
+          branch: true
+        }
+      });
+      if (existingPO) {
+        return existingPO;
+      }
     }
 
     const [supplier, branch] = await Promise.all([
@@ -911,7 +988,7 @@ export class PurchaseService {
           totalAmount,
           taxAmount,
           grandTotal,
-          notes: data.notes,
+          notes: `${data.notes || ''} ${data.idempotencyKey ? `[IDEMPOTENCY:${data.idempotencyKey}]` : ''}`.trim() || null,
           createdById: actorId,
           items: {
             create: preparedItems.map((pi) => ({
@@ -1034,6 +1111,7 @@ export class PurchaseService {
     taxAmount?: number;
     freightAmount?: number;
     allowPriceVariance?: boolean;
+    idempotencyKey?: string;
     invoiceAttachment?: {
       fileName: string;
       fileType: string;
@@ -1062,7 +1140,35 @@ export class PurchaseService {
     const { companyId, branchId, warehouseId, receiverId, userBranchIds, ipAddress, userAgent } = params;
     const isImmediateConfirm = (params.status || 'QC_PASSED') === 'QC_PASSED';
 
-    // 1. Validate Warehouse & Branch Isolation
+    // 0. Idempotency Check (Prevent duplicate submit / double-click / network retry)
+    if (params.idempotencyKey) {
+      const existingGRN = await prisma.goodsReceiveNote.findFirst({
+        where: {
+          companyId,
+          notes: { contains: `[IDEMPOTENCY:${params.idempotencyKey}]` }
+        },
+        include: {
+          items: { include: { item: { include: { unit: true } } } },
+          warehouse: true,
+          supplier: true,
+          branch: true,
+          po: true
+        }
+      });
+      if (existingGRN) {
+        return existingGRN;
+      }
+    }
+
+    // 0.1 Check Active User Status
+    if (receiverId) {
+      const receiver = await prisma.user.findFirst({ where: { id: receiverId, companyId } });
+      if (receiver && !receiver.isActive) {
+        throw new AppError('Unauthorized: User account is inactive', 403);
+      }
+    }
+
+    // 1. Validate Warehouse & Branch Isolation (Outlet A user cannot receive goods into Outlet B)
     const wh = await prisma.warehouse.findFirst({ where: { id: warehouseId, companyId } });
     if (!wh) {
       throw new AppError('Invalid warehouse specified', 404);
@@ -1071,7 +1177,7 @@ export class PurchaseService {
       throw new AppError('Warehouse does not belong to the specified branch', 400);
     }
     if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(branchId)) {
-      throw new AppError('Unauthorized: You do not have access to receive goods at this branch', 403);
+      throw new AppError('Unauthorized: Outlet A user cannot receive goods into Outlet B', 403);
     }
 
     // 2. Resolve & Validate PO and Supplier
@@ -1225,6 +1331,8 @@ export class PurchaseService {
         ? `${params.notes} | Verification: ${priceVerificationStatus} (PO Base: ${poBaseTotal}, Inv Base: ${invoiceBaseTotal}${isPOValueExceeded ? `, Excess: +${variance} (+${variancePercentage}%)` : ''})`
         : `Verification: ${priceVerificationStatus} (PO Base: ${poBaseTotal}, Inv Base: ${invoiceBaseTotal}${isPOValueExceeded ? `, Excess: +${variance} (+${variancePercentage}%)` : ''})`;
 
+      const notesWithIdempotency = `${notesWithAudit} ${params.idempotencyKey ? `[IDEMPOTENCY:${params.idempotencyKey}]` : ''}`.trim();
+
       // 1. Create GRN Header
       const grn = await tx.goodsReceiveNote.create({
         data: {
@@ -1238,7 +1346,7 @@ export class PurchaseService {
           invoiceNumber: params.invoiceNumber,
           status: effectiveStatus,
           totalAmount,
-          notes: notesWithAudit,
+          notes: notesWithIdempotency,
           receivedById: receiverId
         }
       });

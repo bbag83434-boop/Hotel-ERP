@@ -65,6 +65,7 @@ export const createPurchaseOrderSchema = z.object({
     requestId: z.string().uuid().optional().nullable(),
     deliveryDate: z.string().optional(),
     taxAmount: z.number().nonnegative().optional().default(0),
+    idempotencyKey: z.string().optional(),
     notes: z.string().optional(),
     status: z.enum(['DRAFT', 'ISSUED']).optional().default('ISSUED'),
     items: z.array(
@@ -115,6 +116,7 @@ export const createGoodsReceiveSchema = z.object({
     taxAmount: z.number().nonnegative().optional().default(0),
     freightAmount: z.number().nonnegative().optional().default(0),
     allowPriceVariance: z.boolean().optional().default(false),
+    idempotencyKey: z.string().optional(),
     invoiceAttachment: z.object({
       fileName: z.string(),
       fileType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']),

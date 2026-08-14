@@ -18,6 +18,12 @@ export interface Branch {
   isDefault?: boolean;
 }
 
+export interface Department {
+  id: string;
+  name: string;
+  code: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -26,6 +32,7 @@ export interface User {
   lastName?: string;
   avatarUrl?: string;
   role: Role;
+  department?: Department | null;
   company: Company | null;
   branches: Branch[];
   defaultBranch: Branch | null;

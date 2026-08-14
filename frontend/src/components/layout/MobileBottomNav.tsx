@@ -1,13 +1,12 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Hotel, UtensilsCrossed, ChefHat, DollarSign } from 'lucide-react';
+import { LayoutDashboard, Boxes, ShoppingCart, ShieldCheck } from 'lucide-react';
 
 const mobileNavItems = [
   { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-  { name: 'Hotel PMS', path: '/hotel', icon: Hotel },
-  { name: 'POS Dining', path: '/restaurant', icon: UtensilsCrossed },
-  { name: 'Kitchen KDS', path: '/production', icon: ChefHat },
-  { name: 'Accounting', path: '/accounting', icon: DollarSign }
+  { name: 'Inventory', path: '/inventory', icon: Boxes },
+  { name: 'Suppliers', path: '/purchasing', icon: ShoppingCart },
+  { name: 'Approvals', path: '/approvals', icon: ShieldCheck }
 ];
 
 export const MobileBottomNav: React.FC = () => {
@@ -22,13 +21,13 @@ export const MobileBottomNav: React.FC = () => {
               to={item.path}
               className={({ isActive }) =>
                 `flex flex-col items-center justify-center py-1.5 px-3 rounded-xl transition-all duration-150 active:scale-95 ${
-                  isActive ? 'text-rose-400 font-bold' : 'text-slate-400 font-normal hover:text-slate-200'
+                  isActive ? 'text-amber-400 font-bold' : 'text-slate-400 font-normal hover:text-slate-200'
                 }`
               }
             >
               {({ isActive }) => (
                 <>
-                  <div className={`p-1 rounded-xl transition-all ${isActive ? 'bg-rose-500/15' : ''}`}>
+                  <div className={`p-1 rounded-xl transition-all ${isActive ? 'bg-amber-500/15' : ''}`}>
                     <Icon className="w-5 h-5" />
                   </div>
                   <span className="text-[10px] tracking-tight mt-0.5">{item.name}</span>

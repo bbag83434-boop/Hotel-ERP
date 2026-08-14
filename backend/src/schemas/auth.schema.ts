@@ -12,3 +12,14 @@ export const refreshTokenSchema = z.object({
     refreshToken: z.string().optional()
   })
 });
+
+export const googleLoginSchema = z.object({
+  body: z.object({
+    credential: z.string().min(1, 'Google credential token or email is required'),
+    email: z.string().email('Valid email is required').optional(),
+    firstName: z.string().optional(),
+    lastName: z.string().optional(),
+    avatarUrl: z.string().url().optional()
+  })
+});
+

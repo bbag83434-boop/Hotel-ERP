@@ -12,6 +12,17 @@ export const authApi = {
     return res.data.data;
   },
 
+  loginWithGoogle: async (data: {
+    credential: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    avatarUrl?: string;
+  }): Promise<LoginResponse> => {
+    const res = await apiClient.post('/auth/google', data);
+    return res.data.data;
+  },
+
   logout: async (): Promise<void> => {
     await apiClient.post('/auth/logout');
   },
@@ -21,3 +32,4 @@ export const authApi = {
     return res.data.data;
   }
 };
+
