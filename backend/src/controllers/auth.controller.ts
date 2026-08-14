@@ -17,7 +17,7 @@ export class AuthController {
       res.cookie('refreshToken', result.refreshToken, {
         httpOnly: true,
         secure: env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
         domain: env.COOKIE_DOMAIN,
         maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
       });
@@ -47,7 +47,7 @@ export class AuthController {
       res.cookie('refreshToken', result.refreshToken, {
         httpOnly: true,
         secure: env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
         domain: env.COOKIE_DOMAIN,
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
@@ -73,7 +73,7 @@ export class AuthController {
       res.clearCookie('refreshToken', {
         httpOnly: true,
         secure: env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
         domain: env.COOKIE_DOMAIN
       });
 

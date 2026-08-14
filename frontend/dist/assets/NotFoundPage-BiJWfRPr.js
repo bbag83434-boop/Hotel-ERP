@@ -1,6 +1,0 @@
-import{c as t,j as e,p as s,b as a}from"./index-D4o45pbq.js";/**
- * @license lucide-react v0.456.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */const r=t("Compass",[["path",{d:"m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z",key:"9ktpf1"}],["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}]]),o=()=>e.jsxs("div",{className:"min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center",children:[e.jsx("div",{className:"w-20 h-20 bg-slate-900 border border-slate-800 rounded-3xl flex items-center justify-center mb-6 shadow-floating text-brand-400",children:e.jsx(r,{className:"w-10 h-10 animate-pulse"})}),e.jsx("h1",{className:"text-4xl font-extrabold text-white mb-2",children:"404"}),e.jsx("h2",{className:"text-lg font-semibold text-slate-300 mb-2",children:"Page Not Found"}),e.jsx("p",{className:"text-sm text-slate-400 max-w-sm mb-8",children:"The requested resource or page does not exist or has been relocated."}),e.jsx(s,{to:"/dashboard",children:e.jsx(a,{variant:"primary",size:"md",children:"Return to Dashboard"})})]});export{o as NotFoundPage};

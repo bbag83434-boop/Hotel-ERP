@@ -15,7 +15,7 @@ class AuthController {
             res.cookie('refreshToken', result.refreshToken, {
                 httpOnly: true,
                 secure: env_1.env.NODE_ENV === 'production',
-                sameSite: 'lax',
+                sameSite: env_1.env.NODE_ENV === 'production' ? 'none' : 'lax',
                 domain: env_1.env.COOKIE_DOMAIN,
                 maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
             });
@@ -38,7 +38,7 @@ class AuthController {
             res.cookie('refreshToken', result.refreshToken, {
                 httpOnly: true,
                 secure: env_1.env.NODE_ENV === 'production',
-                sameSite: 'lax',
+                sameSite: env_1.env.NODE_ENV === 'production' ? 'none' : 'lax',
                 domain: env_1.env.COOKIE_DOMAIN,
                 maxAge: 7 * 24 * 60 * 60 * 1000
             });
@@ -58,7 +58,7 @@ class AuthController {
             res.clearCookie('refreshToken', {
                 httpOnly: true,
                 secure: env_1.env.NODE_ENV === 'production',
-                sameSite: 'lax',
+                sameSite: env_1.env.NODE_ENV === 'production' ? 'none' : 'lax',
                 domain: env_1.env.COOKIE_DOMAIN
             });
             return (0, response_utils_1.sendSuccess)(res, null, 'Logged out successfully');

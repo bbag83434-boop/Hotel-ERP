@@ -19,19 +19,32 @@ app.use((0, helmet_1.default)({
     crossOriginEmbedderPolicy: false
 }));
 // CORS configuration
-const allowedOrigins = env_1.env.CORS_ORIGIN.split(',').map((o) => o.trim());
+const allowedOrigins = env_1.env.CORS_ORIGIN.split(',').map((o) => o.trim().replace(/\/+$/, ''));
+const knownOrigins = [
+    'https://hotel-erp-1-o13c.onrender.com',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+];
+knownOrigins.forEach((orig) => {
+    if (!allowedOrigins.includes(orig)) {
+        allowedOrigins.push(orig);
+    }
+});
 app.use((0, cors_1.default)({
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        if (!origin)
+            return callback(null, true);
+        const normalizedOrigin = origin.replace(/\/+$/, '');
+        if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes('*')) {
             callback(null, true);
         }
         else {
-            callback(new Error('CORS not allowed for this origin'));
+            callback(new Error(`CORS not allowed for this origin: ${origin}`));
         }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
 // Body Parsing & Cookies
 app.use(express_1.default.json({ limit: '10mb' }));

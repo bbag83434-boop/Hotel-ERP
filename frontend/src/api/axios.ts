@@ -1,6 +1,45 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
+// Centralized Backend & API URL configuration
+// Supports VITE_API_URL formatted as:
+// - "https://hotel-erp-muv8.onrender.com"
+// - "https://hotel-erp-muv8.onrender.com/api/v1"
+// - "/api/v1" (local development fallback)
+// - "" (unset default)
+const rawEnvUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+
+const resolveUrls = () => {
+  if (!rawEnvUrl) {
+    return {
+      backendBaseUrl: '',
+      apiBaseUrl: '/api/v1',
+      healthCheckUrl: '/api/health'
+    };
+  }
+
+  // Relative path configuration (e.g. /api/v1)
+  if (rawEnvUrl.startsWith('/')) {
+    const baseWithoutPrefix = rawEnvUrl.replace(/\/api(\/v1)?\/?$/, '');
+    return {
+      backendBaseUrl: baseWithoutPrefix,
+      apiBaseUrl: rawEnvUrl.endsWith('/api/v1') ? rawEnvUrl : `${rawEnvUrl.replace(/\/api\/?$/, '')}/api/v1`,
+      healthCheckUrl: `${baseWithoutPrefix}/api/health`
+    };
+  }
+
+  // Absolute domain URL (e.g. https://hotel-erp-muv8.onrender.com)
+  const hostBase = rawEnvUrl.replace(/\/api(\/v1)?\/?$/, '');
+  return {
+    backendBaseUrl: hostBase,
+    apiBaseUrl: `${hostBase}/api/v1`,
+    healthCheckUrl: `${hostBase}/api/health`
+  };
+};
+
+const resolved = resolveUrls();
+export const BACKEND_BASE_URL = resolved.backendBaseUrl;
+export const API_BASE_URL = resolved.apiBaseUrl;
+export const HEALTH_CHECK_URL = resolved.healthCheckUrl;
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

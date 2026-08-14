@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Sparkles, RefreshCw, WifiOff, AlertTriangle, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { HEALTH_CHECK_URL } from '../../api/axios';
 
 interface RenderServerWakeupScreenProps {
   onServerReady?: () => void;
@@ -22,15 +23,15 @@ export const RenderServerWakeupScreen: React.FC<RenderServerWakeupScreenProps> =
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const isComponentMounted = useRef<boolean>(true);
 
-  // Ping /api/health endpoint
+  // Ping backend health endpoint using centralized URL
   const checkHealth = useCallback(async (): Promise<boolean> => {
     try {
       setIsChecking(true);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      // Probe backend /api/health directly
-      const res = await fetch('/api/health', {
+      // Probe backend health directly via centralized HEALTH_CHECK_URL
+      const res = await fetch(HEALTH_CHECK_URL, {
         method: 'GET',
         headers: { Accept: 'application/json' },
         signal: controller.signal
