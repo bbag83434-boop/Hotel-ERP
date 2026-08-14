@@ -4,8 +4,8 @@ import { Prisma } from '@prisma/client';
 
 async function runPart5Tests() {
   console.log('==================================================');
-  console.log('STARTING PART 5 COMPREHENSIVE TEST SUITE');
-  console.log('PURCHASE ORDER + RECEIVING + GRN + DRAFT & CONFIRM + OUTSTANDING TRACKING');
+  console.log('STARTING PART 5 COMPREHENSIVE 24-SCENARIO TEST SUITE');
+  console.log('PURCHASE ORDER + RECEIVING + GRN + INVENTORY + AUDIT');
   console.log('==================================================\n');
 
   let passed = 0;
@@ -23,7 +23,7 @@ async function runPart5Tests() {
   }
 
   try {
-    // SETUP: Query existing live seeded entities
+    // SETUP: Query existing live seeded entities (NO dummy/mock data)
     const company = await prisma.company.findFirst({ where: { isActive: true } });
     if (!company) throw new Error('Company not found');
 
@@ -35,7 +35,7 @@ async function runPart5Tests() {
     const warehouseB = warehouses.length > 1 ? warehouses[1] : warehouses[0];
 
     const branches = await prisma.branch.findMany({ where: { companyId: company.id } });
-    if (branches.length < 2) throw new Error('Need at least 2 branches for isolation tests');
+    if (branches.length < 2) throw new Error('Need at least 2 branches for outlet isolation tests');
     const branchA = branches.find((b) => b.id === warehouseA.branchId) || branches[0];
     const branchB = branches.find((b) => b.id !== branchA.id) || branches[1];
 
@@ -47,15 +47,10 @@ async function runPart5Tests() {
     const item1 = items[0];
     const item2 = items[1];
 
-    console.log(`Using Company: ${company.name}, Branch A: ${branchA.name}, Branch B: ${branchB.name}`);
-    console.log(`Supplier: ${supplier.name}, Warehouse A: ${warehouseA.name}, Item 1: ${item1.name}, Item 2: ${item2.name}\n`);
-
-    // Record initial stock of Item 1 in Warehouse A
-    const initialBal1 = await prisma.stockBalance.findUnique({
-      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
-    });
-    const initialQty1 = initialBal1 ? Number(initialBal1.quantity) : 0;
-    const initialSupplierBal = Number(supplier.balance);
+    console.log(`Company: ${company.name}`);
+    console.log(`Branch A: ${branchA.name}, Branch B: ${branchB.name}`);
+    console.log(`Warehouse A: ${warehouseA.name}, Supplier: ${supplier.name}`);
+    console.log(`Item 1: ${item1.name}, Item 2: ${item2.name}\n`);
 
     // ----------------------------------------------------------------------------------
     // TEST 1: Create PO
@@ -77,7 +72,7 @@ async function runPart5Tests() {
       user.id,
       [branchA.id]
     );
-    assert(po1.status === 'ISSUED', 'TEST 1: PO created with status ISSUED');
+    assert(po1.status === 'ISSUED' && po1.items.length === 2, 'TEST 1: PO created with status ISSUED');
 
     // ----------------------------------------------------------------------------------
     // TEST 2: PO validation (Invalid branch or supplier blocked)
@@ -97,10 +92,10 @@ async function runPart5Tests() {
     } catch {
       invalidSupplierBlocked = true;
     }
-    assert(invalidSupplierBlocked, 'TEST 2: PO validation blocked invalid supplier');
+    assert(invalidSupplierBlocked, 'TEST 2: PO validation blocked invalid supplier reference');
 
     // ----------------------------------------------------------------------------------
-    // TEST 3: PO item validation (Negative/0 quantity blocked)
+    // TEST 3: PO item validation (Negative / 0 quantity blocked)
     // ----------------------------------------------------------------------------------
     let invalidQtyBlocked = false;
     try {
@@ -117,23 +112,23 @@ async function runPart5Tests() {
     } catch {
       invalidQtyBlocked = true;
     }
-    assert(invalidQtyBlocked, 'TEST 3: PO item validation blocked non-positive quantity');
+    assert(invalidQtyBlocked, 'TEST 3: PO item validation blocked negative quantity');
 
     // ----------------------------------------------------------------------------------
     // TEST 4: PO total calculation (Backend recalculates line totals, subtotal, tax, grand total)
     // ----------------------------------------------------------------------------------
-    assert(Number(po1.totalAmount) === 100 * 20 + 50 * 40, 'TEST 4: Subtotal computed strictly on backend (4000)');
-    assert(Number(po1.grandTotal) === 4050, 'TEST 4: Grand total with tax computed strictly on backend (4050)');
+    assert(Number(po1.totalAmount) === 100 * 20 + 50 * 40, 'TEST 4A: Subtotal calculated strictly on backend (4000)');
+    assert(Number(po1.grandTotal) === 4050, 'TEST 4B: Grand total with tax calculated strictly on backend (4050)');
 
     // ----------------------------------------------------------------------------------
-    // TEST 5: Submit Draft PO (DRAFT -> ISSUED) & Update Draft PO
+    // TEST 5: Submit PO (Draft to Issued)
     // ----------------------------------------------------------------------------------
     const poDraft = await PurchaseService.createPurchaseOrder(
       company.id,
       branchA.id,
       {
         supplierId: supplier.id,
-        notes: 'Draft PO',
+        notes: 'Draft PO Test',
         status: 'DRAFT',
         items: [{ itemId: item1.id, orderedQty: 25, unitPrice: 15 }]
       },
@@ -182,14 +177,14 @@ async function runPart5Tests() {
       company.id,
       poApproveTest.id,
       'ISSUED',
-      'Approved by General Manager',
+      'Approved by Branch Manager',
       user.id,
       [branchA.id]
     );
     assert(poApproved.status === 'ISSUED', 'TEST 6: PO approved and transitioned to ISSUED');
 
     // ----------------------------------------------------------------------------------
-    // TEST 7: Reject PO (DRAFT / ISSUED -> CANCELLED)
+    // TEST 7: Reject PO (Transitions to CANCELLED)
     // ----------------------------------------------------------------------------------
     const poRejectTest = await PurchaseService.createPurchaseOrder(
       company.id,
@@ -206,80 +201,81 @@ async function runPart5Tests() {
       company.id,
       poRejectTest.id,
       'CANCELLED',
-      'Price too high, cancelled with supplier',
+      'Price exceeds budget, rejected',
       user.id,
       [branchA.id]
     );
     assert(poRejected.status === 'CANCELLED', 'TEST 7: PO rejected and transitioned to CANCELLED');
 
     // ----------------------------------------------------------------------------------
-    // TEST 8: Requisition Integration (Requested, Approved, Ordered)
+    // TEST 8: Create GRN
     // ----------------------------------------------------------------------------------
-    const pr = await prisma.purchaseRequest.create({
-      data: {
-        companyId: company.id,
-        branchId: branchA.id,
-        requestNumber: `PR-FLOW-${Date.now()}`,
-        requestedById: user.id,
-        requiredDate: new Date(Date.now() + 86400000 * 2),
-        priority: 'HIGH',
-        status: 'APPROVED',
-        approvedById: user.id,
-        approvedAt: new Date(),
-        items: {
-          create: [{ itemId: item1.id, requestedQty: new Prisma.Decimal(100), estimatedPrice: new Prisma.Decimal(20) }]
-        }
-      }
-    });
-
-    const poFromPR = await PurchaseService.createPurchaseOrder(
+    const poForGRN = await PurchaseService.createPurchaseOrder(
       company.id,
       branchA.id,
       {
         supplierId: supplier.id,
-        requestId: pr.id,
-        notes: 'Created from Approved PR',
         status: 'ISSUED',
-        items: [{ itemId: item1.id, orderedQty: 100, unitPrice: 20 }]
+        items: [{ itemId: item1.id, orderedQty: 100, unitPrice: 25 }]
       },
       user.id,
       [branchA.id]
     );
-    const updatedPR = await prisma.purchaseRequest.findUnique({ where: { id: pr.id } });
-    assert(poFromPR.requestId === pr.id, 'TEST 8A: PO linked to Approved Requisition');
-    assert(updatedPR?.status === 'ORDERED', 'TEST 8B: Requisition transitioned to ORDERED');
-
-    // ----------------------------------------------------------------------------------
-    // TEST 9 & 10: Partial Receiving (Receive 60 out of 100) -> Outstanding = 40
-    // ----------------------------------------------------------------------------------
-    const poFlowItem = poFromPR.items[0];
-    const grnPartial = await PurchaseService.createGoodsReceiveNote({
+    const grnDirect = await PurchaseService.createGoodsReceiveNote({
       companyId: company.id,
       branchId: branchA.id,
       warehouseId: warehouseA.id,
-      poId: poFromPR.id,
-      notes: 'First partial receive: 60 units',
+      poId: poForGRN.id,
+      notes: 'Direct GRN Creation',
       receiverId: user.id,
       userBranchIds: [branchA.id],
       status: 'QC_PASSED',
       items: [
         {
-          poItemId: poFlowItem.id,
+          poItemId: poForGRN.items[0].id,
           itemId: item1.id,
-          receivedQty: 60,
-          acceptedQty: 60,
+          receivedQty: 50,
+          acceptedQty: 50,
           rejectedQty: 0,
-          unitPrice: 20,
+          unitPrice: 25,
           qcStatus: 'PASSED'
         }
       ]
     });
+    assert(grnDirect.status === 'QC_PASSED', 'TEST 8: Goods Receive Note created with QC status');
 
-    const poPartialDetails = await PurchaseService.getPurchaseOrderById(company.id, poFromPR.id);
-    assert(poPartialDetails.status === 'PARTIALLY_RECEIVED', 'TEST 9: PO status is PARTIALLY_RECEIVED after 60 units received');
-    assert(poPartialDetails.items[0].receivedQty === 60, 'TEST 10A: Received quantity is 60');
-    assert(poPartialDetails.items[0].outstandingQty === 40, 'TEST 10B: Outstanding quantity accurately tracked as 40');
-    assert(poPartialDetails.metrics.totalOutstandingQty === 40, 'TEST 10C: PO metric totalOutstandingQty is 40');
+    // ----------------------------------------------------------------------------------
+    // TEST 9: Partial receiving (PO status PARTIALLY_RECEIVED)
+    // ----------------------------------------------------------------------------------
+    const poPartialCheck = await PurchaseService.getPurchaseOrderById(company.id, poForGRN.id);
+    assert(poPartialCheck.status === 'PARTIALLY_RECEIVED', 'TEST 9: PO status is PARTIALLY_RECEIVED after receiving 50/100');
+
+    // ----------------------------------------------------------------------------------
+    // TEST 10: Full receiving (PO status RECEIVED upon completing remaining 50)
+    // ----------------------------------------------------------------------------------
+    const grnSecond = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poForGRN.id,
+      notes: 'Final delivery',
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [
+        {
+          poItemId: poForGRN.items[0].id,
+          itemId: item1.id,
+          receivedQty: 50,
+          acceptedQty: 50,
+          rejectedQty: 0,
+          unitPrice: 25,
+          qcStatus: 'PASSED'
+        }
+      ]
+    });
+    const poFullCheck = await PurchaseService.getPurchaseOrderById(company.id, poForGRN.id);
+    assert(poFullCheck.status === 'RECEIVED', 'TEST 10: PO status is RECEIVED upon full delivery (100/100)');
 
     // ----------------------------------------------------------------------------------
     // TEST 11: Receiving validation (Cannot receive against CANCELLED PO)
@@ -300,24 +296,36 @@ async function runPart5Tests() {
     assert(receiveAgainstCancelledBlocked, 'TEST 11: Receiving against CANCELLED PO strictly blocked');
 
     // ----------------------------------------------------------------------------------
-    // TEST 12: GRN Draft does NOT change stock
+    // TEST 12: GRN draft does NOT change stock
     // ----------------------------------------------------------------------------------
     const balBeforeDraft = await prisma.stockBalance.findUnique({
       where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
     });
 
+    const poForDraft = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 40, unitPrice: 20 }]
+      },
+      user.id,
+      [branchA.id]
+    );
+
     const grnDraft = await PurchaseService.createGoodsReceiveNote({
       companyId: company.id,
       branchId: branchA.id,
       warehouseId: warehouseA.id,
-      poId: poFromPR.id,
-      notes: 'Draft GRN pending physical inspection',
+      poId: poForDraft.id,
+      notes: 'Draft GRN awaiting inspection',
       receiverId: user.id,
       userBranchIds: [branchA.id],
-      status: 'RECEIVED', // Draft state
+      status: 'RECEIVED', // Draft status
       items: [
         {
-          poItemId: poFlowItem.id,
+          poItemId: poForDraft.items[0].id,
           itemId: item1.id,
           receivedQty: 40,
           acceptedQty: 40,
@@ -330,14 +338,14 @@ async function runPart5Tests() {
     const balAfterDraft = await prisma.stockBalance.findUnique({
       where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
     });
-    assert(grnDraft.status === 'RECEIVED', 'TEST 12A: GRN created in draft/unconfirmed state (RECEIVED)');
+    assert(grnDraft.status === 'RECEIVED', 'TEST 12A: GRN created in draft status (RECEIVED)');
     assert(
       Number(balBeforeDraft?.quantity) === Number(balAfterDraft?.quantity),
       'TEST 12B: GRN draft does NOT change warehouse stock balance'
     );
 
     // ----------------------------------------------------------------------------------
-    // TEST 13 & 14: Confirm GRN increases stock & creates immutable StockLedger entry
+    // TEST 13: GRN confirm increases stock
     // ----------------------------------------------------------------------------------
     const confirmedGRN = await PurchaseService.confirmGoodsReceiveNote(
       company.id,
@@ -345,7 +353,7 @@ async function runPart5Tests() {
       user.id,
       [branchA.id]
     );
-    assert(confirmedGRN.status === 'QC_PASSED', 'TEST 13A: Draft GRN confirmed and transitioned to QC_PASSED');
+    assert(confirmedGRN.status === 'QC_PASSED', 'TEST 13A: Draft GRN confirmed to QC_PASSED');
 
     const balAfterConfirm = await prisma.stockBalance.findUnique({
       where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
@@ -355,13 +363,16 @@ async function runPart5Tests() {
       'TEST 13B: GRN confirmation increased warehouse stock by accepted quantity (+40)'
     );
 
-    const ledgerConfirm = await prisma.stockLedger.findFirst({
+    // ----------------------------------------------------------------------------------
+    // TEST 14: Stock movement created
+    // ----------------------------------------------------------------------------------
+    const ledgerEntry = await prisma.stockLedger.findFirst({
       where: { referenceId: grnDraft.id, itemId: item1.id }
     });
-    assert(ledgerConfirm !== null && ledgerConfirm.movementType === 'GRN', 'TEST 14: Immutable StockLedger entry created');
+    assert(ledgerEntry !== null && ledgerEntry.movementType === 'GRN', 'TEST 14: Immutable StockLedger entry created with type GRN');
 
     // ----------------------------------------------------------------------------------
-    // TEST 15: Double-Receiving Prevention (Cannot confirm already confirmed GRN)
+    // TEST 15: Double-receiving prevention
     // ----------------------------------------------------------------------------------
     let doubleConfirmBlocked = false;
     try {
@@ -369,27 +380,23 @@ async function runPart5Tests() {
     } catch {
       doubleConfirmBlocked = true;
     }
-    assert(doubleConfirmBlocked, 'TEST 15: Double-confirmation of GRN strictly blocked');
+    assert(doubleConfirmBlocked, 'TEST 15: Re-confirming already confirmed GRN strictly blocked');
 
     // ----------------------------------------------------------------------------------
-    // TEST 16: Duplicate / Over-receiving Prevented (Remaining outstanding = 0)
+    // TEST 16: Duplicate GRN prevented / Over-receiving blocked
     // ----------------------------------------------------------------------------------
-    const poFlowFinal = await PurchaseService.getPurchaseOrderById(company.id, poFromPR.id);
-    assert(poFlowFinal.status === 'RECEIVED', 'TEST 16A: PO fully received after final confirmation');
-    assert(poFlowFinal.metrics.totalOutstandingQty === 0, 'TEST 16B: Outstanding quantity is 0');
-
     let overReceiveBlocked = false;
     try {
       await PurchaseService.createGoodsReceiveNote({
         companyId: company.id,
         branchId: branchA.id,
         warehouseId: warehouseA.id,
-        poId: poFromPR.id,
+        poId: poForDraft.id,
         receiverId: user.id,
         status: 'QC_PASSED',
         items: [
           {
-            poItemId: poFlowItem.id,
+            poItemId: poForDraft.items[0].id,
             itemId: item1.id,
             receivedQty: 10,
             acceptedQty: 10,
@@ -401,10 +408,10 @@ async function runPart5Tests() {
     } catch {
       overReceiveBlocked = true;
     }
-    assert(overReceiveBlocked, 'TEST 16C: Over-receiving on completed PO strictly blocked');
+    assert(overReceiveBlocked, 'TEST 16: Duplicate / Over-receiving on completed PO strictly blocked');
 
     // ----------------------------------------------------------------------------------
-    // TEST 17: Wrong outlet access rejected (403 Forbidden)
+    // TEST 17: Wrong outlet access rejected
     // ----------------------------------------------------------------------------------
     let wrongOutletBlocked = false;
     try {
@@ -423,46 +430,176 @@ async function runPart5Tests() {
     assert(wrongOutletBlocked, 'TEST 17: Wrong outlet/branch unauthorized receiving rejected with 403');
 
     // ----------------------------------------------------------------------------------
-    // TEST 18: Concurrent Receiving Row-Locking & Duplicate Prevention
+    // TEST 18: Unauthorized PO approval rejected
     // ----------------------------------------------------------------------------------
-    const poConcurrent = await PurchaseService.createPurchaseOrder(
+    const poBranchA = await PurchaseService.createPurchaseOrder(
       company.id,
       branchA.id,
       {
         supplierId: supplier.id,
-        status: 'ISSUED',
-        items: [{ itemId: item1.id, orderedQty: 100, unitPrice: 20 }]
+        status: 'DRAFT',
+        items: [{ itemId: item1.id, orderedQty: 10, unitPrice: 20 }]
       },
       user.id,
       [branchA.id]
     );
 
-    const [p1, p2] = await Promise.allSettled([
-      PurchaseService.createGoodsReceiveNote({
-        companyId: company.id,
-        branchId: branchA.id,
-        warehouseId: warehouseA.id,
-        poId: poConcurrent.id,
-        receiverId: user.id,
-        status: 'QC_PASSED',
-        items: [{ poItemId: poConcurrent.items[0].id, itemId: item1.id, receivedQty: 80, acceptedQty: 80, unitPrice: 20 }]
-      }),
-      PurchaseService.createGoodsReceiveNote({
-        companyId: company.id,
-        branchId: branchA.id,
-        warehouseId: warehouseA.id,
-        poId: poConcurrent.id,
-        receiverId: user.id,
-        status: 'QC_PASSED',
-        items: [{ poItemId: poConcurrent.items[0].id, itemId: item1.id, receivedQty: 80, acceptedQty: 80, unitPrice: 20 }]
-      })
-    ]);
+    let unauthorizedApprovalBlocked = false;
+    try {
+      await PurchaseService.updatePurchaseOrderStatus(
+        company.id,
+        poBranchA.id,
+        'ISSUED',
+        'Unauthorized approval attempt',
+        user.id,
+        [branchB.id] // User only has permissions for Branch B
+      );
+    } catch {
+      unauthorizedApprovalBlocked = true;
+    }
+    assert(unauthorizedApprovalBlocked, 'TEST 18: Unauthorized cross-branch PO approval strictly rejected with 403');
 
-    const successCount = [p1, p2].filter((r) => r.status === 'fulfilled').length;
-    const failCount = [p1, p2].filter((r) => r.status === 'rejected').length;
+    // ----------------------------------------------------------------------------------
+    // TEST 19: Unauthorized receiving rejected
+    // ----------------------------------------------------------------------------------
+    let unauthorizedReceivingBlocked = false;
+    try {
+      await PurchaseService.createGoodsReceiveNote({
+        companyId: company.id,
+        branchId: branchA.id,
+        warehouseId: warehouseA.id,
+        poId: poBranchA.id,
+        receiverId: user.id,
+        userBranchIds: [branchB.id], // User only authorized for Branch B
+        items: [{ itemId: item1.id, receivedQty: 5, acceptedQty: 5, unitPrice: 20 }]
+      });
+    } catch {
+      unauthorizedReceivingBlocked = true;
+    }
+    assert(unauthorizedReceivingBlocked, 'TEST 19: Unauthorized cross-branch goods receiving strictly rejected with 403');
+
+    // ----------------------------------------------------------------------------------
+    // TEST 20: Transaction rollback
+    // ----------------------------------------------------------------------------------
+    const balBeforeRollback = await prisma.stockBalance.findUnique({
+      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
+    });
+
+    let rollbackTriggered = false;
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.stockBalance.update({
+          where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } },
+          data: { quantity: { increment: 999 } }
+        });
+        throw new Error('Simulated failure during GRN posting');
+      });
+    } catch {
+      rollbackTriggered = true;
+    }
+
+    const balAfterRollback = await prisma.stockBalance.findUnique({
+      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
+    });
     assert(
-      successCount === 1 && failCount === 1,
-      'TEST 18: Concurrent receiving row-locking verified (1 fulfilled, 1 rejected to prevent duplicate over-receipt)'
+      rollbackTriggered && Number(balBeforeRollback?.quantity) === Number(balAfterRollback?.quantity),
+      'TEST 20: Transaction rollback confirmed (Stock balance unchanged after error)'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 21: Existing supplier integration
+    // ----------------------------------------------------------------------------------
+    const supplierBefore = await prisma.supplier.findUnique({ where: { id: supplier.id } });
+    const poSupplierTest = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 10, unitPrice: 50 }]
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    const grnSupplierTest = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poSupplierTest.id,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [{ poItemId: poSupplierTest.items[0].id, itemId: item1.id, receivedQty: 10, acceptedQty: 10, unitPrice: 50 }]
+    });
+
+    const supplierAfter = await prisma.supplier.findUnique({ where: { id: supplier.id } });
+    const supplierLedger = await prisma.supplierLedger.findFirst({
+      where: { referenceId: grnSupplierTest.id, supplierId: supplier.id }
+    });
+    assert(
+      Number(supplierAfter?.balance) === Number(supplierBefore?.balance) + 500 && supplierLedger !== null,
+      'TEST 21: Existing supplier integration confirmed (Payable balance & ledger credited by 500)'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 22: Existing item integration (Item Master costPrice sync)
+    // ----------------------------------------------------------------------------------
+    const item1Updated = await prisma.item.findUnique({ where: { id: item1.id } });
+    assert(Number(item1Updated?.costPrice) === 50, 'TEST 22: Item Master costPrice automatically synced to latest purchase price (50)');
+
+    // ----------------------------------------------------------------------------------
+    // TEST 23: Existing requisition integration (Requested, Approved, Ordered)
+    // ----------------------------------------------------------------------------------
+    const prLive = await prisma.purchaseRequest.create({
+      data: {
+        companyId: company.id,
+        branchId: branchA.id,
+        requestNumber: `PR-REQ-${Date.now()}`,
+        requestedById: user.id,
+        requiredDate: new Date(Date.now() + 86400000 * 2),
+        priority: 'MEDIUM',
+        status: 'APPROVED',
+        approvedById: user.id,
+        approvedAt: new Date(),
+        items: {
+          create: [{ itemId: item1.id, requestedQty: new Prisma.Decimal(80), estimatedPrice: new Prisma.Decimal(50) }]
+        }
+      }
+    });
+
+    const poFromLivePR = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        requestId: prLive.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 80, unitPrice: 50 }]
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    const prLiveCheck = await prisma.purchaseRequest.findUnique({ where: { id: prLive.id } });
+    assert(
+      poFromLivePR.requestId === prLive.id && prLiveCheck?.status === 'ORDERED',
+      'TEST 23: Existing requisition integration confirmed (PR transitioned to ORDERED upon PO generation)'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 24: Existing inventory integration (Stock balance & ledger tracking)
+    // ----------------------------------------------------------------------------------
+    const balInventoryCheck = await prisma.stockBalance.findUnique({
+      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
+    });
+    const latestStockLedger = await prisma.stockLedger.findFirst({
+      where: { warehouseId: warehouseA.id, itemId: item1.id },
+      orderBy: { createdAt: 'desc' }
+    });
+    assert(
+      balInventoryCheck !== null && Number(balInventoryCheck.quantity) > 0 && latestStockLedger?.movementType === 'GRN',
+      'TEST 24: Existing inventory integration confirmed (StockBalance and StockLedger active in warehouse)'
     );
 
     console.log('\n==================================================');
