@@ -141,6 +141,7 @@ export const purchaseApi = {
     poId?: string | null;
     receiveDate?: string;
     invoiceNumber?: string;
+    invoiceAmount?: number;
     notes?: string;
     status?: string;
     items: Array<{

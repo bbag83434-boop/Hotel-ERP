@@ -527,6 +527,8 @@ async function runPart5Tests() {
       branchId: branchA.id,
       warehouseId: warehouseA.id,
       poId: poSupplierTest.id,
+      invoiceNumber: 'INV-SUPP-999',
+      invoiceAmount: 500,
       receiverId: user.id,
       userBranchIds: [branchA.id],
       status: 'QC_PASSED',
@@ -537,9 +539,15 @@ async function runPart5Tests() {
     const supplierLedger = await prisma.supplierLedger.findFirst({
       where: { referenceId: grnSupplierTest.id, supplierId: supplier.id }
     });
+    const purchaseInvoice = await prisma.purchaseInvoice.findFirst({
+      where: { grnId: grnSupplierTest.id }
+    });
     assert(
-      Number(supplierAfter?.balance) === Number(supplierBefore?.balance) + 500 && supplierLedger !== null,
-      'TEST 21: Existing supplier integration confirmed (Payable balance & ledger credited by 500)'
+      Number(supplierAfter?.balance) === Number(supplierBefore?.balance) + 500 &&
+        supplierLedger !== null &&
+        purchaseInvoice !== null &&
+        Number(purchaseInvoice.totalAmount) === 500,
+      'TEST 21: Existing supplier & Invoice integration confirmed (Invoice Amount 500 & payable ledger credited)'
     );
 
     // ----------------------------------------------------------------------------------

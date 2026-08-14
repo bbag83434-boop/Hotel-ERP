@@ -887,6 +887,7 @@ export class PurchaseService {
     poId?: string | null;
     receiveDate?: string;
     invoiceNumber?: string;
+    invoiceAmount?: number;
     notes?: string;
     status?: GRNStatus;
     items: Array<{
@@ -971,7 +972,7 @@ export class PurchaseService {
       const grnNumber = `GRN-${new Date().getFullYear()}-${String(grnCount + 1).padStart(5, '0')}`;
 
       // Calculate total accepted amount and validate QC balancing & over-receiving
-      let totalAmount = new Prisma.Decimal(0);
+      let calculatedTotal = new Prisma.Decimal(0);
 
       for (const item of params.items) {
         const itemRecord = await tx.item.findFirst({ where: { id: item.itemId, companyId } });
@@ -1017,8 +1018,12 @@ export class PurchaseService {
           }
         }
 
-        totalAmount = totalAmount.plus(acceptedQty.times(unitPrice));
+        calculatedTotal = calculatedTotal.plus(acceptedQty.times(unitPrice));
       }
+
+      const totalAmount = params.invoiceAmount !== undefined && params.invoiceAmount > 0
+        ? new Prisma.Decimal(params.invoiceAmount)
+        : calculatedTotal;
 
       // 1. Create GRN Header
       const grn = await tx.goodsReceiveNote.create({

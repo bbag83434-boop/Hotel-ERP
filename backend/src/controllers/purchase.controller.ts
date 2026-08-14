@@ -282,6 +282,7 @@ export class PurchaseController {
         poId: req.body.poId,
         receiveDate: req.body.receiveDate,
         invoiceNumber: req.body.invoiceNumber,
+        invoiceAmount: req.body.invoiceAmount,
         notes: req.body.notes,
         status: req.body.status,
         items: req.body.items,
