@@ -888,6 +888,9 @@ export class PurchaseService {
     receiveDate?: string;
     invoiceNumber?: string;
     invoiceAmount?: number;
+    taxAmount?: number;
+    freightAmount?: number;
+    allowPriceVariance?: boolean;
     notes?: string;
     status?: GRNStatus;
     items: Array<{
@@ -1052,10 +1055,26 @@ export class PurchaseService {
 
       const variance = invoiceBaseTotal.minus(poBaseTotal);
       const isPOValueExceeded = variance.greaterThan(0);
-      const priceVerificationStatus = isPOValueExceeded ? 'PO_VALUE_EXCEEDED' : 'AMOUNT_MATCHED';
+      const variancePercentage = poBaseTotal.greaterThan(0)
+        ? variance.dividedBy(poBaseTotal).times(100).toFixed(2)
+        : '0.00';
+
+      // When PO value is exceeded without pre-approval, block immediate confirm and require variance approval
+      const effectiveStatus: GRNStatus = isPOValueExceeded && !params.allowPriceVariance
+        ? 'RECEIVED'
+        : isImmediateConfirm
+        ? 'QC_PASSED'
+        : 'RECEIVED';
+
+      const effectiveIsImmediateConfirm = effectiveStatus === 'QC_PASSED';
+
+      const priceVerificationStatus = isPOValueExceeded
+        ? (params.allowPriceVariance ? 'PO_VALUE_EXCEEDED (VARIANCE_APPROVED)' : 'PO_VALUE_EXCEEDED (PENDING_VARIANCE_APPROVAL)')
+        : 'AMOUNT_MATCHED';
+
       const notesWithAudit = params.notes
-        ? `${params.notes} | Verification: ${priceVerificationStatus} (PO Base: ${poBaseTotal}, Inv Base: ${invoiceBaseTotal})`
-        : `Verification: ${priceVerificationStatus} (PO Base: ${poBaseTotal}, Inv Base: ${invoiceBaseTotal})`;
+        ? `${params.notes} | Verification: ${priceVerificationStatus} (PO Base: ${poBaseTotal}, Inv Base: ${invoiceBaseTotal}${isPOValueExceeded ? `, Excess: +${variance} (+${variancePercentage}%)` : ''})`
+        : `Verification: ${priceVerificationStatus} (PO Base: ${poBaseTotal}, Inv Base: ${invoiceBaseTotal}${isPOValueExceeded ? `, Excess: +${variance} (+${variancePercentage}%)` : ''})`;
 
       // 1. Create GRN Header
       const grn = await tx.goodsReceiveNote.create({
@@ -1068,7 +1087,7 @@ export class PurchaseService {
           grnNumber,
           receiveDate: params.receiveDate ? new Date(params.receiveDate) : new Date(),
           invoiceNumber: params.invoiceNumber,
-          status: isImmediateConfirm ? 'QC_PASSED' : 'RECEIVED',
+          status: effectiveStatus,
           totalAmount,
           notes: notesWithAudit,
           receivedById: receiverId
@@ -1101,8 +1120,8 @@ export class PurchaseService {
           }
         });
 
-        // Only increase stock and ledger when CONFIRMED (isImmediateConfirm = true)
-        if (isImmediateConfirm && acceptedQty.greaterThan(0)) {
+        // Only increase stock and ledger when CONFIRMED (effectiveIsImmediateConfirm = true)
+        if (effectiveIsImmediateConfirm && acceptedQty.greaterThan(0)) {
           // A. Increase Stock Balance in target Warehouse atomically
           const stockBalance = await tx.stockBalance.upsert({
             where: {
@@ -1148,7 +1167,7 @@ export class PurchaseService {
         }
 
         // D. Update PO Item received quantity if confirmed and linked to PO
-        if (isImmediateConfirm && item.poItemId && params.poId) {
+        if (effectiveIsImmediateConfirm && item.poItemId && params.poId) {
           await tx.purchaseOrderItem.update({
             where: { id: item.poItemId },
             data: {
@@ -1159,7 +1178,7 @@ export class PurchaseService {
       }
 
       // 3. Update PO status accurately based on cumulative received quantities
-      if (isImmediateConfirm && params.poId) {
+      if (effectiveIsImmediateConfirm && params.poId) {
         const poItems = await tx.purchaseOrderItem.findMany({ where: { poId: params.poId } });
         const allReceived = poItems.length > 0 && poItems.every((poi) => poi.receivedQty.greaterThanOrEqualTo(poi.orderedQty));
         const someReceived = poItems.some((poi) => poi.receivedQty.greaterThan(0));
@@ -1173,7 +1192,7 @@ export class PurchaseService {
       }
 
       // 4. Update Supplier Payable Balance & record in Supplier Ledger if confirmed
-      if (isImmediateConfirm && totalAmount.greaterThan(0)) {
+      if (effectiveIsImmediateConfirm && totalAmount.greaterThan(0)) {
         const updatedSupplier = await tx.supplier.update({
           where: { id: resolvedSupplierId },
           data: {
@@ -1227,7 +1246,7 @@ export class PurchaseService {
 
       await AuditService.log({
         userId: receiverId,
-        action: isImmediateConfirm ? 'GOODS_RECEIVE_COMPLETED' : 'GOODS_RECEIVE_DRAFT_CREATED',
+        action: effectiveIsImmediateConfirm ? 'GOODS_RECEIVE_COMPLETED' : 'GOODS_RECEIVE_DRAFT_CREATED',
         entity: 'GoodsReceiveNote',
         entityId: grn.id,
         details: {
@@ -1237,7 +1256,8 @@ export class PurchaseService {
           poId: params.poId,
           totalAmount: totalAmount.toString(),
           itemCount: params.items.length,
-          status: grn.status
+          status: grn.status,
+          priceVerification: priceVerificationStatus
         },
         ipAddress,
         userAgent
@@ -1245,6 +1265,81 @@ export class PurchaseService {
 
       return grn;
     }, { maxWait: 10000, timeout: 30000 });
+  }
+
+  public static async approveGoodsReceiveVariance(
+    companyId: string,
+    grnId: string,
+    actorId?: string,
+    userBranchIds?: string[],
+    ipAddress?: string,
+    userAgent?: string
+  ) {
+    const grn = await prisma.goodsReceiveNote.findFirst({
+      where: { id: grnId, companyId }
+    });
+    if (!grn) {
+      throw new AppError('Goods Receive Note not found', 404);
+    }
+    if (grn.status !== 'RECEIVED') {
+      throw new AppError(`GRN cannot be variance-approved. Current status is "${grn.status}".`, 400);
+    }
+    if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(grn.branchId)) {
+      throw new AppError('Unauthorized: You do not have access to approve variance for this branch', 403);
+    }
+
+    await prisma.goodsReceiveNote.update({
+      where: { id: grnId },
+      data: {
+        notes: grn.notes ? `${grn.notes} | VARIANCE APPROVED by manager` : 'VARIANCE APPROVED by manager'
+      }
+    });
+
+    return PurchaseService.confirmGoodsReceiveNote(companyId, grnId, actorId, userBranchIds, ipAddress, userAgent);
+  }
+
+  public static async rejectGoodsReceiveVariance(
+    companyId: string,
+    grnId: string,
+    reason: string,
+    actorId?: string,
+    userBranchIds?: string[],
+    ipAddress?: string,
+    userAgent?: string
+  ) {
+    const grn = await prisma.goodsReceiveNote.findFirst({
+      where: { id: grnId, companyId }
+    });
+    if (!grn) {
+      throw new AppError('Goods Receive Note not found', 404);
+    }
+    if (grn.status !== 'RECEIVED') {
+      throw new AppError(`GRN cannot be variance-rejected. Current status is "${grn.status}".`, 400);
+    }
+    if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(grn.branchId)) {
+      throw new AppError('Unauthorized: You do not have access to reject variance for this branch', 403);
+    }
+
+    const updated = await prisma.goodsReceiveNote.update({
+      where: { id: grnId },
+      data: {
+        status: 'REJECTED',
+        notes: grn.notes ? `${grn.notes} | VARIANCE REJECTED: ${reason}` : `VARIANCE REJECTED: ${reason}`
+      },
+      include: { items: true, warehouse: true, supplier: true }
+    });
+
+    await AuditService.log({
+      userId: actorId,
+      action: 'GOODS_RECEIVE_VARIANCE_REJECTED',
+      entity: 'GoodsReceiveNote',
+      entityId: grn.id,
+      details: { grnNumber: grn.grnNumber, reason },
+      ipAddress,
+      userAgent
+    });
+
+    return updated;
   }
 
   public static async confirmGoodsReceiveNote(

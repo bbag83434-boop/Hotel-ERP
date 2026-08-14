@@ -118,6 +118,7 @@ export interface GoodsReceiveNote {
   supplierId: string;
   supplier: { id: string; name: string; code: string };
   poId?: string;
+  po?: { id: string; poNumber: string; totalAmount?: number | string };
   receiveDate: string;
   invoiceNumber?: string;
   status: GRNStatus;

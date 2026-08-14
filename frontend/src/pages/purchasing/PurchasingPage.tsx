@@ -57,6 +57,7 @@ export const PurchasingPage: React.FC = () => {
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
 
   const [showGRNModal, setShowGRNModal] = useState<boolean>(false);
+  const [selectedGRNDetails, setSelectedGRNDetails] = useState<GoodsReceiveNote | null>(null);
   const [showSupplierModal, setShowSupplierModal] = useState<boolean>(false);
   const [showLedgerModal, setShowLedgerModal] = useState<boolean>(false);
   const [selectedSupplierLedger, setSelectedSupplierLedger] = useState<{ supplier: Supplier; entries: SupplierLedgerEntry[] } | null>(null);
@@ -270,6 +271,34 @@ export const PurchasingPage: React.FC = () => {
       loadTabData();
     } catch (err: any) {
       setErrorMsg(err?.response?.data?.message || 'Failed to register Goods Receipt');
+    }
+  };
+
+  const handleApproveVariance = async (grnId: string) => {
+    try {
+      setIsLoading(true);
+      await purchaseApi.approveGoodsReceiveVariance(grnId);
+      setSuccessMsg('Price variance approved and GRN stock confirmed!');
+      setSelectedGRNDetails(null);
+      loadTabData();
+    } catch (err: any) {
+      setErrorMsg(err?.response?.data?.message || 'Failed to approve variance');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRejectVariance = async (grnId: string) => {
+    try {
+      setIsLoading(true);
+      await purchaseApi.rejectGoodsReceiveVariance(grnId, 'Rejected by authorized manager');
+      setSuccessMsg('Price variance rejected. Excess amount was not finalized.');
+      setSelectedGRNDetails(null);
+      loadTabData();
+    } catch (err: any) {
+      setErrorMsg(err?.response?.data?.message || 'Failed to reject variance');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -600,8 +629,9 @@ export const PurchasingPage: React.FC = () => {
                   <th className="p-4">Vendor</th>
                   <th className="p-4">Invoice #</th>
                   <th className="p-4 text-right">Total Amount</th>
-                  <th className="p-4 text-center">QC Status</th>
+                  <th className="p-4 text-center">Status / QC</th>
                   <th className="p-4">Received By</th>
+                  <th className="p-4 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
@@ -610,21 +640,39 @@ export const PurchasingPage: React.FC = () => {
                     <td className="p-4 font-mono font-bold text-white text-sm">{grn.grnNumber}</td>
                     <td className="p-4 font-mono text-slate-300">{formatDateIN(grn.receiveDate)}</td>
                     <td className="p-4">
-                      <p className="font-bold text-white">{grn.warehouse.name}</p>
-                      <p className="text-[10px] text-slate-400">{grn.warehouse.code}</p>
+                      <p className="font-bold text-white">{grn.warehouse?.name}</p>
+                      <p className="text-[10px] text-slate-400">{grn.warehouse?.code}</p>
                     </td>
-                    <td className="p-4 text-slate-300">{grn.supplier.name}</td>
+                    <td className="p-4 text-slate-300">{grn.supplier?.name}</td>
                     <td className="p-4 font-mono text-slate-400">{grn.invoiceNumber || 'N/A'}</td>
                     <td className="p-4 text-right font-mono font-bold text-emerald-400 text-sm">
                       {formatINR(grn.totalAmount)}
                     </td>
                     <td className="p-4 text-center">
-                      <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-bold text-[10px]">
-                        {grn.status}
+                      <span
+                        className={`px-2.5 py-1 rounded-full font-bold text-[10px] ${
+                          grn.status === 'QC_PASSED'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : grn.status === 'REJECTED'
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        }`}
+                      >
+                        {grn.notes?.includes('PENDING_VARIANCE_APPROVAL')
+                          ? 'PENDING VARIANCE'
+                          : grn.status.replace('_', ' ')}
                       </span>
                     </td>
                     <td className="p-4 text-slate-400">
                       {grn.receivedBy ? `${grn.receivedBy.firstName} ${grn.receivedBy.lastName}` : 'System'}
+                    </td>
+                    <td className="p-4 text-center">
+                      <button
+                        onClick={() => setSelectedGRNDetails(grn)}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[11px]"
+                      >
+                        View Details
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -968,6 +1016,142 @@ export const PurchasingPage: React.FC = () => {
 
             <div className="flex justify-end pt-3 border-t border-slate-800">
               <Button variant="outline" size="sm" onClick={() => setSelectedPO(null)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL: VIEW GRN DETAILS & VARIANCE APPROVAL */}
+      {/* ------------------------------------------------------------- */}
+      {selectedGRNDetails && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-floating space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                  <span>Goods Receive Note: {selectedGRNDetails.grnNumber}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      selectedGRNDetails.status === 'QC_PASSED'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : selectedGRNDetails.status === 'REJECTED'
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    }`}
+                  >
+                    {selectedGRNDetails.notes?.includes('PENDING_VARIANCE_APPROVAL')
+                      ? 'PENDING VARIANCE APPROVAL'
+                      : selectedGRNDetails.status.replace('_', ' ')}
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  PO: {selectedGRNDetails.po?.poNumber || 'Direct GRN'} | Vendor: {selectedGRNDetails.supplier?.name} | Outlet: {selectedGRNDetails.branch?.name || selectedBranchId || 'Primary'}
+                </p>
+              </div>
+              <button onClick={() => setSelectedGRNDetails(null)}><X className="w-5 h-5 text-slate-400" /></button>
+            </div>
+
+            {/* Financial & Metadata Summary */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-800/40 p-4 rounded-2xl border border-slate-800">
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400">System Amount (PO Base)</p>
+                <p className="text-sm font-mono font-bold text-white">{formatINR(selectedGRNDetails.po?.totalAmount || selectedGRNDetails.totalAmount)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400">Invoice Amount</p>
+                <p className="text-sm font-mono font-bold text-emerald-400">{formatINR(selectedGRNDetails.totalAmount)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400">Invoice Number</p>
+                <p className="text-sm font-mono text-slate-200">{selectedGRNDetails.invoiceNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400">Warehouse</p>
+                <p className="text-sm text-slate-200">{selectedGRNDetails.warehouse?.name || 'Warehouse'}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400">Receive Date</p>
+                <p className="text-xs font-mono text-slate-300">{formatDateIN(selectedGRNDetails.receiveDate)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400">Received By</p>
+                <p className="text-xs text-slate-300">{selectedGRNDetails.receivedBy ? `${selectedGRNDetails.receivedBy.firstName} ${selectedGRNDetails.receivedBy.lastName}` : 'Authorized Receiver'}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-[10px] uppercase font-bold text-slate-400">Verification & Notes</p>
+                <p className="text-xs text-slate-300 italic">{selectedGRNDetails.notes || 'Normal stock verification completed'}</p>
+              </div>
+            </div>
+
+            {/* GRN Items Breakdown */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Received Line Items & QC</span>
+              <div className="overflow-x-auto border border-slate-800 rounded-2xl">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-800/80 text-slate-400 font-semibold border-b border-slate-800 text-[10px] uppercase tracking-wider">
+                    <tr>
+                      <th className="p-3">Item</th>
+                      <th className="p-3 text-right">Received</th>
+                      <th className="p-3 text-right">Accepted</th>
+                      <th className="p-3 text-right">Rejected</th>
+                      <th className="p-3 text-right">Unit Price</th>
+                      <th className="p-3 text-center">Batch / Expiry</th>
+                      <th className="p-3 text-center">QC Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 font-mono">
+                    {selectedGRNDetails.items?.map((item) => (
+                      <tr key={item.id}>
+                        <td className="p-3 font-sans text-white font-medium">{item.item?.name || 'Item'}</td>
+                        <td className="p-3 text-right text-slate-200">{Number(item.receivedQty)} {item.item?.unit?.symbol}</td>
+                        <td className="p-3 text-right text-emerald-400 font-bold">{Number(item.acceptedQty)} {item.item?.unit?.symbol}</td>
+                        <td className="p-3 text-right text-rose-400">{Number(item.rejectedQty || 0)} {item.item?.unit?.symbol}</td>
+                        <td className="p-3 text-right text-slate-200">{formatINR(item.unitPrice)}</td>
+                        <td className="p-3 text-center text-slate-400 text-[11px]">
+                          {item.batchNumber || 'N/A'} {item.expiryDate ? `(${formatDateIN(item.expiryDate)})` : ''}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              item.qcStatus === 'PASSED'
+                                ? 'bg-emerald-500/20 text-emerald-300'
+                                : 'bg-rose-500/20 text-rose-300'
+                            }`}
+                          >
+                            {item.qcStatus}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Actions for Variance Approval */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+              {selectedGRNDetails.status === 'RECEIVED' ? (
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleApproveVariance(selectedGRNDetails.id)}
+                  >
+                    Approve Variance & Confirm Stock
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => handleRejectVariance(selectedGRNDetails.id)}
+                  >
+                    Reject Variance
+                  </Button>
+                </div>
+              ) : (
+                <div />
+              )}
+              <Button variant="outline" size="sm" onClick={() => setSelectedGRNDetails(null)}>Close</Button>
             </div>
           </div>
         </div>

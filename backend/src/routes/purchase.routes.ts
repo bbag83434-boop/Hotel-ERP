@@ -42,5 +42,7 @@ router.get('/grn', PurchaseController.getGoodsReceiveNotes);
 router.get('/grn/:id', PurchaseController.getGoodsReceiveNoteById);
 router.post('/grn', validate(createGoodsReceiveSchema), PurchaseController.createGoodsReceiveNote);
 router.post('/grn/:id/confirm', PurchaseController.confirmGoodsReceiveNote);
+router.post('/grn/:id/approve-variance', PurchaseController.approveGoodsReceiveVariance);
+router.post('/grn/:id/reject-variance', PurchaseController.rejectGoodsReceiveVariance);
 
 export default router;

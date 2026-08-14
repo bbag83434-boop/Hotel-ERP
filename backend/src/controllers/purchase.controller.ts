@@ -299,6 +299,51 @@ export class PurchaseController {
     }
   }
 
+  public static async approveGoodsReceiveVariance(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN') || req.user?.role?.toUpperCase().includes('MANAGER');
+      const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
+      const grn = await PurchaseService.approveGoodsReceiveVariance(
+        companyId,
+        id,
+        req.user?.userId,
+        userBranchIds,
+        ipAddress,
+        userAgent
+      );
+      return sendSuccess(res, grn, 'Price variance approved & GRN confirmed successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async rejectGoodsReceiveVariance(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN') || req.user?.role?.toUpperCase().includes('MANAGER');
+      const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
+      const grn = await PurchaseService.rejectGoodsReceiveVariance(
+        companyId,
+        id,
+        req.body.reason || 'Excess price variance rejected by manager',
+        req.user?.userId,
+        userBranchIds,
+        ipAddress,
+        userAgent
+      );
+      return sendSuccess(res, grn, 'Price variance rejected. Excess amount was not finalized.');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   public static async confirmGoodsReceiveNote(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const companyId = await resolveCompanyId(req);

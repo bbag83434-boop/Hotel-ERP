@@ -722,6 +722,200 @@ async function runPart5Tests() {
       'TEST 27: 3-Way match flagged exact price match (PO Base: 5000, Invoice Base: 5000 -> AMOUNT_MATCHED)'
     );
 
+    // ----------------------------------------------------------------------------------
+    // TEST 28: Variance Approval Workflow (Blocked -> Pending Approval -> Approved)
+    // ----------------------------------------------------------------------------------
+    const poVarianceWorkflow = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 100, unitPrice: 100 }] // PO Base = 10,000
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    const balBeforeVariance = await prisma.stockBalance.findUnique({
+      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
+    });
+
+    const grnPendingApproval = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poVarianceWorkflow.id,
+      invoiceNumber: `INV-VAR-PENDING-${Date.now()}`,
+      invoiceAmount: 10500,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED', // Normal submit attempted
+      items: [
+        {
+          poItemId: poVarianceWorkflow.items[0].id,
+          itemId: item1.id,
+          receivedQty: 100,
+          acceptedQty: 100,
+          unitPrice: 105 // 5% price increase -> 10,500
+        }
+      ]
+    });
+
+    const balDuringPending = await prisma.stockBalance.findUnique({
+      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
+    });
+
+    assert(
+      grnPendingApproval.status === 'RECEIVED' &&
+        grnPendingApproval.notes?.includes('PENDING_VARIANCE_APPROVAL') === true &&
+        Number(balBeforeVariance?.quantity) === Number(balDuringPending?.quantity),
+      'TEST 28A: Unapproved excess invoice variance blocked from auto-confirming; stock balance unchanged in PENDING state'
+    );
+
+    const grnApproved = await PurchaseService.approveGoodsReceiveVariance(
+      company.id,
+      grnPendingApproval.id,
+      user.id,
+      [branchA.id]
+    );
+
+    const balAfterApproval = await prisma.stockBalance.findUnique({
+      where: { warehouseId_itemId: { warehouseId: warehouseA.id, itemId: item1.id } }
+    });
+
+    assert(
+      grnApproved.status === 'QC_PASSED' &&
+        Number(balAfterApproval?.quantity) === Number(balBeforeVariance?.quantity) + 100,
+      'TEST 28B: Authorized manager approval confirms GRN and increases stock by +100'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 29: Variance Rejection Workflow (Blocked -> Rejected -> Excess Not Finalized)
+    // ----------------------------------------------------------------------------------
+    const poVarianceReject = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 50, unitPrice: 100 }]
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    const grnToReject = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poVarianceReject.id,
+      invoiceNumber: `INV-VAR-REJ-${Date.now()}`,
+      invoiceAmount: 6000,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [
+        {
+          poItemId: poVarianceReject.items[0].id,
+          itemId: item1.id,
+          receivedQty: 50,
+          acceptedQty: 50,
+          unitPrice: 120 // 20% price increase
+        }
+      ]
+    });
+
+    const grnRejected = await PurchaseService.rejectGoodsReceiveVariance(
+      company.id,
+      grnToReject.id,
+      'Price exceeds agreed contractual rate',
+      user.id,
+      [branchA.id]
+    );
+
+    assert(
+      grnRejected.status === 'REJECTED' &&
+        grnRejected.notes?.includes('VARIANCE REJECTED: Price exceeds agreed contractual rate') === true,
+      'TEST 29: Rejected variance strictly marked REJECTED and excess amount not finalized'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 30: Multi-Stage Receiving (PO = 100 -> Receive 60 -> PARTIALLY_RECEIVED -> Receive 40 -> RECEIVED)
+    // ----------------------------------------------------------------------------------
+    const poMultiStage = await PurchaseService.createPurchaseOrder(
+      company.id,
+      branchA.id,
+      {
+        supplierId: supplier.id,
+        status: 'ISSUED',
+        items: [{ itemId: item1.id, orderedQty: 100, unitPrice: 50 }]
+      },
+      user.id,
+      [branchA.id]
+    );
+
+    // Stage 1: Receive 60 KG
+    await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poMultiStage.id,
+      invoiceNumber: `INV-STAGE1-${Date.now()}`,
+      invoiceAmount: 3000,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [
+        {
+          poItemId: poMultiStage.items[0].id,
+          itemId: item1.id,
+          receivedQty: 60,
+          acceptedQty: 60,
+          unitPrice: 50
+        }
+      ]
+    });
+
+    const poAfterStage1 = await PurchaseService.getPurchaseOrderById(company.id, poMultiStage.id);
+    assert(
+      poAfterStage1.status === 'PARTIALLY_RECEIVED' &&
+        Number(poAfterStage1.items[0].receivedQty) === 60 &&
+        poAfterStage1.items[0].outstandingQty === 40,
+      'TEST 30A: Multi-stage receiving Stage 1: Received 60/100 -> Status is PARTIALLY_RECEIVED (40 Outstanding)'
+    );
+
+    // Stage 2: Receive remaining 40 KG
+    await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      poId: poMultiStage.id,
+      invoiceNumber: `INV-STAGE2-${Date.now()}`,
+      invoiceAmount: 2000,
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [
+        {
+          poItemId: poMultiStage.items[0].id,
+          itemId: item1.id,
+          receivedQty: 40,
+          acceptedQty: 40,
+          unitPrice: 50
+        }
+      ]
+    });
+
+    const poAfterStage2 = await PurchaseService.getPurchaseOrderById(company.id, poMultiStage.id);
+    assert(
+      poAfterStage2.status === 'RECEIVED' &&
+        Number(poAfterStage2.items[0].receivedQty) === 100 &&
+        poAfterStage2.items[0].outstandingQty === 0 &&
+        poAfterStage2.metrics.isFullyReceived === true,
+      'TEST 30B: Multi-stage receiving Stage 2: Received remaining 40/40 -> Status is RECEIVED (Fully Received)'
+    );
+
     console.log('\n==================================================');
     console.log(`PART 5 TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);
     console.log('==================================================\n');

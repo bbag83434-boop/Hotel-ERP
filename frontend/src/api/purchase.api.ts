@@ -165,5 +165,13 @@ export const purchaseApi = {
   confirmGoodsReceiveNote: async (id: string): Promise<GoodsReceiveNote> => {
     const res = await apiClient.post(`/purchasing/grn/${id}/confirm`);
     return res.data.data;
+  },
+  approveGoodsReceiveVariance: async (id: string): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.post(`/purchasing/grn/${id}/approve-variance`);
+    return res.data.data;
+  },
+  rejectGoodsReceiveVariance: async (id: string, reason?: string): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.post(`/purchasing/grn/${id}/reject-variance`, { reason });
+    return res.data.data;
   }
 };
