@@ -9,7 +9,9 @@ import {
   AlertTriangle,
   FileText,
   RefreshCw,
-  X
+  X,
+  Camera,
+  Upload
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
@@ -84,6 +86,12 @@ export const PurchasingPage: React.FC = () => {
     poId: '',
     receiveDate: new Date().toISOString().split('T')[0],
     invoiceNumber: '',
+    invoiceDate: new Date().toISOString().split('T')[0],
+    invoiceAmount: 0,
+    taxAmount: 0,
+    freightAmount: 0,
+    allowPriceVariance: false,
+    invoiceAttachment: null as { fileName: string; fileType: string; fileBase64: string; fileSize: number } | null,
     notes: '',
     items: [{ itemId: '', receivedQty: 10, acceptedQty: 10, unitPrice: 0, batchNumber: `BAT-${Math.floor(1000 + Math.random() * 9000)}`, expiryDate: '' }]
   });
@@ -244,6 +252,36 @@ export const PurchasingPage: React.FC = () => {
     }
   };
 
+  const handleInvoiceFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      setErrorMsg(`Unsupported file type: "${file.type}". Please upload JPEG, PNG, WebP, or PDF.`);
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setErrorMsg('File size exceeds 10MB limit.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setGrnForm((prev) => ({
+        ...prev,
+        invoiceAttachment: {
+          fileName: file.name,
+          fileType: file.type,
+          fileBase64: base64,
+          fileSize: file.size
+        }
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleCreateGRN = async (e: React.FormEvent) => {
     e.preventDefault();
     const branchId = selectedBranchId || user?.branches[0]?.id;
@@ -263,6 +301,12 @@ export const PurchasingPage: React.FC = () => {
         poId: grnForm.poId || null,
         receiveDate: grnForm.receiveDate,
         invoiceNumber: grnForm.invoiceNumber,
+        invoiceDate: grnForm.invoiceDate,
+        invoiceAmount: grnForm.invoiceAmount,
+        taxAmount: grnForm.taxAmount,
+        freightAmount: grnForm.freightAmount,
+        allowPriceVariance: grnForm.allowPriceVariance,
+        invoiceAttachment: grnForm.invoiceAttachment || undefined,
         notes: grnForm.notes,
         items: validItems
       });
@@ -1283,6 +1327,76 @@ export const PurchasingPage: React.FC = () => {
                   onChange={(e) => setGrnForm({ ...grnForm, invoiceNumber: e.target.value })}
                   placeholder="e.g. INV-99021"
                 />
+              </div>
+
+              {/* Invoice Financial Details & Upload */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-800/40 p-3.5 rounded-2xl border border-slate-800">
+                <Input
+                  label="Invoice Date"
+                  type="date"
+                  value={grnForm.invoiceDate || grnForm.receiveDate}
+                  onChange={(e) => setGrnForm({ ...grnForm, invoiceDate: e.target.value })}
+                />
+                <Input
+                  label="Claimed Invoice Amount (₹)"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={grnForm.invoiceAmount || ''}
+                  onChange={(e) => setGrnForm({ ...grnForm, invoiceAmount: parseFloat(e.target.value) || 0 })}
+                  placeholder="e.g. 10500"
+                />
+                <Input
+                  label="Tax / GST (₹)"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={grnForm.taxAmount || ''}
+                  onChange={(e) => setGrnForm({ ...grnForm, taxAmount: parseFloat(e.target.value) || 0 })}
+                  placeholder="e.g. 1800"
+                />
+              </div>
+
+              {/* Invoice Upload: Camera & File picker */}
+              <div className="bg-slate-800/30 p-3.5 rounded-2xl border border-slate-800/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-slate-200">Supplier Invoice Document / Receipt Photo</p>
+                    <p className="text-[11px] text-slate-400">Attach photo via Camera, Gallery image (JPEG/PNG/WebP), or PDF</p>
+                  </div>
+                  {grnForm.invoiceAttachment && (
+                    <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                      ✓ Attached: {grnForm.invoiceAttachment.fileName} ({Math.round(grnForm.invoiceAttachment.fileSize / 1024)} KB)
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-3 pt-1">
+                  {/* Take Photo button for mobile camera */}
+                  <label className="cursor-pointer inline-flex items-center space-x-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors">
+                    <Camera className="w-4 h-4 text-brand-400" />
+                    <span>[ Take Photo ]</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={handleInvoiceFileUpload}
+                    />
+                  </label>
+
+                  {/* Upload Invoice File button */}
+                  <label className="cursor-pointer inline-flex items-center space-x-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors">
+                    <Upload className="w-4 h-4 text-emerald-400" />
+                    <span>[ Upload Invoice ]</span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      className="hidden"
+                      onChange={handleInvoiceFileUpload}
+                    />
+                  </label>
+                </div>
               </div>
 
               {/* Items */}

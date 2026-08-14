@@ -916,6 +916,108 @@ async function runPart5Tests() {
       'TEST 30B: Multi-stage receiving Stage 2: Received remaining 40/40 -> Status is RECEIVED (Fully Received)'
     );
 
+    // ----------------------------------------------------------------------------------
+    // TEST 31: Supplier Invoice Upload - PDF format & file integrity
+    // ----------------------------------------------------------------------------------
+    const dummyPdfContent = Buffer.from('%PDF-1.4\n%âãÏÓ\n1 0 obj\n<<\n/Type /Catalog\n>>\nendobj\ntrailer\n<<\n/Root 1 0 R\n>>\n%%EOF').toString('base64');
+    const invoicePdfNumber = `INV-PDF-${Date.now()}`;
+    const uploadPdfRes = await PurchaseService.uploadSupplierInvoice({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      supplierId: supplier.id,
+      poId: poMultiStage.id,
+      invoiceNumber: invoicePdfNumber,
+      invoiceDate: '2026-08-15',
+      invoiceAmount: 5000,
+      fileName: 'vendor_invoice_doc.pdf',
+      fileType: 'application/pdf',
+      fileBase64: dummyPdfContent,
+      actorId: user.id,
+      userBranchIds: [branchA.id]
+    });
+    assert(
+      uploadPdfRes.fileName === 'vendor_invoice_doc.pdf' &&
+        uploadPdfRes.fileType === 'application/pdf' &&
+        uploadPdfRes.storageRef.includes('uploads/invoices') &&
+        uploadPdfRes.invoiceNumber === invoicePdfNumber &&
+        uploadPdfRes.invoiceAmount === 5000,
+      'TEST 31: Supplier invoice PDF uploaded, validated magic bytes, and linked with storage reference'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 32: Supplier Invoice Upload - JPEG image photo & linkage
+    // ----------------------------------------------------------------------------------
+    const dummyJpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x60, 0x00, 0x60, 0x00, 0x00, 0xff, 0xd9]);
+    const invoiceJpgNumber = `INV-JPG-${Date.now()}`;
+    const uploadJpgRes = await PurchaseService.uploadSupplierInvoice({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      supplierId: supplier.id,
+      invoiceNumber: invoiceJpgNumber,
+      invoiceAmount: 2500,
+      fileName: 'camera_capture_receipt.jpg',
+      fileType: 'image/jpeg',
+      fileBase64: dummyJpegBuffer.toString('base64'),
+      actorId: user.id,
+      userBranchIds: [branchA.id]
+    });
+    assert(
+      uploadJpgRes.fileType === 'image/jpeg' &&
+        uploadJpgRes.storageRef.endsWith('.jpg') &&
+        uploadJpgRes.invoiceAmount === 2500,
+      'TEST 32: Supplier invoice JPEG photo upload validated and stored securely'
+    );
+
+    // ----------------------------------------------------------------------------------
+    // TEST 33: Unsupported file type and corrupted file rejection
+    // ----------------------------------------------------------------------------------
+    let corruptRejected = false;
+    try {
+      await PurchaseService.uploadSupplierInvoice({
+        companyId: company.id,
+        branchId: branchA.id,
+        warehouseId: warehouseA.id,
+        supplierId: supplier.id,
+        invoiceNumber: `INV-CORRUPT-${Date.now()}`,
+        invoiceAmount: 1000,
+        fileName: 'malicious_script.exe',
+        fileType: 'application/x-msdownload' as any,
+        fileBase64: Buffer.from('MZ...').toString('base64'),
+        actorId: user.id
+      });
+    } catch (e: any) {
+      corruptRejected = e.message.includes('Unsupported file type');
+    }
+    assert(corruptRejected, 'TEST 33: Unsupported file type strictly rejected without execution');
+
+    // ----------------------------------------------------------------------------------
+    // TEST 34: GRN creation with attached invoice metadata
+    // ----------------------------------------------------------------------------------
+    const grnWithAttachmentNo = `INV-ATTACH-${Date.now()}`;
+    const grnWithAttachment = await PurchaseService.createGoodsReceiveNote({
+      companyId: company.id,
+      branchId: branchA.id,
+      warehouseId: warehouseA.id,
+      supplierId: supplier.id,
+      invoiceNumber: grnWithAttachmentNo,
+      invoiceAmount: 1500,
+      invoiceAttachment: {
+        fileName: 'vendor_receipt.png',
+        fileType: 'image/png',
+        fileBase64: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]).toString('base64')
+      },
+      receiverId: user.id,
+      userBranchIds: [branchA.id],
+      status: 'QC_PASSED',
+      items: [{ itemId: item1.id, receivedQty: 30, acceptedQty: 30, unitPrice: 50 }]
+    });
+    assert(
+      grnWithAttachment.id !== undefined && grnWithAttachment.status === 'QC_PASSED',
+      'TEST 34: GRN created with validated supplier invoice attachment metadata & confirmed'
+    );
+
     console.log('\n==================================================');
     console.log(`PART 5 TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);
     console.log('==================================================\n');

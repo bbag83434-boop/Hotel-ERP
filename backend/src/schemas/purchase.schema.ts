@@ -114,6 +114,13 @@ export const createGoodsReceiveSchema = z.object({
     invoiceAmount: z.number().nonnegative().optional(),
     taxAmount: z.number().nonnegative().optional().default(0),
     freightAmount: z.number().nonnegative().optional().default(0),
+    allowPriceVariance: z.boolean().optional().default(false),
+    invoiceAttachment: z.object({
+      fileName: z.string(),
+      fileType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']),
+      fileBase64: z.string(),
+      fileSize: z.number().optional()
+    }).optional(),
     notes: z.string().optional(),
     status: z.enum(['RECEIVED', 'QC_PASSED']).optional().default('QC_PASSED'),
     items: z.array(
@@ -130,5 +137,20 @@ export const createGoodsReceiveSchema = z.object({
         qcNotes: z.string().optional()
       })
     ).min(1, 'At least one received item is required')
+  })
+});
+
+export const uploadInvoiceSchema = z.object({
+  body: z.object({
+    branchId: z.string().uuid('Branch is required'),
+    warehouseId: z.string().uuid('Warehouse is required'),
+    supplierId: z.string().uuid('Supplier is required'),
+    poId: z.string().uuid().optional().nullable(),
+    invoiceNumber: z.string().min(1, 'Invoice number is required'),
+    invoiceDate: z.string().optional(),
+    invoiceAmount: z.number().positive('Invoice amount must be positive'),
+    fileName: z.string().min(1, 'File name is required'),
+    fileType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']),
+    fileBase64: z.string().min(1, 'File content is required')
   })
 });

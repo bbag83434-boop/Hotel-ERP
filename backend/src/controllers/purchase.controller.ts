@@ -282,9 +282,12 @@ export class PurchaseController {
         poId: req.body.poId,
         receiveDate: req.body.receiveDate,
         invoiceNumber: req.body.invoiceNumber,
+        invoiceDate: req.body.invoiceDate,
         invoiceAmount: req.body.invoiceAmount,
         taxAmount: req.body.taxAmount,
         freightAmount: req.body.freightAmount,
+        allowPriceVariance: req.body.allowPriceVariance,
+        invoiceAttachment: req.body.invoiceAttachment,
         notes: req.body.notes,
         status: req.body.status,
         items: req.body.items,
@@ -294,6 +297,38 @@ export class PurchaseController {
         userAgent
       });
       return sendSuccess(res, grn, 'Goods Receive Note created & stock updated automatically', 201);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async uploadSupplierInvoice(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const ipAddress = getClientIp(req);
+      const userAgent = (req.headers['user-agent'] as string) || '';
+      const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+      const userBranchIds = isAdmin ? undefined : (req.user as any)?.branchIds;
+
+      const metadata = await PurchaseService.uploadSupplierInvoice({
+        companyId,
+        branchId: req.body.branchId,
+        warehouseId: req.body.warehouseId,
+        supplierId: req.body.supplierId,
+        poId: req.body.poId,
+        invoiceNumber: req.body.invoiceNumber,
+        invoiceDate: req.body.invoiceDate,
+        invoiceAmount: req.body.invoiceAmount,
+        fileName: req.body.fileName,
+        fileType: req.body.fileType,
+        fileBase64: req.body.fileBase64,
+        actorId: req.user?.userId,
+        userBranchIds,
+        ipAddress,
+        userAgent
+      });
+
+      return sendSuccess(res, metadata, 'Supplier invoice uploaded and linked successfully', 201);
     } catch (error) {
       next(error);
     }

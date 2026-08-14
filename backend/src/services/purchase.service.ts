@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { prisma } from '../config/database';
 import { AppError } from '../utils/response.utils';
 import { AuditService } from './audit.service';
@@ -6,6 +8,146 @@ import { ApprovalService } from './approval.service';
 import { Prisma, PRStatus, PRPriority, POStatus, GRNStatus, QCStatus, SupplierTxType } from '@prisma/client';
 
 export class PurchaseService {
+  // -------------------------------------------------------------
+  // INVOICE FILE STORAGE & VALIDATION
+  // -------------------------------------------------------------
+
+  public static validateAndSaveInvoiceFile(params: {
+    companyId: string;
+    fileName: string;
+    fileType: string;
+    fileBase64: string;
+  }) {
+    const { companyId, fileName, fileType, fileBase64 } = params;
+
+    // 1. Allowed MIME Types
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowedTypes.includes(fileType)) {
+      throw new AppError(`Unsupported file type: "${fileType}". Only JPEG, PNG, WebP, and PDF are allowed.`, 400);
+    }
+
+    // 2. Decode Base64 & validate size
+    let cleanBase64 = fileBase64;
+    if (cleanBase64.includes(';base64,')) {
+      cleanBase64 = cleanBase64.split(';base64,')[1];
+    }
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (buffer.length === 0) {
+      throw new AppError('Uploaded file is empty or corrupted', 400);
+    }
+    if (buffer.length > maxSize) {
+      throw new AppError('File size exceeds the 10MB limit', 400);
+    }
+
+    // 3. File Header & Magic Bytes Integrity Validation
+    const isPDF = fileType === 'application/pdf' && buffer.subarray(0, 4).toString() === '%PDF';
+    const isPNG = fileType === 'image/png' && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+    const isJPEG = fileType === 'image/jpeg' && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    const isWebP = fileType === 'image/webp' && buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP';
+
+    if (!isPDF && !isPNG && !isJPEG && !isWebP) {
+      throw new AppError('File integrity validation failed. File content does not match the claimed MIME type.', 400);
+    }
+
+    // 4. Safe Storage Reference on Disk
+    const safeBaseName = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const targetDir = path.join(process.cwd(), 'uploads', 'invoices', companyId);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    const storedFileName = `${Date.now()}_${safeBaseName}`;
+    const fullPath = path.join(targetDir, storedFileName);
+    fs.writeFileSync(fullPath, buffer, { mode: 0o644 });
+
+    const storageRef = `/uploads/invoices/${companyId}/${storedFileName}`;
+
+    return {
+      fileName: safeBaseName,
+      fileType,
+      fileSize: buffer.length,
+      uploadTime: new Date().toISOString(),
+      storageRef
+    };
+  }
+
+  public static async uploadSupplierInvoice(params: {
+    companyId: string;
+    branchId: string;
+    warehouseId: string;
+    supplierId: string;
+    poId?: string | null;
+    invoiceNumber: string;
+    invoiceDate?: string;
+    invoiceAmount: number;
+    fileName: string;
+    fileType: string;
+    fileBase64: string;
+    actorId?: string;
+    userBranchIds?: string[];
+    ipAddress?: string;
+    userAgent?: string;
+  }) {
+    const { companyId, branchId, warehouseId, supplierId, poId, invoiceNumber, invoiceDate, invoiceAmount, actorId, userBranchIds } = params;
+
+    // Check branch authorization
+    if (userBranchIds && userBranchIds.length > 0 && !userBranchIds.includes(branchId)) {
+      throw new AppError('Unauthorized: You do not have access to upload invoices for this branch', 403);
+    }
+
+    // Verify supplier & warehouse exist
+    const [supplier, wh] = await Promise.all([
+      prisma.supplier.findFirst({ where: { id: supplierId, companyId } }),
+      prisma.warehouse.findFirst({ where: { id: warehouseId, companyId } })
+    ]);
+    if (!supplier) throw new AppError('Supplier not found', 404);
+    if (!wh) throw new AppError('Warehouse not found', 404);
+
+    // Check for duplicate invoice
+    const cleanInvoiceNumber = invoiceNumber.trim();
+    const existing = await prisma.goodsReceiveNote.findFirst({
+      where: {
+        companyId,
+        supplierId,
+        invoiceNumber: { equals: cleanInvoiceNumber, mode: 'insensitive' }
+      }
+    });
+    if (existing) {
+      throw new AppError('Duplicate supplier invoice detected.', 400);
+    }
+
+    // Validate and save file securely
+    const fileMeta = PurchaseService.validateAndSaveInvoiceFile({
+      companyId,
+      fileName: params.fileName,
+      fileType: params.fileType,
+      fileBase64: params.fileBase64
+    });
+
+    const fullMetadata = {
+      ...fileMeta,
+      uploadedBy: actorId || 'Authorized User',
+      invoiceNumber: cleanInvoiceNumber,
+      invoiceDate: invoiceDate || new Date().toISOString().split('T')[0],
+      invoiceAmount,
+      supplier: { id: supplier.id, name: supplier.name, code: supplier.code },
+      outletId: branchId,
+      warehouseId,
+      poId: poId || null
+    };
+
+    await AuditService.log({
+      userId: actorId,
+      action: 'SUPPLIER_INVOICE_UPLOADED',
+      entity: 'SupplierInvoice',
+      entityId: cleanInvoiceNumber,
+      details: fullMetadata,
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent
+    });
+
+    return fullMetadata;
+  }
   // -------------------------------------------------------------
   // SUPPLIER MANAGEMENT & SUPPLIER LEDGER
   // -------------------------------------------------------------
@@ -887,10 +1029,17 @@ export class PurchaseService {
     poId?: string | null;
     receiveDate?: string;
     invoiceNumber?: string;
+    invoiceDate?: string;
     invoiceAmount?: number;
     taxAmount?: number;
     freightAmount?: number;
     allowPriceVariance?: boolean;
+    invoiceAttachment?: {
+      fileName: string;
+      fileType: string;
+      fileBase64: string;
+      fileSize?: number;
+    };
     notes?: string;
     status?: GRNStatus;
     items: Array<{

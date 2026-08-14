@@ -11,7 +11,8 @@ import {
   createPurchaseOrderSchema,
   updatePurchaseOrderSchema,
   updatePOStatusSchema,
-  createGoodsReceiveSchema
+  createGoodsReceiveSchema,
+  uploadInvoiceSchema
 } from '../schemas/purchase.schema';
 
 const router = Router();
@@ -23,6 +24,9 @@ router.get('/suppliers', PurchaseController.getSuppliers);
 router.post('/suppliers', validate(createSupplierSchema), PurchaseController.createSupplier);
 router.put('/suppliers/:id', validate(updateSupplierSchema), PurchaseController.updateSupplier);
 router.get('/suppliers/:id/ledger', PurchaseController.getSupplierLedger);
+
+// Supplier Invoice Upload & Metadata
+router.post('/invoices/upload', validate(uploadInvoiceSchema), PurchaseController.uploadSupplierInvoice);
 
 // Purchase Requests / Requisitions
 router.get('/requests', PurchaseController.getPurchaseRequests);

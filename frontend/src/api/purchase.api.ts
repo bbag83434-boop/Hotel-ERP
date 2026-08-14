@@ -141,9 +141,17 @@ export const purchaseApi = {
     poId?: string | null;
     receiveDate?: string;
     invoiceNumber?: string;
+    invoiceDate?: string;
     invoiceAmount?: number;
     taxAmount?: number;
     freightAmount?: number;
+    allowPriceVariance?: boolean;
+    invoiceAttachment?: {
+      fileName: string;
+      fileType: string;
+      fileBase64: string;
+      fileSize?: number;
+    };
     notes?: string;
     status?: string;
     items: Array<{
@@ -172,6 +180,21 @@ export const purchaseApi = {
   },
   rejectGoodsReceiveVariance: async (id: string, reason?: string): Promise<GoodsReceiveNote> => {
     const res = await apiClient.post(`/purchasing/grn/${id}/reject-variance`, { reason });
+    return res.data.data;
+  },
+  uploadSupplierInvoice: async (data: {
+    branchId: string;
+    warehouseId: string;
+    supplierId: string;
+    poId?: string | null;
+    invoiceNumber: string;
+    invoiceDate?: string;
+    invoiceAmount: number;
+    fileName: string;
+    fileType: string;
+    fileBase64: string;
+  }) => {
+    const res = await apiClient.post('/purchasing/invoices/upload', data);
     return res.data.data;
   }
 };
