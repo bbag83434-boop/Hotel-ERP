@@ -32,6 +32,17 @@ export default {
           cardDark: '#1e293b',
           mutedLight: '#f8fafc',
           mutedDark: '#334155'
+        },
+        apex: {
+          bg: '#0c0c0e',
+          gold: '#d4a437',
+          card: '#17171b',
+          text: '#ffffff',
+          border: 'rgba(255,255,255,0.08)',
+          danger: '#e5544d',
+          warning: '#e5a33d',
+          success: '#3fbf6f',
+          info: '#4d9de5'
         }
       },
       fontFamily: {

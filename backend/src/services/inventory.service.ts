@@ -698,6 +698,359 @@ export class InventoryService {
   }
 
   // -------------------------------------------------------------
+  // MULTI-STAGE INTER-OUTLET TRANSFER (PART 17)
+  // Request -> Approve/Pick -> Dispatch (In Transit) -> Receive -> Reconcile
+  // -------------------------------------------------------------
+
+  public static async requestStockTransfer(params: {
+    companyId: string;
+    fromWarehouseId: string;
+    toWarehouseId: string;
+    items: Array<{ itemId: string; quantity: number; notes?: string }>;
+    notes?: string;
+    actorId?: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }) {
+    const { companyId, fromWarehouseId, toWarehouseId, items, notes, actorId, ipAddress, userAgent } = params;
+
+    if (fromWarehouseId === toWarehouseId) {
+      throw new AppError('Source and destination warehouses cannot be the same', 400);
+    }
+    if (!items || items.length === 0) {
+      throw new AppError('At least one item must be included in the transfer request', 400);
+    }
+
+    const [fromWh, toWh] = await Promise.all([
+      prisma.warehouse.findFirst({ where: { id: fromWarehouseId, companyId } }),
+      prisma.warehouse.findFirst({ where: { id: toWarehouseId, companyId } })
+    ]);
+
+    if (!fromWh || !toWh) throw new AppError('Invalid source or destination warehouse', 404);
+
+    return prisma.$transaction(async (tx) => {
+      const transferCount = await tx.stockTransfer.count({ where: { companyId } });
+      const transferNumber = `TRF-REQ-${new Date().getFullYear()}-${String(transferCount + 1).padStart(5, '0')}`;
+
+      const transfer = await tx.stockTransfer.create({
+        data: {
+          companyId,
+          fromWarehouseId,
+          toWarehouseId,
+          transferNumber,
+          status: 'PENDING',
+          notes: notes ? `[STAGE:REQUESTED] ${notes}` : '[STAGE:REQUESTED]',
+          createdById: actorId,
+          items: {
+            create: items.map((it) => ({
+              itemId: it.itemId,
+              quantity: new Prisma.Decimal(it.quantity),
+              notes: it.notes
+            }))
+          }
+        },
+        include: {
+          items: { include: { item: true } },
+          fromWarehouse: true,
+          toWarehouse: true
+        }
+      });
+
+      await AuditService.log({
+        userId: actorId,
+        action: 'STOCK_TRANSFER_REQUESTED',
+        entity: 'StockTransfer',
+        entityId: transfer.id,
+        details: { transferNumber, from: fromWh.name, to: toWh.name, items: items.length },
+        ipAddress,
+        userAgent
+      });
+
+      return transfer;
+    }, { maxWait: 10000, timeout: 30000 });
+  }
+
+  public static async dispatchStockTransfer(params: {
+    companyId: string;
+    transferId: string;
+    actorId?: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }) {
+    const { companyId, transferId, actorId, ipAddress, userAgent } = params;
+
+    const transfer = await prisma.stockTransfer.findFirst({
+      where: { id: transferId, companyId },
+      include: {
+        items: { include: { item: true } },
+        fromWarehouse: true,
+        toWarehouse: true
+      }
+    });
+
+    if (!transfer) throw new AppError('Stock transfer not found', 404);
+    if (transfer.status !== 'PENDING') {
+      throw new AppError(`Cannot dispatch transfer with status "${transfer.status}"`, 400);
+    }
+
+    return prisma.$transaction(async (tx) => {
+      // 1. Verify and deduct stock from source warehouse
+      for (const item of transfer.items) {
+        const qty = item.quantity;
+        const currentBalance = await tx.stockBalance.findUnique({
+          where: {
+            warehouseId_itemId: { warehouseId: transfer.fromWarehouseId, itemId: item.itemId }
+          }
+        });
+
+        if (!currentBalance || currentBalance.quantity.lessThan(qty)) {
+          const available = currentBalance ? currentBalance.quantity.toString() : '0';
+          throw new AppError(
+            `Insufficient stock for "${item.item.name}" in ${transfer.fromWarehouse.name}. Available: ${available}, Required for transfer: ${qty}`,
+            400
+          );
+        }
+
+        // Deduct from source warehouse
+        const updatedFromBal = await tx.stockBalance.update({
+          where: { id: currentBalance.id },
+          data: { quantity: { decrement: qty } }
+        });
+
+        // Record TRANSFER_OUT in StockLedger
+        await tx.stockLedger.create({
+          data: {
+            warehouseId: transfer.fromWarehouseId,
+            itemId: item.itemId,
+            movementType: 'TRANSFER_OUT',
+            changeQty: qty.negated(),
+            balanceQty: updatedFromBal.quantity,
+            unitCost: item.item.costPrice,
+            totalCost: qty.times(item.item.costPrice),
+            referenceType: 'TRANSFER_DISPATCH',
+            referenceId: transfer.id,
+            notes: `Dispatched in-transit to ${transfer.toWarehouse.name} (${transfer.transferNumber})`,
+            createdById: actorId
+          }
+        });
+      }
+
+      // Update transfer status to reflect in-transit dispatch
+      const updatedTransfer = await tx.stockTransfer.update({
+        where: { id: transferId },
+        data: {
+          notes: transfer.notes ? `${transfer.notes} | [STAGE:IN_TRANSIT]` : '[STAGE:IN_TRANSIT]'
+        },
+        include: { items: { include: { item: true } }, fromWarehouse: true, toWarehouse: true }
+      });
+
+      await AuditService.log({
+        userId: actorId,
+        action: 'STOCK_TRANSFER_DISPATCHED',
+        entity: 'StockTransfer',
+        entityId: transfer.id,
+        details: { transferNumber: transfer.transferNumber, stage: 'IN_TRANSIT' },
+        ipAddress,
+        userAgent
+      });
+
+      return updatedTransfer;
+    }, { maxWait: 10000, timeout: 30000 });
+  }
+
+  public static async receiveAndReconcileTransfer(params: {
+    companyId: string;
+    transferId: string;
+    receivedItems: Array<{
+      itemId: string;
+      acceptedQty: number;
+      transitLossQty?: number;
+      batchNumber?: string;
+      notes?: string;
+    }>;
+    notes?: string;
+    actorId?: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }) {
+    const { companyId, transferId, receivedItems, notes, actorId, ipAddress, userAgent } = params;
+
+    const transfer = await prisma.stockTransfer.findFirst({
+      where: { id: transferId, companyId },
+      include: {
+        items: { include: { item: true } },
+        fromWarehouse: true,
+        toWarehouse: { include: { branch: true } }
+      }
+    });
+
+    if (!transfer) throw new AppError('Stock transfer not found', 404);
+    if (transfer.status === 'COMPLETED' || transfer.status === 'CANCELLED') {
+      throw new AppError(`Cannot receive transfer with status "${transfer.status}"`, 400);
+    }
+
+    return prisma.$transaction(async (tx) => {
+      let totalTransitLossValue = new Prisma.Decimal(0);
+
+      for (const recItem of receivedItems) {
+        const accepted = new Prisma.Decimal(recItem.acceptedQty);
+        const transitLoss = new Prisma.Decimal(recItem.transitLossQty || 0);
+
+        const item = await tx.item.findFirst({ where: { id: recItem.itemId, companyId } });
+        if (!item) throw new AppError(`Item not found: ${recItem.itemId}`, 404);
+
+        // 1. Increment Destination Warehouse StockBalance for accepted quantity
+        const toBalance = await tx.stockBalance.upsert({
+          where: {
+            warehouseId_itemId: { warehouseId: transfer.toWarehouseId, itemId: recItem.itemId }
+          },
+          update: { quantity: { increment: accepted } },
+          create: {
+            warehouseId: transfer.toWarehouseId,
+            itemId: recItem.itemId,
+            quantity: accepted
+          }
+        });
+
+        // 2. Record TRANSFER_IN in StockLedger
+        await tx.stockLedger.create({
+          data: {
+            warehouseId: transfer.toWarehouseId,
+            itemId: recItem.itemId,
+            batchNumber: recItem.batchNumber,
+            movementType: 'TRANSFER_IN',
+            changeQty: accepted,
+            balanceQty: toBalance.quantity,
+            unitCost: item.costPrice,
+            totalCost: accepted.times(item.costPrice),
+            referenceType: 'TRANSFER_RECEIVE',
+            referenceId: transfer.id,
+            notes: `Received from ${transfer.fromWarehouse.name} (${transfer.transferNumber})`,
+            createdById: actorId
+          }
+        });
+
+        // 3. If transit loss occurred, record shrinkage adjustment in ledger
+        if (transitLoss.greaterThan(0)) {
+          const lossValue = transitLoss.times(item.costPrice);
+          totalTransitLossValue = totalTransitLossValue.plus(lossValue);
+
+          await tx.stockLedger.create({
+            data: {
+              warehouseId: transfer.toWarehouseId,
+              itemId: recItem.itemId,
+              batchNumber: recItem.batchNumber,
+              movementType: 'ADJUSTMENT',
+              changeQty: transitLoss.negated(),
+              balanceQty: toBalance.quantity,
+              unitCost: item.costPrice,
+              totalCost: lossValue,
+              referenceType: 'TRANSIT_LOSS',
+              referenceId: transfer.id,
+              notes: `Transit Damage Loss on ${transfer.transferNumber}: ${recItem.notes || 'Damaged during transit'}`,
+              createdById: actorId
+            }
+          });
+        }
+      }
+
+      // 4. Post Balanced General Ledger Journal for Transit Loss if any
+      if (totalTransitLossValue.greaterThan(0)) {
+        try {
+          const [transitLossAccount, inventoryAccount] = await Promise.all([
+            tx.chartOfAccount.findFirst({ where: { companyId, code: '5040' } }) ||
+              tx.chartOfAccount.findFirst({ where: { companyId, code: '5030' } }),
+            tx.chartOfAccount.findFirst({ where: { companyId, code: '1050' } }) ||
+              tx.chartOfAccount.findFirst({ where: { companyId, code: '1010' } })
+          ]);
+
+          if (transitLossAccount && inventoryAccount) {
+            const count = await tx.journalEntry.count({ where: { companyId } });
+            const entryNumber = `JE-TRF-LOSS-${new Date().getFullYear()}-${String(count + 1).padStart(6, '0')}`;
+
+            const je = await tx.journalEntry.create({
+              data: {
+                companyId,
+                branchId: transfer.toWarehouse.branchId || transfer.fromWarehouse.branchId || '',
+                entryNumber,
+                referenceType: 'STOCK_TRANSIT_LOSS',
+                referenceId: transfer.id,
+                narration: `Transit loss during inter-outlet transfer ${transfer.transferNumber}`,
+                status: 'POSTED',
+                totalDebit: totalTransitLossValue,
+                totalCredit: totalTransitLossValue,
+                createdById: actorId
+              }
+            });
+
+            await tx.journalEntryLine.createMany({
+              data: [
+                {
+                  journalEntryId: je.id,
+                  accountId: transitLossAccount.id,
+                  debit: totalTransitLossValue,
+                  credit: new Prisma.Decimal(0),
+                  narration: `Transit Loss on ${transfer.transferNumber}`
+                },
+                {
+                  journalEntryId: je.id,
+                  accountId: inventoryAccount.id,
+                  debit: new Prisma.Decimal(0),
+                  credit: totalTransitLossValue,
+                  narration: `Inventory write-down for ${transfer.transferNumber}`
+                }
+              ]
+            });
+
+            await tx.chartOfAccount.update({
+              where: { id: transitLossAccount.id },
+              data: { balance: { increment: totalTransitLossValue } }
+            });
+            await tx.chartOfAccount.update({
+              where: { id: inventoryAccount.id },
+              data: { balance: { decrement: totalTransitLossValue } }
+            });
+          }
+        } catch (glErr) {
+          console.warn('Transfer loss GL journal notice:', glErr);
+        }
+      }
+
+      // 5. Update Transfer Status to COMPLETED
+      const updatedTransfer = await tx.stockTransfer.update({
+        where: { id: transferId },
+        data: {
+          status: 'COMPLETED',
+          notes: transfer.notes
+            ? `${transfer.notes} | [STAGE:RECONCILED_AND_RECEIVED] ${notes || ''}`
+            : `[STAGE:RECONCILED_AND_RECEIVED] ${notes || ''}`
+        },
+        include: { items: true, fromWarehouse: true, toWarehouse: true }
+      });
+
+      await AuditService.log({
+        userId: actorId,
+        action: 'STOCK_TRANSFER_RECONCILED_AND_RECEIVED',
+        entity: 'StockTransfer',
+        entityId: transfer.id,
+        details: {
+          transferNumber: transfer.transferNumber,
+          totalTransitLossValue: totalTransitLossValue.toString(),
+          status: 'COMPLETED'
+        },
+        ipAddress,
+        userAgent
+      });
+
+      return {
+        transfer: updatedTransfer,
+        totalTransitLossValue,
+        status: 'COMPLETED'
+      };
+    }, { maxWait: 10000, timeout: 30000 });
+  }
+
+  // -------------------------------------------------------------
   // STOCK ADJUSTMENT (OPENING BALANCE OR PHYSICAL RECONCILIATION)
   // -------------------------------------------------------------
 

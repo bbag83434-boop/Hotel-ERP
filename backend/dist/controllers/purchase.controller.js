@@ -170,8 +170,41 @@ class PurchaseController {
             const companyId = await resolveCompanyId(req);
             const ipAddress = getClientIp(req);
             const userAgent = req.headers['user-agent'] || '';
-            const po = await purchase_service_1.PurchaseService.createPurchaseOrder(companyId, req.body.branchId, req.body, req.user?.userId, ipAddress, userAgent);
+            const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+            const userBranchIds = isAdmin ? undefined : req.user?.branchIds;
+            const idempotencyKey = req.body.idempotencyKey || req.headers['x-idempotency-key'];
+            const po = await purchase_service_1.PurchaseService.createPurchaseOrder(companyId, req.body.branchId, { ...req.body, idempotencyKey }, req.user?.userId, userBranchIds, ipAddress, userAgent);
             return (0, response_utils_1.sendSuccess)(res, po, 'Purchase order created successfully', 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async updatePurchaseOrder(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const ipAddress = getClientIp(req);
+            const userAgent = req.headers['user-agent'] || '';
+            const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+            const userBranchIds = isAdmin ? undefined : req.user?.branchIds;
+            const po = await purchase_service_1.PurchaseService.updatePurchaseOrder(companyId, id, req.body, req.user?.userId, userBranchIds, ipAddress, userAgent);
+            return (0, response_utils_1.sendSuccess)(res, po, 'Draft Purchase Order updated successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async updatePurchaseOrderStatus(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const ipAddress = getClientIp(req);
+            const userAgent = req.headers['user-agent'] || '';
+            const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+            const userBranchIds = isAdmin ? undefined : req.user?.branchIds;
+            const po = await purchase_service_1.PurchaseService.updatePurchaseOrderStatus(companyId, id, req.body.status, req.body.reason, req.user?.userId, userBranchIds, ipAddress, userAgent);
+            return (0, response_utils_1.sendSuccess)(res, po, `Purchase order status updated to ${req.body.status}`);
         }
         catch (error) {
             next(error);
@@ -183,6 +216,9 @@ class PurchaseController {
             const companyId = await resolveCompanyId(req);
             const ipAddress = getClientIp(req);
             const userAgent = req.headers['user-agent'] || '';
+            const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+            const userBranchIds = isAdmin ? undefined : req.user?.branchIds;
+            const idempotencyKey = req.body.idempotencyKey || req.headers['x-idempotency-key'];
             const grn = await purchase_service_1.PurchaseService.createGoodsReceiveNote({
                 companyId,
                 branchId: req.body.branchId,
@@ -191,9 +227,18 @@ class PurchaseController {
                 poId: req.body.poId,
                 receiveDate: req.body.receiveDate,
                 invoiceNumber: req.body.invoiceNumber,
+                invoiceDate: req.body.invoiceDate,
+                invoiceAmount: req.body.invoiceAmount,
+                taxAmount: req.body.taxAmount,
+                freightAmount: req.body.freightAmount,
+                allowPriceVariance: req.body.allowPriceVariance,
+                idempotencyKey,
+                invoiceAttachment: req.body.invoiceAttachment,
                 notes: req.body.notes,
+                status: req.body.status,
                 items: req.body.items,
                 receiverId: req.user?.userId,
+                userBranchIds,
                 ipAddress,
                 userAgent
             });
@@ -203,14 +248,101 @@ class PurchaseController {
             next(error);
         }
     }
+    static async uploadSupplierInvoice(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const ipAddress = getClientIp(req);
+            const userAgent = req.headers['user-agent'] || '';
+            const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+            const userBranchIds = isAdmin ? undefined : req.user?.branchIds;
+            const metadata = await purchase_service_1.PurchaseService.uploadSupplierInvoice({
+                companyId,
+                branchId: req.body.branchId,
+                warehouseId: req.body.warehouseId,
+                supplierId: req.body.supplierId,
+                poId: req.body.poId,
+                invoiceNumber: req.body.invoiceNumber,
+                invoiceDate: req.body.invoiceDate,
+                invoiceAmount: req.body.invoiceAmount,
+                fileName: req.body.fileName,
+                fileType: req.body.fileType,
+                fileBase64: req.body.fileBase64,
+                actorId: req.user?.userId,
+                userBranchIds,
+                ipAddress,
+                userAgent
+            });
+            return (0, response_utils_1.sendSuccess)(res, metadata, 'Supplier invoice uploaded and linked successfully', 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async approveGoodsReceiveVariance(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const ipAddress = getClientIp(req);
+            const userAgent = req.headers['user-agent'] || '';
+            const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN') || req.user?.role?.toUpperCase().includes('MANAGER');
+            const userBranchIds = isAdmin ? undefined : req.user?.branchIds;
+            const grn = await purchase_service_1.PurchaseService.approveGoodsReceiveVariance(companyId, id, req.user?.userId, userBranchIds, ipAddress, userAgent);
+            return (0, response_utils_1.sendSuccess)(res, grn, 'Price variance approved & GRN confirmed successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async rejectGoodsReceiveVariance(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const ipAddress = getClientIp(req);
+            const userAgent = req.headers['user-agent'] || '';
+            const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN') || req.user?.role?.toUpperCase().includes('MANAGER');
+            const userBranchIds = isAdmin ? undefined : req.user?.branchIds;
+            const grn = await purchase_service_1.PurchaseService.rejectGoodsReceiveVariance(companyId, id, req.body.reason || 'Excess price variance rejected by manager', req.user?.userId, userBranchIds, ipAddress, userAgent);
+            return (0, response_utils_1.sendSuccess)(res, grn, 'Price variance rejected. Excess amount was not finalized.');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async confirmGoodsReceiveNote(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const ipAddress = getClientIp(req);
+            const userAgent = req.headers['user-agent'] || '';
+            const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const isAdmin = req.user?.role?.toUpperCase().includes('ADMIN');
+            const userBranchIds = isAdmin ? undefined : req.user?.branchIds;
+            const grn = await purchase_service_1.PurchaseService.confirmGoodsReceiveNote(companyId, id, req.user?.userId, userBranchIds, ipAddress, userAgent);
+            return (0, response_utils_1.sendSuccess)(res, grn, 'Goods Receive Note confirmed & warehouse stock increased successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async getGoodsReceiveNoteById(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+            const grn = await purchase_service_1.PurchaseService.getGoodsReceiveNoteById(companyId, id);
+            return (0, response_utils_1.sendSuccess)(res, grn, 'Goods receive note details');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
     static async getGoodsReceiveNotes(req, res, next) {
         try {
             const companyId = await resolveCompanyId(req);
-            const { branchId, warehouseId, supplierId, page, limit } = req.query;
+            const { branchId, warehouseId, supplierId, poId, page, limit } = req.query;
             const result = await purchase_service_1.PurchaseService.getGoodsReceiveNotes(companyId, {
                 branchId: branchId,
                 warehouseId: warehouseId,
                 supplierId: supplierId,
+                poId: poId,
                 page: page ? parseInt(page, 10) : 1,
                 limit: limit ? parseInt(limit, 10) : 20
             });

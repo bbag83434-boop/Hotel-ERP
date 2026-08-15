@@ -45,12 +45,12 @@ const NotFoundPage = lazy(() =>
 import { RenderServerWakeupScreen } from './components/common/RenderServerWakeupScreen';
 
 const RouteLoadingFallback: React.FC = () => (
-  <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-3">
-    <div className="w-9 h-9 border-3 border-amber-500/80 border-t-transparent rounded-full animate-spin shadow-lg shadow-amber-900/20" />
+  <div className="min-h-screen bg-[#0c0c0e] flex flex-col items-center justify-center space-y-3 select-none">
+    <div className="w-9 h-9 border-2 border-[#d4a437] border-t-transparent rounded-full animate-spin shadow-lg shadow-[#d4a437]/20" />
     <div className="text-center space-y-1">
-      <p className="text-xs font-bold uppercase tracking-widest text-amber-400 font-mono">CHEF BISU</p>
-      <p className="text-sm font-semibold text-slate-200">Hotel Management</p>
-      <p className="text-[11px] text-slate-500">Hospitality Management System • Loading...</p>
+      <p className="text-xs font-bold uppercase tracking-widest text-[#d4a437] font-mono">GRAND HERITAGE</p>
+      <p className="text-sm font-semibold text-white">APEX Enterprise ERP</p>
+      <p className="text-[11px] text-neutral-500">Loading module workspace...</p>
     </div>
   </div>
 );

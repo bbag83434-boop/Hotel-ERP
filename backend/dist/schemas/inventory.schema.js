@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.adjustStockSchema = exports.transferStockSchema = exports.createWarehouseSchema = exports.updateItemSchema = exports.createItemSchema = exports.createUnitSchema = exports.createCategorySchema = void 0;
+exports.receiveTransferSchema = exports.dispatchTransferSchema = exports.rejectRequisitionSchema = exports.approveRequisitionSchema = exports.submitRequisitionSchema = exports.createRequisitionSchema = exports.adjustStockSchema = exports.transferStockSchema = exports.createWarehouseSchema = exports.updateItemSchema = exports.createItemSchema = exports.createUnitSchema = exports.createCategorySchema = void 0;
 const zod_1 = require("zod");
 exports.createCategorySchema = zod_1.z.object({
     body: zod_1.z.object({
@@ -75,4 +75,53 @@ exports.adjustStockSchema = zod_1.z.object({
         newQuantity: zod_1.z.number().nonnegative('New quantity must be 0 or greater'),
         reason: zod_1.z.string().min(1, 'Reason for stock adjustment is required')
     })
+});
+exports.createRequisitionSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        fromWarehouseId: zod_1.z.string().uuid('Source / issuing warehouse is required'),
+        toWarehouseId: zod_1.z.string().uuid('Destination / requesting warehouse is required'),
+        departmentId: zod_1.z.string().uuid().optional().nullable(),
+        section: zod_1.z.string().optional(),
+        priority: zod_1.z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).default('MEDIUM'),
+        notes: zod_1.z.string().optional(),
+        submitImmediately: zod_1.z.boolean().optional().default(false),
+        items: zod_1.z.array(zod_1.z.object({
+            itemId: zod_1.z.string().uuid('Item ID is required'),
+            requestedQty: zod_1.z.number().positive('Requested quantity must be greater than 0'),
+            notes: zod_1.z.string().optional()
+        })).min(1, 'At least one item must be included in requisition')
+    })
+});
+exports.submitRequisitionSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        notes: zod_1.z.string().optional()
+    }).optional()
+});
+exports.approveRequisitionSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        comment: zod_1.z.string().optional()
+    }).optional()
+});
+exports.rejectRequisitionSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        reason: zod_1.z.string().min(1, 'Rejection reason is required')
+    })
+});
+exports.dispatchTransferSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        notes: zod_1.z.string().optional(),
+        items: zod_1.z.array(zod_1.z.object({
+            itemId: zod_1.z.string().uuid('Item ID is required'),
+            dispatchQty: zod_1.z.number().positive('Dispatch quantity must be greater than 0')
+        })).optional()
+    }).optional()
+});
+exports.receiveTransferSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        notes: zod_1.z.string().optional(),
+        items: zod_1.z.array(zod_1.z.object({
+            itemId: zod_1.z.string().uuid('Item ID is required'),
+            receivedQty: zod_1.z.number().positive('Received quantity must be greater than 0')
+        })).optional()
+    }).optional()
 });

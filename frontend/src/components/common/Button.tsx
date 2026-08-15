@@ -26,11 +26,11 @@ export const Button: React.FC<ButtonProps> = ({
     'inline-flex items-center justify-center font-medium rounded-xl transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98] select-none';
 
   const variants = {
-    primary: 'bg-brand-600 hover:bg-brand-500 text-white shadow-md shadow-brand-600/20 focus:ring-brand-500 focus:ring-offset-slate-900',
-    secondary: 'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 focus:ring-slate-500 focus:ring-offset-slate-900',
-    outline: 'border border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white focus:ring-slate-500 focus:ring-offset-slate-900',
-    danger: 'bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20 focus:ring-rose-500 focus:ring-offset-slate-900',
-    ghost: 'text-slate-400 hover:text-white hover:bg-slate-800/60 focus:ring-slate-500 focus:ring-offset-slate-900'
+    primary: 'bg-[#d4a437] hover:bg-[#b88c2c] text-black font-semibold shadow-md shadow-[#d4a437]/15 focus:ring-[#d4a437] focus:ring-offset-[#0c0c0e]',
+    secondary: 'bg-[#17171b] hover:bg-[#222228] text-white border border-white/[0.08] focus:ring-neutral-500 focus:ring-offset-[#0c0c0e]',
+    outline: 'border border-white/[0.12] text-neutral-300 hover:bg-white/[0.05] hover:text-white focus:ring-neutral-500 focus:ring-offset-[#0c0c0e]',
+    danger: 'bg-[#e5544d] hover:bg-[#c93e38] text-white shadow-md shadow-[#e5544d]/20 focus:ring-[#e5544d] focus:ring-offset-[#0c0c0e]',
+    ghost: 'text-neutral-400 hover:text-white hover:bg-white/[0.06] focus:ring-neutral-500 focus:ring-offset-[#0c0c0e]'
   };
 
   const sizes = {

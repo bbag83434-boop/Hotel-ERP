@@ -14,13 +14,20 @@ export interface AuditLogOptions {
 export class AuditService {
   public static async log(options: AuditLogOptions) {
     try {
+      const isUuid = options.userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.userId);
+      const validUserId = isUuid ? options.userId : null;
+      const details = {
+        ...(options.details || {}),
+        ...(!isUuid && options.userId ? { actor: options.userId } : {})
+      };
+
       const auditLog = await prisma.auditLog.create({
         data: {
-          userId: options.userId || null,
+          userId: validUserId,
           action: options.action,
           entity: options.entity,
           entityId: options.entityId || null,
-          details: options.details ? (options.details as any) : undefined,
+          details: Object.keys(details).length > 0 ? (details as any) : undefined,
           ipAddress: options.ipAddress || null,
           userAgent: options.userAgent || null
         }

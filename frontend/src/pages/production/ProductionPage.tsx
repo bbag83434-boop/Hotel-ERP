@@ -235,32 +235,37 @@ export const ProductionPage: React.FC = () => {
   const rawMaterials = items.filter((i) => i.type === 'RAW_MATERIAL' || i.type === 'SEMI_FINISHED');
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 select-none">
       {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center space-x-3">
-          <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-2xl">
-            <ChefHat className="w-6 h-6" />
+      <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl p-5 sm:p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#d4a437] to-[#996f1b] flex items-center justify-center text-black shadow-lg shadow-[#d4a437]/20 border border-[#d4a437]/40">
+            <ChefHat className="w-6 h-6 text-black" />
           </div>
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              Kitchen Production & Recipe Management
-            </h1>
-            <p className="text-xs text-slate-400">
-              Bill of Materials (BOM), automated ingredient consumption, yield/wastage tracking & Food Cost calculation
+            <div className="flex items-center space-x-2.5">
+              <h1 className="text-lg sm:text-xl font-bold text-white tracking-wide uppercase">
+                Culinary Recipes & Central Kitchen
+              </h1>
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-[#d4a437]/15 text-[#d4a437] font-semibold border border-[#d4a437]/30 tracking-wider">
+                Production Engine
+              </span>
+            </div>
+            <p className="text-xs text-neutral-400 mt-0.5">
+              Multi-tier Bill of Materials (BOM), automated ingredient consumption, yield/wastage tracking & Food Cost calculation
             </p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2.5">
           {activeTab === 'recipes' && (
             <Button variant="primary" size="md" leftIcon={<Plus className="w-4 h-4" />} onClick={handleOpenCreateRecipe}>
-              New Recipe (BOM)
+              Create Recipe (BOM)
             </Button>
           )}
           {activeTab !== 'execute' && (
             <Button variant="secondary" size="md" leftIcon={<Flame className="w-4 h-4" />} onClick={() => setActiveTab('execute')}>
-              Produce Batch
+              Cook Batch
             </Button>
           )}
         </div>
@@ -268,30 +273,30 @@ export const ProductionPage: React.FC = () => {
 
       {/* Notifications */}
       {errorMsg && (
-        <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 text-xs text-rose-400 flex items-center justify-between">
+        <div className="bg-[#e5544d]/10 border border-[#e5544d]/25 rounded-2xl p-4 text-xs text-[#e5544d] flex items-center justify-between font-medium">
           <div className="flex items-center space-x-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>{errorMsg}</span>
           </div>
-          <button onClick={() => setErrorMsg(null)}><X className="w-4 h-4" /></button>
+          <button onClick={() => setErrorMsg(null)} className="p-1 hover:text-white"><X className="w-4 h-4" /></button>
         </div>
       )}
       {successMsg && (
-        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 text-xs text-emerald-400 flex items-center justify-between">
+        <div className="bg-[#3fbf6f]/10 border border-[#3fbf6f]/25 rounded-2xl p-4 text-xs text-[#3fbf6f] flex items-center justify-between font-medium">
           <div className="flex items-center space-x-2">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span>{successMsg}</span>
           </div>
-          <button onClick={() => setSuccessMsg(null)}><X className="w-4 h-4" /></button>
+          <button onClick={() => setSuccessMsg(null)} className="p-1 hover:text-white"><X className="w-4 h-4" /></button>
         </div>
       )}
 
       {/* Navigation Tabs */}
-      <div className="flex items-center space-x-2 border-b border-slate-800 overflow-x-auto pb-1 text-xs font-semibold scrollbar-none">
+      <div className="flex items-center space-x-2 border-b border-white/[0.08] overflow-x-auto pb-2 text-xs font-semibold scrollbar-none">
         <button
           onClick={() => setActiveTab('recipes')}
           className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${
-            activeTab === 'recipes' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            activeTab === 'recipes' ? 'bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 shadow-sm' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'
           }`}
         >
           <Layers className="w-4 h-4" />
@@ -301,7 +306,7 @@ export const ProductionPage: React.FC = () => {
         <button
           onClick={() => setActiveTab('execute')}
           className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${
-            activeTab === 'execute' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            activeTab === 'execute' ? 'bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 shadow-sm' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'
           }`}
         >
           <Flame className="w-4 h-4" />
@@ -311,7 +316,7 @@ export const ProductionPage: React.FC = () => {
         <button
           onClick={() => setActiveTab('orders')}
           className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${
-            activeTab === 'orders' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            activeTab === 'orders' ? 'bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 shadow-sm' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'
           }`}
         >
           <History className="w-4 h-4" />
@@ -324,34 +329,41 @@ export const ProductionPage: React.FC = () => {
       {/* ------------------------------------------------------------- */}
       {activeTab === 'recipes' && (
         isLoading ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-500">
-            <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-brand-400" />
+          <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl p-12 text-center text-neutral-500">
+            <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-[#d4a437]" />
             Loading recipes and bill of materials...
           </div>
         ) : recipes.length === 0 ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-500">
-            No recipes created yet. Click "New Recipe (BOM)" to define your first dish.
+          <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl p-12 text-center text-neutral-500 space-y-3">
+            <ChefHat className="w-10 h-10 text-neutral-500 mx-auto" />
+            <h4 className="text-sm font-bold text-white">No Culinary Recipes Configured</h4>
+            <p className="text-xs text-neutral-400 max-w-sm mx-auto">
+              Define standard dishes with itemized raw ingredient Bills of Materials (BOM), standard yield, and estimated food costing.
+            </p>
+            <Button variant="primary" size="md" leftIcon={<Plus className="w-4 h-4" />} onClick={handleOpenCreateRecipe}>
+              Create Recipe (BOM)
+            </Button>
           </div>
         ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {recipes.map((rec) => (
-            <div key={rec.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-floating hover:border-brand-500/40 transition-colors flex flex-col justify-between">
+            <div key={rec.id} className="bg-[#17171b] border border-white/[0.08] rounded-3xl p-5 space-y-4 shadow-xl hover:border-[#d4a437]/40 transition-colors flex flex-col justify-between">
               <div className="space-y-3">
                 <div className="flex items-start justify-between">
                   <div>
                     <h3 className="font-bold text-white text-base leading-snug">{rec.name}</h3>
-                    <p className="text-xs text-brand-400 font-semibold mt-0.5">
+                    <p className="text-xs text-[#d4a437] font-semibold mt-0.5">
                       Yields: {Number(rec.yieldQty)} {rec.finishedItem.unit?.symbol} {rec.finishedItem.name}
                     </p>
                   </div>
-                  <span className="font-mono bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-xs text-amber-300">
+                  <span className="font-mono bg-[#0c0c0e] px-2 py-0.5 rounded border border-white/[0.08] text-xs text-[#d4a437]">
                     {rec.code}
                   </span>
                 </div>
 
-                <div className="flex items-center space-x-3 text-xs text-slate-400">
+                <div className="flex items-center space-x-3 text-xs text-neutral-400">
                   <span className="flex items-center space-x-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    <Clock className="w-3.5 h-3.5 text-neutral-500" />
                     <span>{rec.preparationMinutes || 15} mins</span>
                   </span>
                   <span>•</span>
@@ -359,11 +371,11 @@ export const ProductionPage: React.FC = () => {
                 </div>
 
                 {/* Ingredients Pill Summary */}
-                <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">BOM Ingredients</p>
+                <div className="space-y-1.5 pt-2 border-t border-white/[0.06]">
+                  <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">BOM Ingredients</p>
                   <div className="flex flex-wrap gap-1.5">
                     {rec.ingredients.map((ing) => (
-                      <span key={ing.id} className="px-2 py-0.5 bg-slate-800 rounded-md text-[11px] text-slate-300 border border-slate-700/80">
+                      <span key={ing.id} className="px-2 py-0.5 bg-[#0c0c0e] rounded-lg text-[11px] text-neutral-300 border border-white/[0.06]">
                         {ing.rawItem.name}: <span className="font-mono text-white">{Number(ing.quantity)} {ing.unit?.symbol || ing.rawItem.unit?.symbol}</span>
                       </span>
                     ))}
@@ -372,10 +384,10 @@ export const ProductionPage: React.FC = () => {
               </div>
 
               {/* Costing Summary & Action */}
-              <div className="bg-slate-800/60 p-3.5 rounded-2xl border border-slate-700/60 flex items-center justify-between mt-2">
+              <div className="bg-[#0c0c0e] p-3.5 rounded-2xl border border-white/[0.06] flex items-center justify-between mt-2">
                 <div>
-                  <p className="text-[10px] text-slate-400 uppercase font-semibold">Unit Food Cost</p>
-                  <p className="text-base font-bold font-mono text-emerald-400">
+                  <p className="text-[10px] text-neutral-400 uppercase font-semibold">Unit Food Cost</p>
+                  <p className="text-base font-bold font-mono text-[#3fbf6f]">
                     {formatINR(rec.estimatedUnitCost || 0)}
                   </p>
                 </div>
@@ -406,26 +418,26 @@ export const ProductionPage: React.FC = () => {
       {/* ------------------------------------------------------------- */}
       {activeTab === 'execute' && (
         <div className="max-w-4xl mx-auto space-y-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-floating space-y-6">
+          <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl p-6 shadow-xl space-y-6">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center space-x-2">
-                <Flame className="w-5 h-5 text-amber-400" />
-                <span>Execute Kitchen Production Order</span>
+              <h2 className="text-base font-bold text-white flex items-center space-x-2">
+                <Flame className="w-4 h-4 text-[#d4a437]" />
+                <span className="uppercase tracking-wider">Execute Kitchen Production Order</span>
               </h2>
-              <p className="text-xs text-slate-400">
-                Consumes raw ingredients per recipe, verifies non-negative kitchen stock, records yield/wastage, and recalculates Food Cost automatically.
+              <p className="text-xs text-neutral-400 mt-1">
+                Consumes raw ingredients per recipe BOM, validates non-negative kitchen store stock, records yield/wastage, and updates real-time Food Cost.
               </p>
             </div>
 
             <form onSubmit={handleExecuteProduction} className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">Select Recipe</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-300">Select Recipe *</label>
                   <select
                     value={executeForm.recipeId}
                     onChange={(e) => setExecuteForm({ ...executeForm, recipeId: e.target.value })}
                     required
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-brand-500"
+                    className="w-full bg-[#0c0c0e] border border-white/[0.09] text-white text-xs rounded-xl px-3 py-2.5 focus:border-[#d4a437] focus:outline-none"
                   >
                     {recipes.map((r) => (
                       <option key={r.id} value={r.id}>
@@ -436,12 +448,12 @@ export const ProductionPage: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">Kitchen Store (Source)</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-300">Kitchen Store (Source) *</label>
                   <select
                     value={executeForm.kitchenWarehouseId}
                     onChange={(e) => setExecuteForm({ ...executeForm, kitchenWarehouseId: e.target.value })}
                     required
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-brand-500"
+                    className="w-full bg-[#0c0c0e] border border-white/[0.09] text-white text-xs rounded-xl px-3 py-2.5 focus:border-[#d4a437] focus:outline-none"
                   >
                     {warehouses.map((w) => (
                       <option key={w.id} value={w.id}>{w.name}</option>
@@ -464,20 +476,20 @@ export const ProductionPage: React.FC = () => {
               </div>
 
               {/* Live Consumption Preview Table */}
-              <div className="bg-slate-800/40 rounded-2xl border border-slate-700/60 p-4 space-y-3">
+              <div className="bg-[#0c0c0e] rounded-2xl border border-white/[0.06] p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Sparkles className="w-4 h-4 text-brand-400" />
-                    <span>Raw Material Consumption & Stock Check</span>
+                  <h3 className="text-xs font-bold text-neutral-300 uppercase tracking-wider flex items-center space-x-1.5">
+                    <Sparkles className="w-4 h-4 text-[#d4a437]" />
+                    <span>Raw Material Consumption & Availability Check</span>
                   </h3>
-                  {isPreviewLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand-400" />}
+                  {isPreviewLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#d4a437]" />}
                 </div>
 
                 {preview ? (
                   <div className="space-y-3">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs text-slate-300">
-                        <thead className="text-[10px] text-slate-400 uppercase font-semibold border-b border-slate-700">
+                      <table className="w-full text-left text-xs text-neutral-300">
+                        <thead className="text-[10px] text-neutral-400 uppercase font-semibold border-b border-white/[0.06]">
                           <tr>
                             <th className="pb-2">Ingredient</th>
                             <th className="pb-2 text-right">Standard Required</th>
@@ -486,26 +498,26 @@ export const ProductionPage: React.FC = () => {
                             <th className="pb-2 text-center">Availability</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-700/60 font-mono text-xs">
+                        <tbody className="divide-y divide-white/[0.06] font-mono text-xs">
                           {preview.ingredients.map((ing) => (
                             <tr key={ing.rawItemId} className="py-2">
                               <td className="py-2.5 font-sans font-medium text-white">{ing.rawItemName}</td>
-                              <td className="py-2.5 text-right font-bold text-brand-300">
+                              <td className="py-2.5 text-right font-bold text-[#d4a437]">
                                 {Number(ing.standardRequiredQty).toFixed(3)} {ing.unitSymbol}
                               </td>
-                              <td className="py-2.5 text-right text-slate-300">
+                              <td className="py-2.5 text-right text-neutral-300">
                                 {Number(ing.currentStockInKitchen).toFixed(3)} {ing.unitSymbol}
                               </td>
-                              <td className="py-2.5 text-right text-slate-400">
+                              <td className="py-2.5 text-right text-neutral-400">
                                 {formatINR(ing.totalCost)}
                               </td>
                               <td className="py-2.5 text-center font-sans">
                                 {ing.isAvailable ? (
-                                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-bold">
+                                  <span className="px-2 py-0.5 bg-[#3fbf6f]/15 text-[#3fbf6f] border border-[#3fbf6f]/25 rounded text-[10px] font-bold">
                                     IN STOCK
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded text-[10px] font-bold">
+                                  <span className="px-2 py-0.5 bg-[#e5544d]/15 text-[#e5544d] border border-[#e5544d]/25 rounded text-[10px] font-bold">
                                     SHORT: {Number(ing.shortageQty).toFixed(2)} {ing.unitSymbol}
                                   </span>
                                 )}
@@ -516,23 +528,23 @@ export const ProductionPage: React.FC = () => {
                       </table>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-center justify-between bg-slate-800 p-3 rounded-xl border border-slate-700 text-xs gap-2">
+                    <div className="flex flex-col sm:flex-row items-center justify-between bg-[#17171b] p-3 rounded-xl border border-white/[0.06] text-xs gap-2">
                       <div>
-                        <span className="text-slate-400">Total Raw Ingredient Cost: </span>
+                        <span className="text-neutral-400">Total Raw Ingredient Cost: </span>
                         <span className="font-mono font-bold text-white text-sm">
                           {formatINR(preview.totalEstimatedRawCost)}
                         </span>
                       </div>
                       <div>
-                        <span className="text-slate-400">Estimated Unit Food Cost: </span>
-                        <span className="font-mono font-bold text-emerald-400 text-sm">
+                        <span className="text-neutral-400">Estimated Unit Food Cost: </span>
+                        <span className="font-mono font-bold text-[#3fbf6f] text-sm">
                           {formatINR(preview.estimatedUnitFoodCost)} / dish
                         </span>
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-500 text-center py-4">Select a recipe to view ingredient consumption</p>
+                  <p className="text-xs text-neutral-500 text-center py-4">Select a recipe to view ingredient consumption</p>
                 )}
               </div>
 
@@ -584,10 +596,10 @@ export const ProductionPage: React.FC = () => {
       {/* TAB 3: PRODUCTION ORDERS HISTORY */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'orders' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-floating">
+        <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl overflow-hidden shadow-xl">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-800/80 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider text-[10px]">
+            <table className="w-full text-left text-xs text-neutral-300">
+              <thead className="bg-[#0c0c0e] text-neutral-400 font-semibold border-b border-white/[0.06] uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="p-4">Order #</th>
                   <th className="p-4">Dish / Recipe</th>
@@ -599,26 +611,36 @@ export const ProductionPage: React.FC = () => {
                   <th className="p-4">Completed Date</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800 font-mono">
-                {productionOrders.map((ord) => (
-                  <tr key={ord.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="p-4 font-bold text-white">{ord.orderNumber}</td>
-                    <td className="p-4 font-sans font-medium text-white">
-                      <p>{ord.recipe.name}</p>
-                      <p className="text-[10px] text-brand-400">{ord.recipe.finishedItem.name}</p>
-                    </td>
-                    <td className="p-4 font-sans text-slate-300">{ord.kitchenWarehouse.name}</td>
-                    <td className="p-4 text-center">
-                      <span className="text-slate-400">{Number(ord.plannedQty)}</span> → <span className="font-bold text-emerald-400">{Number(ord.actualYieldQty)}</span>
-                    </td>
-                    <td className="p-4 text-center text-rose-400 font-bold">{Number(ord.wastageQty)}</td>
-                    <td className="p-4 text-right text-slate-200 font-semibold">{formatINR(ord.totalRawCost)}</td>
-                    <td className="p-4 text-right font-bold text-emerald-400">{formatINR(ord.unitFoodCost)}</td>
-                    <td className="p-4 font-sans text-slate-400 text-[11px]">
-                      {ord.completedDate ? formatDateTimeIN(ord.completedDate) : 'In Progress'}
+              <tbody className="divide-y divide-white/[0.06] font-mono">
+                {productionOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-12 text-center text-neutral-500 font-sans space-y-2">
+                      <History className="w-8 h-8 text-neutral-500 mx-auto" />
+                      <p className="text-sm font-semibold text-neutral-300">No production orders executed</p>
+                      <p className="text-xs text-neutral-500">Completed batches and automated stock conversions will be logged here.</p>
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  productionOrders.map((ord) => (
+                    <tr key={ord.id} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="p-4 font-bold text-white">{ord.orderNumber}</td>
+                      <td className="p-4 font-sans font-medium text-white">
+                        <p>{ord.recipe.name}</p>
+                        <p className="text-[10px] text-[#d4a437]">{ord.recipe.finishedItem.name}</p>
+                      </td>
+                      <td className="p-4 font-sans text-neutral-300">{ord.kitchenWarehouse.name}</td>
+                      <td className="p-4 text-center">
+                        <span className="text-neutral-400">{Number(ord.plannedQty)}</span> → <span className="font-bold text-[#3fbf6f]">{Number(ord.actualYieldQty)}</span>
+                      </td>
+                      <td className="p-4 text-center text-[#e5544d] font-bold">{Number(ord.wastageQty)}</td>
+                      <td className="p-4 text-right text-neutral-200 font-semibold">{formatINR(ord.totalRawCost)}</td>
+                      <td className="p-4 text-right font-bold text-[#3fbf6f]">{formatINR(ord.unitFoodCost)}</td>
+                      <td className="p-4 font-sans text-neutral-400 text-[11px]">
+                        {ord.completedDate ? formatDateTimeIN(ord.completedDate) : 'In Progress'}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -629,24 +651,27 @@ export const ProductionPage: React.FC = () => {
       {/* MODAL: RECIPE BUILDER (BOM) */}
       {/* ------------------------------------------------------------- */}
       {showRecipeModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-floating">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
-              <h3 className="text-lg font-bold text-white">Build Recipe & Bill of Materials</h3>
-              <button onClick={() => setShowRecipeModal(false)}><X className="w-5 h-5" /></button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#17171b] border border-white/[0.1] rounded-3xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-white/[0.06] mb-4">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <ChefHat className="w-4 h-4 text-[#d4a437]" />
+                Build Recipe & Bill of Materials (BOM)
+              </h3>
+              <button onClick={() => setShowRecipeModal(false)} className="text-neutral-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
 
             <form onSubmit={handleSaveRecipe} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
-                    Finished Good (Dish Item)
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-300">
+                    Finished Good (Dish Item) *
                   </label>
                   <select
                     value={recipeForm.finishedItemId}
                     onChange={(e) => setRecipeForm({ ...recipeForm, finishedItemId: e.target.value })}
                     required
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-xl px-3 py-2.5"
+                    className="w-full bg-[#0c0c0e] border border-white/[0.09] text-white text-xs rounded-xl px-3 py-2.5 focus:border-[#d4a437] focus:outline-none"
                   >
                     <option value="">Select Finished Dish</option>
                     {finishedGoods.map((fg) => (
@@ -692,14 +717,14 @@ export const ProductionPage: React.FC = () => {
               {/* Raw Ingredients Table */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Raw Ingredients (BOM)</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">Raw Ingredients (BOM)</span>
                   <button
                     type="button"
                     onClick={() => setRecipeForm({
                       ...recipeForm,
                       ingredients: [...recipeForm.ingredients, { rawItemId: '', quantity: 0.1, unitId: units[0]?.id || '', notes: '' }]
                     })}
-                    className="text-xs text-brand-400 hover:text-brand-300 font-semibold flex items-center space-x-1"
+                    className="text-xs text-[#d4a437] hover:text-[#b88c2c] font-semibold flex items-center space-x-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add Ingredient</span>
@@ -707,7 +732,7 @@ export const ProductionPage: React.FC = () => {
                 </div>
 
                 {recipeForm.ingredients.map((ing, idx) => (
-                  <div key={idx} className="flex items-center space-x-2 bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/60">
+                  <div key={idx} className="flex items-center space-x-2 bg-[#0c0c0e] p-2.5 rounded-xl border border-white/[0.06]">
                     <select
                       value={ing.rawItemId}
                       onChange={(e) => {
@@ -716,7 +741,7 @@ export const ProductionPage: React.FC = () => {
                         setRecipeForm({ ...recipeForm, ingredients: copy });
                       }}
                       required
-                      className="flex-1 bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-lg px-2.5 py-1.5"
+                      className="flex-1 bg-[#17171b] border border-white/[0.09] text-white text-xs rounded-lg px-2.5 py-1.5 focus:border-[#d4a437] focus:outline-none"
                     >
                       <option value="">Select Raw Material</option>
                       {rawMaterials.map((rm) => (
@@ -736,14 +761,14 @@ export const ProductionPage: React.FC = () => {
                         setRecipeForm({ ...recipeForm, ingredients: copy });
                       }}
                       required
-                      className="w-24 bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-lg px-2 py-1.5 font-mono text-right"
+                      className="w-24 bg-[#17171b] border border-white/[0.09] text-white text-xs rounded-lg px-2 py-1.5 font-mono text-right focus:border-[#d4a437] focus:outline-none"
                     />
 
                     {recipeForm.ingredients.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setRecipeForm({ ...recipeForm, ingredients: recipeForm.ingredients.filter((_, i) => i !== idx) })}
-                        className="p-1 text-slate-500 hover:text-rose-400"
+                        className="p-1 text-neutral-500 hover:text-[#e5544d]"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -753,17 +778,17 @@ export const ProductionPage: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">Preparation Instructions</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-300">Preparation Instructions</label>
                 <textarea
                   value={recipeForm.instructions}
                   onChange={(e) => setRecipeForm({ ...recipeForm, instructions: e.target.value })}
                   rows={3}
-                  className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-xl p-3 focus:ring-2 focus:ring-brand-500"
+                  className="w-full bg-[#0c0c0e] border border-white/[0.09] text-white text-xs rounded-xl p-3 focus:border-[#d4a437] focus:outline-none"
                   placeholder="Step-by-step culinary preparation and cooking instructions..."
                 />
               </div>
 
-              <div className="flex justify-end space-x-3 pt-4 border-t border-slate-800">
+              <div className="flex justify-end space-x-3 pt-4 border-t border-white/[0.06]">
                 <Button type="button" variant="ghost" onClick={() => setShowRecipeModal(false)}>Cancel</Button>
                 <Button type="submit" variant="primary">Save Recipe BOM</Button>
               </div>

@@ -30,4 +30,14 @@ router.get('/ledger', inventory_controller_1.InventoryController.getStockLedger)
 // Stock Transfers & Adjustments
 router.post('/transfer', (0, validate_middleware_1.validate)(inventory_schema_1.transferStockSchema), inventory_controller_1.InventoryController.transferStock);
 router.post('/adjust', (0, validate_middleware_1.validate)(inventory_schema_1.adjustStockSchema), inventory_controller_1.InventoryController.adjustStock);
+// Store Requisitions & Multi-Stage Warehouse Transfers (Part 4)
+router.get('/requisitions', inventory_controller_1.InventoryController.getRequisitions);
+router.get('/requisitions/:id', inventory_controller_1.InventoryController.getRequisitionById);
+router.post('/requisitions', (0, validate_middleware_1.validate)(inventory_schema_1.createRequisitionSchema), inventory_controller_1.InventoryController.createRequisition);
+router.post('/requisitions/:id/submit', (0, validate_middleware_1.validate)(inventory_schema_1.submitRequisitionSchema), inventory_controller_1.InventoryController.submitRequisition);
+router.post('/requisitions/:id/approve', (0, validate_middleware_1.validate)(inventory_schema_1.approveRequisitionSchema), inventory_controller_1.InventoryController.approveRequisition);
+router.post('/requisitions/:id/reject', (0, validate_middleware_1.validate)(inventory_schema_1.rejectRequisitionSchema), inventory_controller_1.InventoryController.rejectRequisition);
+router.get('/requisitions/:id/pick-verify', inventory_controller_1.InventoryController.pickAndVerifyRequisition);
+router.post('/requisitions/:id/dispatch', (0, validate_middleware_1.validate)(inventory_schema_1.dispatchTransferSchema), inventory_controller_1.InventoryController.dispatchRequisition);
+router.post('/transfers/:id/receive', (0, validate_middleware_1.validate)(inventory_schema_1.receiveTransferSchema), inventory_controller_1.InventoryController.receiveTransfer);
 exports.default = router;
