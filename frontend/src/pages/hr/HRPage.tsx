@@ -3,7 +3,7 @@ import {
   Users,
   Clock,
   Calendar,
-  DollarSign,
+  IndianRupee,
   Plus,
   Crown,
   CheckCircle2,
@@ -223,7 +223,7 @@ export const HRPage: React.FC = () => {
             onClick={() => setShowPayrollModal(true)}
             className="flex items-center space-x-2 px-4 py-2 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold text-xs uppercase tracking-wider rounded-xl shadow-md shadow-[#d4a437]/20 transition-all active:scale-95"
           >
-            <DollarSign className="w-4 h-4" />
+            <IndianRupee className="w-4 h-4" />
             <span>Run Monthly Payroll</span>
           </button>
         </div>
@@ -234,7 +234,7 @@ export const HRPage: React.FC = () => {
           { key: 'employees', label: `Staff Directory (${employees.length})`, icon: Users },
           { key: 'attendance', label: `Daily Attendance (${attendances.length})`, icon: Clock },
           { key: 'leaves', label: `Leave Requests (${leaveRequests.length})`, icon: Calendar },
-          { key: 'payroll', label: `Payroll Runs (${payrollRuns.length})`, icon: DollarSign }
+          { key: 'payroll', label: `Payroll Runs (${payrollRuns.length})`, icon: IndianRupee }
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.key;
@@ -481,7 +481,7 @@ export const HRPage: React.FC = () => {
               onClick={() => setShowPayrollModal(true)}
               className="px-3.5 py-1.5 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center space-x-1.5 shadow-sm"
             >
-              <DollarSign className="w-4 h-4" />
+              <IndianRupee className="w-4 h-4" />
               <span>Process Salary Run</span>
             </button>
           </div>
@@ -532,7 +532,7 @@ export const HRPage: React.FC = () => {
                 onClick={() => setShowPayrollModal(true)}
                 className="px-4 py-2 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md inline-flex items-center space-x-1.5"
               >
-                <DollarSign className="w-4 h-4" />
+                <IndianRupee className="w-4 h-4" />
                 <span>Process Salary Run</span>
               </button>
             </div>
@@ -639,7 +639,7 @@ export const HRPage: React.FC = () => {
           <div className="bg-[#17171b] border border-white/[0.1] rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
               <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-[#d4a437]" /> Execute Monthly Payroll Run
+                <IndianRupee className="w-4 h-4 text-[#d4a437]" /> Execute Monthly Payroll Run
               </h3>
               <button onClick={() => setShowPayrollModal(false)} className="text-neutral-400 hover:text-white">
                 <X className="w-4 h-4" />

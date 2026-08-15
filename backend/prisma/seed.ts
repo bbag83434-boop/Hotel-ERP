@@ -139,11 +139,12 @@ async function main() {
     }
   });
 
-  // 4. Default Indian Branches
+  // 4. Default Property Branch
   const hotelBranch = await prisma.branch.upsert({
     where: { code: 'BR-HOTEL-01' },
     update: {
       name: 'Grand Heritage Resort & Palace',
+      type: 'HYBRID',
       email: 'palace@grandheritage.in',
       phone: '+91 98765 43211',
       address: '12 Civil Lines, Jaipur, Rajasthan 302006'
@@ -152,29 +153,10 @@ async function main() {
       companyId: company.id,
       name: 'Grand Heritage Resort & Palace',
       code: 'BR-HOTEL-01',
-      type: 'HOTEL',
+      type: 'HYBRID',
       email: 'palace@grandheritage.in',
       phone: '+91 98765 43211',
       address: '12 Civil Lines, Jaipur, Rajasthan 302006'
-    }
-  });
-
-  const restBranch = await prisma.branch.upsert({
-    where: { code: 'BR-REST-01' },
-    update: {
-      name: 'Royal Rasoi Multi-Cuisine Restaurant',
-      email: 'rasoi@grandheritage.in',
-      phone: '+91 98765 43212',
-      address: 'Plot 45, MG Road, Bengaluru, Karnataka 560001'
-    },
-    create: {
-      companyId: company.id,
-      name: 'Royal Rasoi Multi-Cuisine Restaurant',
-      code: 'BR-REST-01',
-      type: 'RESTAURANT',
-      email: 'rasoi@grandheritage.in',
-      phone: '+91 98765 43212',
-      address: 'Plot 45, MG Road, Bengaluru, Karnataka 560001'
     }
   });
 
@@ -199,12 +181,6 @@ async function main() {
     where: { userId_branchId: { userId: superAdminUser.id, branchId: hotelBranch.id } },
     update: {},
     create: { userId: superAdminUser.id, branchId: hotelBranch.id, isDefault: true }
-  });
-
-  await prisma.userBranch.upsert({
-    where: { userId_branchId: { userId: superAdminUser.id, branchId: restBranch.id } },
-    update: {},
-    create: { userId: superAdminUser.id, branchId: restBranch.id, isDefault: false }
   });
 
   // 6. Categories
@@ -261,14 +237,14 @@ async function main() {
 
   const kitchenWh = await prisma.warehouse.upsert({
     where: { companyId_code: { companyId: company.id, code: 'WH-KITCHEN-01' } },
-    update: { name: 'Royal Rasoi Kitchen Store' },
+    update: { name: 'Grand Heritage Kitchen Store', branchId: hotelBranch.id },
     create: {
       companyId: company.id,
-      branchId: restBranch.id,
-      name: 'Royal Rasoi Kitchen Store',
+      branchId: hotelBranch.id,
+      name: 'Grand Heritage Kitchen Store',
       code: 'WH-KITCHEN-01',
       isCentral: false,
-      address: 'Restaurant Kitchen Cold Room & Dry Pantry'
+      address: 'Kitchen Cold Room & Dry Pantry'
     }
   });
 
@@ -500,11 +476,11 @@ async function main() {
   // 14. RESTAURANT MASTER MENU & CATEGORIES
   const diningMenu = await prisma.menu.upsert({
     where: { companyId_code: { companyId: company.id, code: 'MENU-MAIN-01' } },
-    update: { name: 'Royal Rasoi Indian Specialty Dining' },
+    update: { name: 'Grand Heritage Specialty Dining', branchId: hotelBranch.id },
     create: {
       companyId: company.id,
-      branchId: restBranch.id,
-      name: 'Royal Rasoi Indian Specialty Dining',
+      branchId: hotelBranch.id,
+      name: 'Grand Heritage Specialty Dining',
       code: 'MENU-MAIN-01',
       description: 'North Indian Curries, Mughlai Specialties, Tandoori Breads & Desserts'
     }

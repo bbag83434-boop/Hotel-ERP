@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
-  DollarSign,
+  IndianRupee,
   Building,
   UtensilsCrossed,
   Boxes,
@@ -89,7 +89,7 @@ export const DashboardShellPage: React.FC = () => {
               <div className="flex items-center justify-between text-xs text-neutral-400 font-semibold tracking-wider uppercase">
                 <span>Total Gross Revenue</span>
                 <span className="p-1.5 bg-[#3fbf6f]/15 text-[#3fbf6f] rounded-xl border border-[#3fbf6f]/25">
-                  <DollarSign className="w-4 h-4" />
+                  <IndianRupee className="w-4 h-4" />
                 </span>
               </div>
               <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight font-mono">

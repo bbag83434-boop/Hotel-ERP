@@ -12,7 +12,7 @@ import {
 export const restaurantApi = {
   // Branches
   getBranches: async (): Promise<any[]> => {
-    const res = await apiClient.get('/users/branches');
+    const res = await apiClient.get('/branches');
     return res.data.data;
   },
 

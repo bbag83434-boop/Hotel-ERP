@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  DollarSign,
+  IndianRupee,
   BookOpen,
   Receipt,
   CreditCard,
@@ -222,7 +222,7 @@ export const AccountingPage: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-gradient-to-tr from-emerald-600 to-teal-400 rounded-xl shadow-lg shadow-emerald-900/20 text-slate-950 font-bold">
-              <DollarSign className="w-6 h-6 text-slate-950" />
+              <IndianRupee className="w-6 h-6 text-slate-950" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
@@ -293,7 +293,7 @@ export const AccountingPage: React.FC = () => {
         <div className="flex border-b border-slate-800 overflow-x-auto scrollbar-none gap-2">
           {[
             { key: 'pnl', label: 'Profit & Loss Statement', icon: TrendingUp },
-            { key: 'cashflow', label: 'Cash Flow Statement', icon: DollarSign },
+            { key: 'cashflow', label: 'Cash Flow Statement', icon: IndianRupee },
             { key: 'gl', label: 'General Ledger & Journals', icon: BookOpen },
             { key: 'accounts', label: 'Chart of Accounts', icon: FileText },
             { key: 'apar', label: 'Accounts Payable & Receivable', icon: CreditCard }

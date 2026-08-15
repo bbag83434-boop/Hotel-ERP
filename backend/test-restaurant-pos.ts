@@ -6,7 +6,8 @@ async function runRestaurantTests() {
 
   try {
     const company = await prisma.company.findFirst({ where: { code: 'COMP-001' } });
-    const restBranch = await prisma.branch.findFirst({ where: { code: 'BR-REST-01' } });
+    if (!company) throw new Error('Company COMP-001 not found');
+    const restBranch = await prisma.branch.findFirst({ where: { companyId: company.id } });
     const adminUser = await prisma.user.findFirst({ where: { email: 'admin@hotel-erp.com' } });
     const kitchenWh = await prisma.warehouse.findFirst({ where: { code: 'WH-KITCHEN-01' } });
     const flourItem = await prisma.item.findFirst({ where: { code: 'RM-FLOUR-01' } });
@@ -19,7 +20,7 @@ async function runRestaurantTests() {
       where: { branchId: restBranch!.id, tableNumber: 'T-02' }
     });
 
-    if (!company || !restBranch || !adminUser || !kitchenWh || !pizzaMenuItem || !tableT1) {
+    if (!restBranch || !adminUser || !kitchenWh || !pizzaMenuItem || !tableT1) {
       throw new Error('Missing required seed data for testing');
     }
 

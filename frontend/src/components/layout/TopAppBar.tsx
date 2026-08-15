@@ -7,35 +7,83 @@ import {
   Bell,
   Search,
   Check,
-  Crown
+  Crown,
+  Plus,
+  X,
+  Store
 } from 'lucide-react';
+import { branchApi, CreateBranchInput } from '../../api/branch.api';
 
 export const TopAppBar: React.FC = () => {
-  const { user, selectedBranchId, setSelectedBranchId, logout } = useAuth();
+  const { user, selectedBranchId, setSelectedBranchId, refreshUser, logout } = useAuth();
   const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+
+  // Add Branch Modal States
+  const [showAddBranchModal, setShowAddBranchModal] = useState(false);
+  const [isSubmittingBranch, setIsSubmittingBranch] = useState(false);
+  const [branchError, setBranchError] = useState('');
+  const [branchSuccess, setBranchSuccess] = useState('');
+  const [newBranchData, setNewBranchData] = useState<CreateBranchInput>({
+    name: '',
+    code: '',
+    type: 'RESTAURANT',
+    address: '',
+    email: '',
+    phone: ''
+  });
 
   const activeBranch =
     user?.branches?.find((b) => b.id === selectedBranchId) || user?.branches?.[0];
 
+  const handleCreateBranch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBranchError('');
+    setBranchSuccess('');
+    setIsSubmittingBranch(true);
+
+    try {
+      const created = await branchApi.createBranch(newBranchData);
+      setBranchSuccess(`Outlet "${created.name}" created successfully!`);
+      await refreshUser();
+      setSelectedBranchId(created.id);
+      setTimeout(() => {
+        setShowAddBranchModal(false);
+        setBranchSuccess('');
+        setNewBranchData({
+          name: '',
+          code: '',
+          type: 'RESTAURANT',
+          address: '',
+          email: '',
+          phone: ''
+        });
+      }, 1000);
+    } catch (err: any) {
+      setBranchError(err.response?.data?.message || 'Failed to create branch. Please check inputs.');
+    } finally {
+      setIsSubmittingBranch(false);
+    }
+  };
+
   return (
-    <header className="bg-[#0c0c0e]/95 backdrop-blur-md border-b border-white/[0.08] sticky top-0 z-40 px-4 py-2.5 flex items-center justify-between transition-all pt-safe select-none">
-      {/* Left: Brand logo & Branch Selector */}
-      <div className="flex items-center space-x-3">
-        <div className="flex items-center space-x-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#d4a437] to-[#996f1b] flex items-center justify-center text-black font-extrabold shadow-md shadow-[#d4a437]/20 border border-[#d4a437]/40">
-            <Crown className="w-5 h-5 text-black" />
+    <>
+      <header className="bg-[#0c0c0e]/95 backdrop-blur-md border-b border-white/[0.08] sticky top-0 z-40 px-4 py-2.5 flex items-center justify-between transition-all pt-safe select-none">
+        {/* Left: Brand logo & Branch Selector */}
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#d4a437] to-[#996f1b] flex items-center justify-center text-black font-extrabold shadow-md shadow-[#d4a437]/20 border border-[#d4a437]/40">
+              <Crown className="w-5 h-5 text-black" />
+            </div>
+            <div className="hidden sm:block">
+              <h1 className="text-xs font-bold text-white tracking-wide uppercase">Grand Heritage Resort</h1>
+              <p className="text-[10px] font-semibold text-[#d4a437] tracking-wider uppercase">APEX Enterprise ERP</p>
+            </div>
           </div>
-          <div className="hidden sm:block">
-            <h1 className="text-xs font-bold text-white tracking-wide uppercase">Grand Heritage Resort</h1>
-            <p className="text-[10px] font-semibold text-[#d4a437] tracking-wider uppercase">APEX Enterprise ERP</p>
-          </div>
-        </div>
 
-        <div className="h-5 w-px bg-white/[0.1] mx-1" />
+          <div className="h-5 w-px bg-white/[0.1] mx-1" />
 
-        {/* Branch Selector Dropdown */}
-        {user && user.branches && user.branches.length > 0 && (
+          {/* Branch Selector Dropdown */}
           <div className="relative">
             <button
               onClick={() => setShowBranchMenu(!showBranchMenu)}
@@ -50,103 +98,309 @@ export const TopAppBar: React.FC = () => {
 
             {showBranchMenu && (
               <div
-                className="absolute left-0 mt-2 w-64 bg-[#17171b] border border-white/[0.1] rounded-2xl shadow-floating py-2 z-50 animate-in fade-in zoom-in-95 duration-100"
-                onClick={() => setShowBranchMenu(false)}
+                className="absolute left-0 mt-2 w-72 bg-[#17171b] border border-white/[0.1] rounded-2xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-100"
               >
-                <div className="px-3.5 py-1.5 text-[10px] font-bold text-[#d4a437] uppercase tracking-widest">
-                  Active Outlet / Branch
+                <div className="px-3.5 py-1.5 text-[10px] font-bold text-[#d4a437] uppercase tracking-widest flex items-center justify-between">
+                  <span>Active Outlets & Branches</span>
+                  <span className="text-[9px] text-neutral-400">{user?.branches?.length || 0} active</span>
                 </div>
-                {user.branches.map((b) => {
-                  const isSelected = b.id === activeBranch?.id;
-                  return (
-                    <button
-                      key={b.id}
-                      onClick={() => setSelectedBranchId(b.id)}
-                      className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-white/[0.05] transition-colors ${
-                        isSelected ? 'text-[#d4a437] font-semibold bg-[#d4a437]/10' : 'text-neutral-200'
-                      }`}
-                    >
-                      <div>
-                        <p className="font-medium text-white">{b.name}</p>
-                        <p className="text-[10px] text-neutral-400">{b.code} • {b.type}</p>
-                      </div>
-                      {isSelected && <Check className="w-4 h-4 text-[#d4a437]" />}
-                    </button>
-                  );
-                })}
+
+                <div className="max-h-60 overflow-y-auto divide-y divide-white/[0.04]">
+                  {user?.branches && user.branches.length > 0 ? (
+                    user.branches.map((b) => {
+                      const isSelected = b.id === activeBranch?.id;
+                      return (
+                        <button
+                          key={b.id}
+                          onClick={() => {
+                            setSelectedBranchId(b.id);
+                            setShowBranchMenu(false);
+                          }}
+                          className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-white/[0.05] transition-colors ${
+                            isSelected ? 'text-[#d4a437] font-semibold bg-[#d4a437]/10' : 'text-neutral-200'
+                          }`}
+                        >
+                          <div>
+                            <p className="font-medium text-white">{b.name}</p>
+                            <p className="text-[10px] text-neutral-400 font-mono">{b.code} • {b.type}</p>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-[#d4a437]" />}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="px-3.5 py-3 text-center text-xs text-neutral-500">
+                      No branches assigned
+                    </div>
+                  )}
+                </div>
+
+                {/* Add New Outlet / Branch Action */}
+                <div className="pt-2 mt-1 border-t border-white/[0.08] px-2">
+                  <button
+                    onClick={() => {
+                      setShowBranchMenu(false);
+                      setShowAddBranchModal(true);
+                    }}
+                    className="w-full py-2 px-3 bg-[#d4a437]/10 hover:bg-[#d4a437]/20 text-[#d4a437] font-bold text-xs rounded-xl flex items-center justify-center space-x-2 border border-[#d4a437]/30 transition active:scale-98"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Add New Outlet / Branch</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Right: Quick Search, Notifications, User Menu */}
-      <div className="flex items-center space-x-2">
-        <button
-          aria-label="Quick Search"
-          className="p-2 text-neutral-400 hover:text-neutral-100 hover:bg-white/[0.06] rounded-xl transition-colors hidden sm:flex"
-        >
-          <Search className="w-4 h-4" />
-        </button>
-
-        <button
-          aria-label="Notifications"
-          className="p-2 text-neutral-400 hover:text-neutral-100 hover:bg-white/[0.06] rounded-xl transition-colors relative"
-        >
-          <Bell className="w-4 h-4" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#d4a437] rounded-full animate-pulse" />
-        </button>
-
-        <div className="h-5 w-px bg-white/[0.1]" />
-
-        {/* User Profile / Menu */}
-        <div className="relative">
+        {/* Right: Quick Search, Notifications, User Menu */}
+        <div className="flex items-center space-x-2">
           <button
-            onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center space-x-2 p-1 pl-2 hover:bg-white/[0.06] border border-white/[0.08] rounded-xl transition-colors"
+            aria-label="Quick Search"
+            className="p-2 text-neutral-400 hover:text-neutral-100 hover:bg-white/[0.06] rounded-xl transition-colors hidden sm:flex"
           >
-            <div className="w-7 h-7 rounded-lg bg-[#d4a437]/20 border border-[#d4a437]/40 flex items-center justify-center text-[#d4a437] font-bold text-xs">
-              {user?.firstName ? user.firstName.charAt(0) : 'U'}
-            </div>
-            <div className="hidden md:block text-left pr-1">
-              <p className="text-xs font-semibold text-white leading-none">
-                {user?.firstName} {user?.lastName}
-              </p>
-              <p className="text-[10px] text-[#d4a437] font-medium mt-0.5 leading-none">
-                {user?.role?.name || 'Administrator'}
-              </p>
-            </div>
-            <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
+            <Search className="w-4 h-4" />
           </button>
 
-          {showUserMenu && (
-            <div
-              className="absolute right-0 mt-2 w-56 bg-[#17171b] border border-white/[0.1] rounded-2xl shadow-floating py-2 z-50 animate-in fade-in zoom-in-95 duration-100"
-              onClick={() => setShowUserMenu(false)}
+          <button
+            aria-label="Notifications"
+            className="p-2 text-neutral-400 hover:text-neutral-100 hover:bg-white/[0.06] rounded-xl transition-colors relative"
+          >
+            <Bell className="w-4 h-4" />
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#d4a437] rounded-full animate-pulse" />
+          </button>
+
+          <div className="h-5 w-px bg-white/[0.1]" />
+
+          {/* User Profile / Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="flex items-center space-x-2 p-1 pl-2 hover:bg-white/[0.06] border border-white/[0.08] rounded-xl transition-colors"
             >
-              <div className="px-3.5 py-2 border-b border-white/[0.06]">
-                <p className="text-xs font-semibold text-white">
+              <div className="w-7 h-7 rounded-lg bg-[#d4a437]/20 border border-[#d4a437]/40 flex items-center justify-center text-[#d4a437] font-bold text-xs">
+                {user?.firstName ? user.firstName.charAt(0) : 'U'}
+              </div>
+              <div className="hidden md:block text-left pr-1">
+                <p className="text-xs font-semibold text-white leading-none">
                   {user?.firstName} {user?.lastName}
                 </p>
-                <p className="text-[11px] text-neutral-400 truncate">{user?.email}</p>
-                <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-[#d4a437]/15 text-[#d4a437] font-medium border border-[#d4a437]/20">
-                  {user?.role?.name || 'Authorized User'}
-                </span>
+                <p className="text-[10px] text-[#d4a437] font-medium mt-0.5 leading-none">
+                  {user?.role?.name || 'Administrator'}
+                </p>
+              </div>
+              <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
+            </button>
+
+            {showUserMenu && (
+              <div
+                className="absolute right-0 mt-2 w-56 bg-[#17171b] border border-white/[0.1] rounded-2xl shadow-floating py-2 z-50 animate-in fade-in zoom-in-95 duration-100"
+                onClick={() => setShowUserMenu(false)}
+              >
+                <div className="px-3.5 py-2 border-b border-white/[0.06]">
+                  <p className="text-xs font-semibold text-white">
+                    {user?.firstName} {user?.lastName}
+                  </p>
+                  <p className="text-[11px] text-neutral-400 truncate">{user?.email}</p>
+                  <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-[#d4a437]/15 text-[#d4a437] font-medium border border-[#d4a437]/20">
+                    {user?.role?.name || 'Authorized User'}
+                  </span>
+                </div>
+
+                <div className="py-1">
+                  <button
+                    onClick={() => logout()}
+                    className="w-full text-left px-3.5 py-2 text-xs text-[#e5544d] hover:bg-[#e5544d]/10 flex items-center space-x-2 transition-colors font-medium"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* ========================================================= */}
+      {/* SECTION 0.6 MODAL: ADD NEW OUTLET / BRANCH */}
+      {/* ========================================================= */}
+      {showAddBranchModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#17171b] border border-white/[0.1] rounded-3xl w-full max-w-lg p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[#d4a437]/15 border border-[#d4a437]/30 flex items-center justify-center text-[#d4a437]">
+                  <Store className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                    Register New Outlet / Branch
+                  </h3>
+                  <p className="text-[11px] text-neutral-400">
+                    Part 4 Multi-Tenant Organizational Structure
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAddBranchModal(false);
+                  setBranchError('');
+                  setBranchSuccess('');
+                }}
+                className="text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.06] transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {branchError && (
+              <div className="p-3 bg-[#e5544d]/10 border border-[#e5544d]/25 text-[#e5544d] rounded-xl text-xs font-medium">
+                {branchError}
+              </div>
+            )}
+
+            {branchSuccess && (
+              <div className="p-3 bg-[#3fbf6f]/10 border border-[#3fbf6f]/25 text-[#3fbf6f] rounded-xl text-xs font-medium">
+                {branchSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateBranch} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Branch Name */}
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] text-neutral-300 font-semibold uppercase tracking-wider block mb-1">
+                    Outlet / Branch Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Royal Bistro & Fine Dining"
+                    value={newBranchData.name}
+                    onChange={(e) =>
+                      setNewBranchData({ ...newBranchData, name: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                  />
+                </div>
+
+                {/* Branch Code */}
+                <div>
+                  <label className="text-[11px] text-neutral-300 font-semibold uppercase tracking-wider block mb-1">
+                    Branch Code *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. BR-BISTRO-01"
+                    value={newBranchData.code}
+                    onChange={(e) =>
+                      setNewBranchData({
+                        ...newBranchData,
+                        code: e.target.value.toUpperCase()
+                      })
+                    }
+                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs font-mono uppercase font-bold text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                  />
+                </div>
+
+                {/* Branch Type */}
+                <div>
+                  <label className="text-[11px] text-neutral-300 font-semibold uppercase tracking-wider block mb-1">
+                    Outlet Category Type *
+                  </label>
+                  <select
+                    value={newBranchData.type}
+                    onChange={(e) =>
+                      setNewBranchData({
+                        ...newBranchData,
+                        type: e.target.value as any
+                      })
+                    }
+                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
+                  >
+                    <option value="RESTAURANT" className="bg-[#17171b] text-white">Restaurant & Bar (POS/KDS)</option>
+                    <option value="HOTEL" className="bg-[#17171b] text-white">Hotel Property (PMS/Rooms)</option>
+                    <option value="HYBRID" className="bg-[#17171b] text-white">Hybrid (Hotel & F&B Combined)</option>
+                    <option value="CENTRAL_KITCHEN" className="bg-[#17171b] text-white">Central Production Kitchen</option>
+                    <option value="MAIN_STORE" className="bg-[#17171b] text-white">Central Logistics & Main Stores</option>
+                    <option value="RETAIL" className="bg-[#17171b] text-white">Retail / Gift Shop Counter</option>
+                  </select>
+                </div>
+
+                {/* Address */}
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] text-neutral-300 font-semibold uppercase tracking-wider block mb-1">
+                    Physical Address / Floor Location *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Ground Floor, Courtyard Pavilion, Grand Heritage"
+                    value={newBranchData.address}
+                    onChange={(e) =>
+                      setNewBranchData({ ...newBranchData, address: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                  />
+                </div>
+
+                {/* Email (Optional) */}
+                <div>
+                  <label className="text-[11px] text-neutral-300 font-semibold uppercase tracking-wider block mb-1">
+                    Contact Email (Optional)
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="e.g. bistro@grandheritage.in"
+                    value={newBranchData.email || ''}
+                    onChange={(e) =>
+                      setNewBranchData({ ...newBranchData, email: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                  />
+                </div>
+
+                {/* Phone (Optional) */}
+                <div>
+                  <label className="text-[11px] text-neutral-300 font-semibold uppercase tracking-wider block mb-1">
+                    Contact Phone (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. +91 98765 43210"
+                    value={newBranchData.phone || ''}
+                    onChange={(e) =>
+                      setNewBranchData({ ...newBranchData, phone: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                  />
+                </div>
               </div>
 
-              <div className="py-1">
+              <div className="pt-2 flex items-center justify-end space-x-3">
                 <button
-                  onClick={() => logout()}
-                  className="w-full text-left px-3.5 py-2 text-xs text-[#e5544d] hover:bg-[#e5544d]/10 flex items-center space-x-2 transition-colors font-medium"
+                  type="button"
+                  onClick={() => setShowAddBranchModal(false)}
+                  className="px-4 py-2.5 bg-[#202026] hover:bg-[#282832] text-neutral-300 text-xs font-semibold rounded-xl transition"
                 >
-                  <LogOut className="w-4 h-4 text-[#e5544d]" />
-                  <span>Sign Out</span>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingBranch}
+                  className="px-5 py-2.5 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold text-xs uppercase tracking-wider rounded-xl transition shadow-lg shadow-[#d4a437]/20 disabled:opacity-50"
+                >
+                  {isSubmittingBranch ? 'Registering...' : 'Create Outlet'}
                 </button>
               </div>
-            </div>
-          )}
+            </form>
+          </div>
         </div>
-      </div>
-    </header>
+      )}
+    </>
   );
 };
+
+export default TopAppBar;

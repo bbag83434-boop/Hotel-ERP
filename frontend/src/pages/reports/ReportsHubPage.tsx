@@ -2,7 +2,7 @@ import React from 'react';
 import {
   FileText,
   TrendingUp,
-  DollarSign,
+  IndianRupee,
   Hotel,
   UtensilsCrossed,
   Boxes,
@@ -29,7 +29,7 @@ export const ReportsHubPage: React.FC = () => {
       title: 'Statement of Cash Flows',
       description: 'Cash inflows and outflows derived from operating bank and cash general ledger journals.',
       path: '/accounting',
-      icon: DollarSign,
+      icon: IndianRupee,
       badge: 'Live GL Derived',
       badgeColor: 'bg-sky-500/20 text-sky-300'
     },

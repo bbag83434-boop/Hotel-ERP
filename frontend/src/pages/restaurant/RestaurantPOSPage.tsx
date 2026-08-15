@@ -7,7 +7,7 @@ import {
   RefreshCw,
   Search,
   Clock,
-  DollarSign,
+  IndianRupee,
   Receipt,
   Percent,
   TrendingUp,
@@ -111,9 +111,7 @@ export const RestaurantPOSPage: React.FC = () => {
       try {
         setLoading(true);
         const [branchList, recipes] = await Promise.all([
-          restaurantApi.getBranches().catch(() => [
-            { id: 'mock-branch', name: 'Royal Rasoi Multi-Cuisine Restaurant', code: 'BR-REST-01', type: 'RESTAURANT' }
-          ]),
+          restaurantApi.getBranches().catch(() => []),
           productionApi.getRecipes()
         ]);
         setBranches(branchList);
@@ -431,33 +429,38 @@ export const RestaurantPOSPage: React.FC = () => {
   }, [kitchenTickets, selectedKdsStation]);
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-6 pb-12 select-none">
       {/* Header Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-rose-50 text-rose-600 rounded-xl">
-              <Utensils className="w-6 h-6" />
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-[#17171b] p-5 sm:p-6 rounded-3xl shadow-xl border border-white/[0.08]">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#d4a437] to-[#996f1b] flex items-center justify-center text-black shadow-lg shadow-[#d4a437]/20 border border-[#d4a437]/40">
+            <Utensils className="w-6 h-6 text-black" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2.5">
+              <h1 className="text-lg sm:text-xl font-bold text-white tracking-wide uppercase">
+                Restaurant POS & Service Desk
+              </h1>
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-[#d4a437]/15 text-[#d4a437] font-semibold border border-[#d4a437]/30 tracking-wider">
+                F&B Operations
+              </span>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Restaurant Operations & POS</h1>
-              <p className="text-sm text-slate-500">
-                Touch-Optimized POS, Live Table Floor Plan, Kitchen Display (KDS), and Recipe-Connected Sales
-              </p>
-            </div>
+            <p className="text-xs text-neutral-400 mt-0.5">
+              Touch-Optimized POS, Interactive Floor Plan, Kitchen Display (KDS), and Recipe BOM Sales
+            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-            <Layers className="w-4 h-4 text-slate-400" />
+          <div className="flex items-center gap-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl px-3.5 py-2">
+            <Layers className="w-4 h-4 text-[#d4a437]" />
             <select
               value={selectedBranchId}
               onChange={(e) => setSelectedBranchId(e.target.value)}
-              className="bg-transparent text-sm font-semibold text-slate-700 focus:outline-none"
+              className="bg-transparent text-xs font-semibold text-white focus:outline-none"
             >
               {branches.map((b) => (
-                <option key={b.id} value={b.id}>
+                <option key={b.id} value={b.id} className="bg-[#17171b] text-white">
                   {b.name} ({b.code})
                 </option>
               ))}
@@ -466,36 +469,36 @@ export const RestaurantPOSPage: React.FC = () => {
 
           <button
             onClick={() => loadBranchData(selectedBranchId)}
-            className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+            className="p-2.5 text-neutral-400 hover:text-white bg-[#0c0c0e] hover:bg-[#202026] border border-white/[0.08] rounded-xl transition"
             title="Refresh Data"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#d4a437]' : ''}`} />
           </button>
         </div>
       </div>
 
       {/* Notifications */}
       {errorMsg && (
-        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm flex items-center justify-between">
+        <div className="p-4 bg-[#e5544d]/10 border border-[#e5544d]/25 text-[#e5544d] rounded-2xl text-xs flex items-center justify-between font-medium">
           <span>{errorMsg}</span>
-          <button onClick={() => setErrorMsg(null)} className="text-rose-500 hover:text-rose-700 font-bold ml-4">✕</button>
+          <button onClick={() => setErrorMsg(null)} className="text-neutral-400 hover:text-white font-bold ml-4">✕</button>
         </div>
       )}
       {successMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-sm flex items-center justify-between">
+        <div className="p-4 bg-[#3fbf6f]/10 border border-[#3fbf6f]/25 text-[#3fbf6f] rounded-2xl text-xs flex items-center justify-between font-medium">
           <span>{successMsg}</span>
-          <button onClick={() => setSuccessMsg(null)} className="text-emerald-500 hover:text-emerald-700 font-bold ml-4">✕</button>
+          <button onClick={() => setSuccessMsg(null)} className="text-neutral-400 hover:text-white font-bold ml-4">✕</button>
         </div>
       )}
 
       {/* Main Tabs Navigation */}
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+      <div className="flex items-center space-x-2 border-b border-white/[0.08] overflow-x-auto pb-2 text-xs font-semibold scrollbar-none">
         <button
           onClick={() => setActiveTab('pos')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition whitespace-nowrap ${
             activeTab === 'pos'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-200'
-              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+              ? 'bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 shadow-sm'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'
           }`}
         >
           <Smartphone className="w-4 h-4" />
@@ -504,10 +507,10 @@ export const RestaurantPOSPage: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('tables')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition whitespace-nowrap ${
             activeTab === 'tables'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-200'
-              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+              ? 'bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 shadow-sm'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'
           }`}
         >
           <Grid className="w-4 h-4" />
@@ -516,16 +519,16 @@ export const RestaurantPOSPage: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('kds')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition relative ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition whitespace-nowrap relative ${
             activeTab === 'kds'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-200'
-              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+              ? 'bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 shadow-sm'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'
           }`}
         >
           <ChefHat className="w-4 h-4" />
           Kitchen Display (KDS)
           {kitchenTickets.length > 0 && (
-            <span className="ml-1.5 px-2 py-0.5 text-xs bg-amber-400 text-slate-950 font-bold rounded-full">
+            <span className="ml-1.5 px-2 py-0.5 text-[10px] bg-[#d4a437] text-black font-bold rounded-full">
               {kitchenTickets.length}
             </span>
           )}
@@ -533,10 +536,10 @@ export const RestaurantPOSPage: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('menu')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition whitespace-nowrap ${
             activeTab === 'menu'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-200'
-              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+              ? 'bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 shadow-sm'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'
           }`}
         >
           <Utensils className="w-4 h-4" />
@@ -545,10 +548,10 @@ export const RestaurantPOSPage: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('sales')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition whitespace-nowrap ${
             activeTab === 'sales'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-200'
-              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+              ? 'bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 shadow-sm'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'
           }`}
         >
           <TrendingUp className="w-4 h-4" />
@@ -564,26 +567,26 @@ export const RestaurantPOSPage: React.FC = () => {
           {/* Left 2 Cols: Categories & Menu Item Cards */}
           <div className="lg:col-span-2 space-y-4">
             {/* Search & Category Pills */}
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+            <div className="bg-[#17171b] p-4 rounded-3xl shadow-xl border border-white/[0.08] space-y-3">
               <div className="relative">
-                <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
+                <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-3" />
                 <input
                   type="text"
-                  placeholder="Search dishes by name or code (e.g. Margherita, Ribeye)..."
+                  placeholder="Search dishes by name or SKU code (e.g. Biryani, Margherita)..."
                   value={searchItem}
                   onChange={(e) => setSearchItem(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               {/* Category Pills */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                 <button
                   onClick={() => setSelectedCategoryId('ALL')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
                     selectedCategoryId === 'ALL'
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      ? 'bg-[#d4a437] text-black shadow-md'
+                      : 'bg-[#0c0c0e] text-neutral-400 hover:text-white border border-white/[0.06]'
                   }`}
                 >
                   All Items ({menuItems.length})
@@ -594,8 +597,8 @@ export const RestaurantPOSPage: React.FC = () => {
                     onClick={() => setSelectedCategoryId(cat.id)}
                     className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
                       selectedCategoryId === cat.id
-                        ? 'bg-rose-600 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        ? 'bg-[#d4a437] text-black shadow-md'
+                        : 'bg-[#0c0c0e] text-neutral-400 hover:text-white border border-white/[0.06]'
                     }`}
                   >
                     {cat.name}
@@ -605,62 +608,70 @@ export const RestaurantPOSPage: React.FC = () => {
             </div>
 
             {/* Menu Items Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 gap-3">
-              {filteredMenuItems.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => handleAddToCart(item)}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-rose-300 hover:shadow-md transition text-left flex flex-col justify-between h-44 group relative overflow-hidden active:scale-95"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        {item.code}
-                      </span>
-                      {item.recipe && (
-                        <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded flex items-center gap-1">
-                          <ChefHat className="w-2.5 h-2.5" /> BOM
+            {filteredMenuItems.length === 0 ? (
+              <div className="p-12 text-center bg-[#17171b] rounded-3xl border border-white/[0.08] space-y-3 text-neutral-500">
+                <Utensils className="w-10 h-10 mx-auto" />
+                <h4 className="text-sm font-bold text-white">No Menu Items Found</h4>
+                <p className="text-xs text-neutral-400">Add dishes to this menu category or clear your search filter.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {filteredMenuItems.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => handleAddToCart(item)}
+                    className="bg-[#17171b] p-4 rounded-2xl border border-white/[0.08] hover:border-[#d4a437]/50 hover:shadow-xl transition text-left flex flex-col justify-between h-44 group relative overflow-hidden active:scale-95"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-400">
+                          {item.code}
                         </span>
-                      )}
-                    </div>
-                    <h3 className="font-bold text-slate-900 text-sm line-clamp-2 group-hover:text-rose-600 transition">
-                      {item.name}
-                    </h3>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs text-slate-500">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> {item.preparationMinutes}m
-                      </span>
-                      <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 font-medium">
-                        {item.kitchenStation.replace('_STATION', '')}
-                      </span>
+                        {item.recipe && (
+                          <span className="px-1.5 py-0.5 bg-[#3fbf6f]/15 text-[#3fbf6f] border border-[#3fbf6f]/25 text-[9px] font-bold rounded flex items-center gap-1">
+                            <ChefHat className="w-2.5 h-2.5" /> BOM
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="font-bold text-white text-xs sm:text-sm line-clamp-2 group-hover:text-[#d4a437] transition">
+                        {item.name}
+                      </h3>
                     </div>
 
-                    <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                      <span className="text-base font-extrabold text-slate-900">
-                        {formatINR(item.price)}
-                      </span>
-                      <span className="p-1 bg-rose-50 text-rose-600 rounded-lg group-hover:bg-rose-600 group-hover:text-white transition">
-                        <Plus className="w-4 h-4" />
-                      </span>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-neutral-500" /> {item.preparationMinutes}m
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 bg-[#0c0c0e] rounded text-neutral-300 font-mono border border-white/[0.06]">
+                          {item.kitchenStation.replace('_STATION', '')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-white/[0.06]">
+                        <span className="text-sm sm:text-base font-extrabold text-[#3fbf6f] font-mono">
+                          {formatINR(item.price)}
+                        </span>
+                        <span className="p-1 bg-[#202026] text-[#d4a437] rounded-lg group-hover:bg-[#d4a437] group-hover:text-black transition">
+                          <Plus className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
-            </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Right 1 Col: Live Fast Order Cart */}
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between h-full min-h-[580px]">
+          <div className="bg-[#17171b] p-5 rounded-3xl shadow-xl border border-white/[0.08] flex flex-col justify-between h-full min-h-[580px]">
             <div className="space-y-4">
               {/* Order Info Bar */}
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
                 <div className="flex items-center gap-2">
-                  <Receipt className="w-5 h-5 text-rose-600" />
-                  <h2 className="font-bold text-slate-900">
-                    {activeOrder ? `Order #${activeOrder.orderNumber}` : 'New Order'}
+                  <Receipt className="w-4 h-4 text-[#d4a437]" />
+                  <h2 className="font-bold text-white text-sm">
+                    {activeOrder ? `Order #${activeOrder.orderNumber}` : 'New POS Order'}
                   </h2>
                 </div>
 
@@ -668,11 +679,11 @@ export const RestaurantPOSPage: React.FC = () => {
                 <select
                   value={posTableId}
                   onChange={(e) => setPosTableId(e.target.value)}
-                  className="text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 rounded-lg px-2.5 py-1.5 focus:outline-none"
+                  className="text-xs font-bold bg-[#0c0c0e] text-[#d4a437] border border-[#d4a437]/30 rounded-xl px-2.5 py-1.5 focus:outline-none"
                 >
-                  <option value="">Counter / Takeaway</option>
+                  <option value="" className="bg-[#17171b] text-white">Counter / Takeaway</option>
                   {tables.map((t) => (
-                    <option key={t.id} value={t.id}>
+                    <option key={t.id} value={t.id} className="bg-[#17171b] text-white">
                       {t.name || `Table ${t.tableNumber}`} ({t.status})
                     </option>
                   ))}
@@ -680,14 +691,14 @@ export const RestaurantPOSPage: React.FC = () => {
               </div>
 
               {/* Order Type & Guest Count */}
-              <div className="space-y-2">
-                <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-xl text-xs font-bold text-slate-600">
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-3 gap-1.5 bg-[#0c0c0e] p-1 rounded-2xl text-xs font-bold text-neutral-400 border border-white/[0.06]">
                   {['DINE_IN', 'TAKEAWAY', 'DELIVERY'].map((type) => (
                     <button
                       key={type}
                       onClick={() => setPosOrderType(type)}
-                      className={`py-1.5 rounded-lg transition ${
-                        posOrderType === type ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-900'
+                      className={`py-1.5 rounded-xl transition ${
+                        posOrderType === type ? 'bg-[#d4a437] text-black shadow-sm' : 'hover:text-white'
                       }`}
                     >
                       {type.replace('_', ' ')}
@@ -696,23 +707,23 @@ export const RestaurantPOSPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg text-slate-600 flex-1">
-                    <Users className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Guests:</span>
+                  <div className="flex items-center gap-1.5 bg-[#0c0c0e] border border-white/[0.09] px-2.5 py-1.5 rounded-xl text-neutral-300 flex-1">
+                    <Users className="w-3.5 h-3.5 text-neutral-500" />
+                    <span className="text-[11px]">Guests:</span>
                     <input
                       type="number"
                       min="1"
                       value={posGuestCount}
                       onChange={(e) => setPosGuestCount(Number(e.target.value))}
-                      className="w-10 bg-transparent font-bold text-slate-900 focus:outline-none"
+                      className="w-10 bg-transparent font-bold text-white focus:outline-none font-mono"
                     />
                   </div>
                   <input
                     type="text"
-                    placeholder="Guest Name (Optional)"
+                    placeholder="Guest Name"
                     value={posCustomerName}
                     onChange={(e) => setPosCustomerName(e.target.value)}
-                    className="flex-1 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none"
+                    className="flex-1 px-2.5 py-1.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                   />
                 </div>
 
@@ -721,48 +732,48 @@ export const RestaurantPOSPage: React.FC = () => {
                   placeholder="Order Kitchen Notes (e.g. VIP, allergy alerts)"
                   value={posOrderNotes}
                   onChange={(e) => setPosOrderNotes(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none"
+                  className="w-full px-2.5 py-1.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               {/* Cart Items List */}
-              <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1">
+              <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1 scrollbar-none">
                 {cartItems.length === 0 ? (
-                  <div className="text-center py-10 text-slate-400 space-y-2">
-                    <Utensils className="w-8 h-8 mx-auto stroke-1" />
-                    <p className="text-xs">Cart is empty. Tap items to add to ticket.</p>
+                  <div className="text-center py-10 text-neutral-500 space-y-2 bg-[#0c0c0e] rounded-2xl border border-white/[0.04]">
+                    <Utensils className="w-7 h-7 mx-auto stroke-1 text-neutral-600" />
+                    <p className="text-xs">Ticket is empty. Tap menu items to add to order.</p>
                   </div>
                 ) : (
                   cartItems.map((c) => (
                     <div
                       key={c.menuItem.id}
-                      className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-3 text-sm"
+                      className="p-3 bg-[#0c0c0e] rounded-2xl border border-white/[0.06] flex items-center justify-between gap-3 text-xs"
                     >
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-semibold text-slate-800 text-xs truncate">{c.menuItem.name}</h4>
-                        <div className="text-[11px] text-slate-400">
+                        <h4 className="font-semibold text-white truncate">{c.menuItem.name}</h4>
+                        <div className="text-[11px] text-neutral-400 font-mono">
                           {formatINR(c.menuItem.price)} each
                         </div>
                       </div>
 
                       {/* Qty Controls */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handleUpdateQty(c.menuItem.id, -1)}
-                          className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center font-bold text-slate-600 hover:bg-slate-100"
+                          className="w-6 h-6 rounded-lg bg-[#202026] border border-white/[0.08] flex items-center justify-center font-bold text-neutral-300 hover:bg-[#282832] transition"
                         >
                           -
                         </button>
-                        <span className="font-bold text-xs w-4 text-center">{c.quantity}</span>
+                        <span className="font-bold text-xs w-4 text-center text-white font-mono">{c.quantity}</span>
                         <button
                           onClick={() => handleUpdateQty(c.menuItem.id, 1)}
-                          className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center font-bold text-slate-600 hover:bg-slate-100"
+                          className="w-6 h-6 rounded-lg bg-[#202026] border border-white/[0.08] flex items-center justify-center font-bold text-neutral-300 hover:bg-[#282832] transition"
                         >
                           +
                         </button>
                       </div>
 
-                      <div className="text-right font-bold text-slate-900 text-xs min-w-[50px]">
+                      <div className="text-right font-bold text-[#3fbf6f] font-mono min-w-[50px]">
                         {formatINR(Number(c.menuItem.price) * c.quantity)}
                       </div>
                     </div>
@@ -772,25 +783,25 @@ export const RestaurantPOSPage: React.FC = () => {
             </div>
 
             {/* Cart Footer & Totals */}
-            <div className="space-y-3 pt-3 border-t border-slate-100">
+            <div className="space-y-3 pt-3 border-t border-white/[0.06]">
               <div className="space-y-1 text-xs">
-                <div className="flex justify-between text-slate-500">
+                <div className="flex justify-between text-neutral-400">
                   <span>Taxable Subtotal</span>
-                  <span className="font-semibold">{formatINR(cartSubtotal)}</span>
+                  <span className="font-semibold text-white font-mono">{formatINR(cartSubtotal)}</span>
                 </div>
-                <div className="flex justify-between text-slate-500">
+                <div className="flex justify-between text-neutral-400">
                   <span>GST (CGST 2.5% + SGST 2.5%)</span>
-                  <span className="font-semibold">{formatINR(cartTax)}</span>
+                  <span className="font-semibold text-white font-mono">{formatINR(cartTax)}</span>
                 </div>
                 {activeDiscountAmount > 0 && (
-                  <div className="flex justify-between text-rose-600 font-semibold">
-                    <span>Discount</span>
-                    <span>-{formatINR(activeDiscountAmount)}</span>
+                  <div className="flex justify-between text-[#e5544d] font-semibold">
+                    <span>Courtesy Discount</span>
+                    <span className="font-mono">-{formatINR(activeDiscountAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-base font-extrabold text-slate-900 pt-1 border-t border-slate-100">
+                <div className="flex justify-between text-sm sm:text-base font-extrabold text-white pt-1 border-t border-white/[0.06]">
                   <span>Grand Total</span>
-                  <span>{formatINR(cartGrandTotal)}</span>
+                  <span className="text-[#3fbf6f] font-mono">{formatINR(cartGrandTotal)}</span>
                 </div>
               </div>
 
@@ -798,15 +809,15 @@ export const RestaurantPOSPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setIsDiscountModalOpen(true)}
-                  className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
+                  className="py-2.5 px-3 bg-[#202026] hover:bg-[#282832] text-neutral-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition border border-white/[0.06]"
                 >
-                  <Percent className="w-3.5 h-3.5" /> Discount
+                  <Percent className="w-3.5 h-3.5 text-[#d4a437]" /> Discount
                 </button>
 
                 <button
                   onClick={handleSendToKitchen}
                   disabled={cartItems.length === 0 || loading}
-                  className="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+                  className="py-2.5 px-3 bg-[#e5a33d] hover:bg-[#c98e32] text-black font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-40"
                 >
                   <Send className="w-3.5 h-3.5" /> Send to KDS
                 </button>
@@ -815,9 +826,9 @@ export const RestaurantPOSPage: React.FC = () => {
               <button
                 onClick={() => setIsCheckoutModalOpen(true)}
                 disabled={cartItems.length === 0 || loading}
-                className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl text-sm shadow-md shadow-rose-200 flex items-center justify-center gap-2 transition disabled:opacity-50"
+                className="w-full py-3.5 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-2xl text-xs uppercase tracking-wider shadow-lg shadow-[#d4a437]/20 flex items-center justify-center gap-2 transition disabled:opacity-40"
               >
-                <DollarSign className="w-5 h-5" /> Settle Bill ({formatINR(cartGrandTotal)})
+                <IndianRupee className="w-4 h-4" /> Settle Bill ({formatINR(cartGrandTotal)})
               </button>
             </div>
           </div>
@@ -829,13 +840,15 @@ export const RestaurantPOSPage: React.FC = () => {
       {/* ========================================================== */}
       {activeTab === 'tables' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#17171b] p-4 rounded-3xl shadow-xl border border-white/[0.08]">
             {/* Section Filters */}
-            <div className="flex items-center gap-2 overflow-x-auto">
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
               <button
                 onClick={() => setSelectedSection('ALL')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
-                  selectedSection === 'ALL' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  selectedSection === 'ALL'
+                    ? 'bg-[#d4a437] text-black shadow-md'
+                    : 'bg-[#0c0c0e] text-neutral-400 hover:text-white border border-white/[0.06]'
                 }`}
               >
                 All Sections
@@ -844,8 +857,10 @@ export const RestaurantPOSPage: React.FC = () => {
                 <button
                   key={sec}
                   onClick={() => setSelectedSection(sec)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
-                    selectedSection === sec ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600'
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                    selectedSection === sec
+                      ? 'bg-[#d4a437] text-black shadow-md'
+                      : 'bg-[#0c0c0e] text-neutral-400 hover:text-white border border-white/[0.06]'
                   }`}
                 >
                   {sec}
@@ -856,13 +871,13 @@ export const RestaurantPOSPage: React.FC = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsMergeModalOpen(true)}
-                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition"
+                className="px-3.5 py-2 bg-[#202026] hover:bg-[#282832] text-neutral-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition border border-white/[0.06]"
               >
-                <GitMerge className="w-4 h-4" /> Merge Tables
+                <GitMerge className="w-4 h-4 text-[#d4a437]" /> Merge Tables
               </button>
               <button
                 onClick={() => setIsNewTableModalOpen(true)}
-                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow-sm"
+                className="px-3.5 py-2 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow-lg shadow-[#d4a437]/20"
               >
                 <Plus className="w-4 h-4" /> Add Table
               </button>
@@ -870,75 +885,83 @@ export const RestaurantPOSPage: React.FC = () => {
           </div>
 
           {/* Tables Visual Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {filteredTables.map((t) => {
-              const isOccupied = t.status === 'OCCUPIED';
-              const isCleaning = t.status === 'CLEANING';
-              const isReserved = t.status === 'RESERVED';
-              const activeOrd = t.orders?.[0];
+          {filteredTables.length === 0 ? (
+            <div className="p-16 text-center bg-[#17171b] rounded-3xl border border-white/[0.08] space-y-3 text-neutral-500">
+              <Grid className="w-10 h-10 mx-auto" />
+              <h4 className="text-sm font-bold text-white">No Tables In This Floor Section</h4>
+              <p className="text-xs text-neutral-400">Click &quot;Add Table&quot; to configure dining stations and seating capacities.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {filteredTables.map((t) => {
+                const isOccupied = t.status === 'OCCUPIED';
+                const isCleaning = t.status === 'CLEANING';
+                const isReserved = t.status === 'RESERVED';
+                const activeOrd = t.orders?.[0];
 
-              return (
-                <div
-                  key={t.id}
-                  onClick={() => handleSelectTableForOrder(t)}
-                  className={`p-4 rounded-2xl border transition text-left cursor-pointer flex flex-col justify-between h-48 relative shadow-sm ${
-                    isOccupied
-                      ? 'bg-amber-50/70 border-amber-300 hover:border-amber-400'
-                      : isCleaning
-                      ? 'bg-cyan-50/70 border-cyan-300 hover:border-cyan-400'
-                      : isReserved
-                      ? 'bg-purple-50/70 border-purple-300 hover:border-purple-400'
-                      : 'bg-white border-slate-200 hover:border-rose-400 hover:shadow-md'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="text-xs font-extrabold text-slate-900">{t.name || `Table ${t.tableNumber}`}</span>
-                      <p className="text-[11px] text-slate-400">{t.section}</p>
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => handleSelectTableForOrder(t)}
+                    className={`p-4 rounded-3xl border transition text-left cursor-pointer flex flex-col justify-between h-48 relative shadow-lg ${
+                      isOccupied
+                        ? 'bg-[#17171b] border-[#e5a33d]/40 hover:border-[#e5a33d]'
+                        : isCleaning
+                        ? 'bg-[#17171b] border-[#4d9de5]/40 hover:border-[#4d9de5]'
+                        : isReserved
+                        ? 'bg-[#17171b] border-[#996f1b]/40 hover:border-[#d4a437]'
+                        : 'bg-[#17171b] border-white/[0.08] hover:border-[#d4a437]/60'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className="text-xs sm:text-sm font-extrabold text-white">{t.name || `Table ${t.tableNumber}`}</span>
+                        <p className="text-[10px] text-neutral-400">{t.section}</p>
+                      </div>
+
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wide border ${
+                          isOccupied
+                            ? 'bg-[#e5a33d]/15 text-[#e5a33d] border-[#e5a33d]/25'
+                            : isCleaning
+                            ? 'bg-[#4d9de5]/15 text-[#4d9de5] border-[#4d9de5]/25'
+                            : isReserved
+                            ? 'bg-[#d4a437]/15 text-[#d4a437] border-[#d4a437]/25'
+                            : 'bg-[#3fbf6f]/15 text-[#3fbf6f] border-[#3fbf6f]/25'
+                        }`}
+                      >
+                        {t.status}
+                      </span>
                     </div>
 
-                    <span
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wide ${
-                        isOccupied
-                          ? 'bg-amber-200 text-amber-900'
-                          : isCleaning
-                          ? 'bg-cyan-200 text-cyan-900'
-                          : isReserved
-                          ? 'bg-purple-200 text-purple-900'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}
-                    >
-                      {t.status}
-                    </span>
+                    {isOccupied && activeOrd ? (
+                      <div className="space-y-1 bg-[#0c0c0e] p-2.5 rounded-2xl border border-white/[0.06] text-xs">
+                        <div className="flex justify-between font-bold text-white">
+                          <span className="font-mono text-[11px]">{activeOrd.orderNumber}</span>
+                        </div>
+                        <div className="flex justify-between text-xs font-bold pt-1 border-t border-white/[0.06]">
+                          <span className="text-neutral-400 text-[10px]">Running Bill:</span>
+                          <span className="text-[#3fbf6f] font-mono">{formatINR(activeOrd.grandTotal)}</span>
+                        </div>
+                        <div className="text-[10px] text-neutral-400">
+                          {activeOrd.items?.length || 0} items ordered
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-2 text-neutral-600">
+                        <Utensils className="w-6 h-6 mx-auto stroke-1" />
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between text-[11px] text-neutral-400 pt-2 border-t border-white/[0.06]">
+                      <span>{t.capacity} Seats</span>
+                      <span className="text-[#d4a437] font-bold text-[10px]">Select →</span>
+                    </div>
                   </div>
-
-                  {isOccupied && activeOrd ? (
-                    <div className="space-y-1 bg-white/80 backdrop-blur p-2.5 rounded-xl border border-amber-200 text-xs">
-                      <div className="flex justify-between font-bold text-slate-800">
-                        <span>{activeOrd.orderNumber}</span>
-                      </div>
-                      <div className="flex justify-between text-xs font-bold pt-1 border-t border-slate-100">
-                        <span className="text-slate-500">Running Bill:</span>
-                        <span className="text-rose-600">{formatINR(activeOrd.grandTotal)}</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500">
-                        {activeOrd.items?.length || 0} items ordered
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-2 text-slate-300">
-                      <Utensils className="w-6 h-6 mx-auto stroke-1" />
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100">
-                    <span>Capacity: {t.capacity} seats</span>
-                    <span className="text-rose-600 font-bold">Tap to Order →</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -947,15 +970,17 @@ export const RestaurantPOSPage: React.FC = () => {
       {/* ========================================================== */}
       {activeTab === 'kds' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#17171b] p-4 rounded-3xl shadow-xl border border-white/[0.08]">
             {/* Station Filter Pills */}
-            <div className="flex items-center gap-2 overflow-x-auto">
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
               {['ALL', 'MAIN_KITCHEN', 'PIZZA_STATION', 'GRILL_STATION', 'BAR'].map((station) => (
                 <button
                   key={station}
                   onClick={() => setSelectedKdsStation(station)}
                   className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                    selectedKdsStation === station ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+                    selectedKdsStation === station
+                      ? 'bg-[#d4a437] text-black shadow-md'
+                      : 'bg-[#0c0c0e] text-neutral-400 hover:text-white border border-white/[0.06]'
                   }`}
                 >
                   {station.replace('_', ' ')}
@@ -964,18 +989,18 @@ export const RestaurantPOSPage: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs font-bold text-neutral-300 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={kdsAutoRefresh}
                   onChange={(e) => setKdsAutoRefresh(e.target.checked)}
-                  className="rounded text-rose-600 focus:ring-rose-500"
+                  className="rounded text-[#d4a437] bg-[#0c0c0e] border-white/[0.1] focus:ring-0"
                 />
                 Auto-Refresh (5s)
               </label>
               <button
                 onClick={() => loadBranchData(selectedBranchId)}
-                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 rounded-xl"
+                className="p-2 text-neutral-400 hover:text-white bg-[#0c0c0e] hover:bg-[#202026] border border-white/[0.08] rounded-xl transition"
               >
                 <RefreshCw className="w-4 h-4" />
               </button>
@@ -985,9 +1010,10 @@ export const RestaurantPOSPage: React.FC = () => {
           {/* Ticket Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredTickets.length === 0 ? (
-              <div className="col-span-full text-center py-16 bg-white rounded-2xl border border-slate-200 text-slate-400 space-y-2">
-                <ChefHat className="w-10 h-10 mx-auto stroke-1" />
-                <p className="font-bold text-sm">All tickets cleared! Kitchen is calm.</p>
+              <div className="col-span-full text-center py-16 bg-[#17171b] rounded-3xl border border-white/[0.08] text-neutral-500 space-y-2">
+                <ChefHat className="w-10 h-10 mx-auto stroke-1 text-neutral-600" />
+                <p className="font-bold text-sm text-white">All KOT Tickets Cleared</p>
+                <p className="text-xs text-neutral-400">Kitchen is running smoothly. New POS orders will appear automatically.</p>
               </div>
             ) : (
               filteredTickets.map((ticket) => {
@@ -998,32 +1024,36 @@ export const RestaurantPOSPage: React.FC = () => {
                 return (
                   <div
                     key={ticket.id}
-                    className={`bg-white rounded-2xl border-2 flex flex-col justify-between shadow-sm overflow-hidden ${
+                    className={`bg-[#17171b] rounded-3xl border flex flex-col justify-between shadow-xl overflow-hidden ${
                       isReady
-                        ? 'border-emerald-500'
+                        ? 'border-[#3fbf6f]/50'
                         : isPreparing
-                        ? 'border-amber-400'
-                        : 'border-slate-200'
+                        ? 'border-[#e5a33d]/50'
+                        : 'border-white/[0.08]'
                     }`}
                   >
                     {/* Ticket Header */}
                     <div
-                      className={`p-3.5 text-white flex items-center justify-between ${
-                        isReady ? 'bg-emerald-600' : isPreparing ? 'bg-amber-500' : 'bg-slate-800'
+                      className={`p-3.5 text-white flex items-center justify-between border-b ${
+                        isReady
+                          ? 'bg-[#3fbf6f]/20 border-[#3fbf6f]/30'
+                          : isPreparing
+                          ? 'bg-[#e5a33d]/20 border-[#e5a33d]/30'
+                          : 'bg-[#202026] border-white/[0.08]'
                       }`}
                     >
                       <div>
-                        <span className="font-extrabold text-sm tracking-wide">{ticket.ticketNumber}</span>
-                        <div className="text-[11px] opacity-90">
+                        <span className="font-extrabold text-sm tracking-wide font-mono">{ticket.ticketNumber}</span>
+                        <div className="text-[11px] text-neutral-300">
                           {ticket.order?.table?.name || `Table ${ticket.order?.table?.tableNumber || 'Takeaway'}`}
                         </div>
                       </div>
 
                       <div className="text-right">
-                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-black/20 rounded">
+                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-[#0c0c0e] rounded text-[#d4a437] border border-white/[0.06]">
                           {ticket.station.replace('_STATION', '')}
                         </span>
-                        <div className="text-[10px] opacity-80 mt-0.5 flex items-center justify-end gap-1">
+                        <div className="text-[10px] text-neutral-400 mt-0.5 flex items-center justify-end gap-1 font-mono">
                           <Clock className="w-2.5 h-2.5" />
                           {new Date(ticket.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
@@ -1031,16 +1061,16 @@ export const RestaurantPOSPage: React.FC = () => {
                     </div>
 
                     {/* Ticket Items List */}
-                    <div className="p-4 space-y-2.5 flex-1 min-h-[160px]">
+                    <div className="p-4 space-y-2.5 flex-1 min-h-[160px] bg-[#17171b]">
                       {ticket.items.map((item) => (
-                        <div key={item.id} className="flex items-start justify-between text-sm border-b border-slate-100 pb-2">
+                        <div key={item.id} className="flex items-start justify-between text-xs border-b border-white/[0.06] pb-2">
                           <div className="space-y-0.5">
-                            <span className="font-bold text-slate-800">
+                            <span className="font-bold text-white font-mono">
                               {Number(item.quantity)}x {item.orderItem?.name}
                             </span>
                             {item.notes && (
-                              <p className="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-medium">
-                                ⚠️ Note: {item.notes}
+                              <p className="text-[10px] text-[#e5a33d] bg-[#e5a33d]/10 px-2 py-0.5 rounded font-medium border border-[#e5a33d]/20">
+                                Note: {item.notes}
                               </p>
                             )}
                           </div>
@@ -1049,11 +1079,11 @@ export const RestaurantPOSPage: React.FC = () => {
                     </div>
 
                     {/* Ticket Workflow Action Buttons */}
-                    <div className="p-3 bg-slate-50 border-t border-slate-100 flex gap-2">
+                    <div className="p-3 bg-[#0c0c0e] border-t border-white/[0.06] flex gap-2">
                       {isPending && (
                         <button
                           onClick={() => handleUpdateKdsStatus(ticket.id, 'PREPARING')}
-                          className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition"
+                          className="w-full py-2 bg-[#e5a33d] hover:bg-[#c98e32] text-black text-xs font-bold rounded-xl transition"
                         >
                           Start Preparing 🍳
                         </button>
@@ -1062,7 +1092,7 @@ export const RestaurantPOSPage: React.FC = () => {
                       {isPreparing && (
                         <button
                           onClick={() => handleUpdateKdsStatus(ticket.id, 'READY')}
-                          className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition"
+                          className="w-full py-2 bg-[#3fbf6f] hover:bg-[#329958] text-black text-xs font-bold rounded-xl transition"
                         >
                           Mark Ready 🔔
                         </button>
@@ -1071,7 +1101,7 @@ export const RestaurantPOSPage: React.FC = () => {
                       {isReady && (
                         <button
                           onClick={() => handleUpdateKdsStatus(ticket.id, 'SERVED')}
-                          className="w-full py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition"
+                          className="w-full py-2 bg-[#d4a437] hover:bg-[#b88c2c] text-black text-xs font-bold rounded-xl transition"
                         >
                           Mark Served ✅
                         </button>
@@ -1090,23 +1120,23 @@ export const RestaurantPOSPage: React.FC = () => {
       {/* ========================================================== */}
       {activeTab === 'menu' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#17171b] p-5 rounded-3xl shadow-xl border border-white/[0.08]">
             <div>
-              <h2 className="font-bold text-slate-900">Menu & Recipe Bill of Materials (BOM)</h2>
-              <p className="text-xs text-slate-500">Every menu item links to raw ingredients to calculate live food cost and automate kitchen stock consumption.</p>
+              <h2 className="font-bold text-white uppercase text-sm tracking-wider">Menu Catalog & Recipe BOM Links</h2>
+              <p className="text-xs text-neutral-400 mt-0.5">Every menu item links to raw ingredients to calculate live food cost and automate kitchen stock deduction.</p>
             </div>
 
             <button
               onClick={() => setIsNewMenuItemModalOpen(true)}
-              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 transition shadow-sm"
+              className="px-4 py-2.5 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-2xl text-xs flex items-center gap-2 transition shadow-lg shadow-[#d4a437]/20"
             >
               <Plus className="w-4 h-4" /> Add Menu Item
             </button>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200 text-xs font-bold uppercase text-slate-500">
+          <div className="bg-[#17171b] rounded-3xl border border-white/[0.08] overflow-hidden shadow-xl">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-[#0c0c0e] border-b border-white/[0.08] text-[10px] font-bold uppercase tracking-wider text-neutral-400">
                 <tr>
                   <th className="p-4">Item Code & Name</th>
                   <th className="p-4">Category</th>
@@ -1117,46 +1147,56 @@ export const RestaurantPOSPage: React.FC = () => {
                   <th className="p-4">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {menuItems.map((item) => {
-                  const price = Number(item.price);
-                  const cost = Number(item.costPrice);
-                  const margin = price > 0 ? (((price - cost) / price) * 100).toFixed(1) : '0';
+              <tbody className="divide-y divide-white/[0.06]">
+                {menuItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-12 text-center text-neutral-500 space-y-2">
+                      <Utensils className="w-8 h-8 mx-auto" />
+                      <p className="text-sm font-semibold text-white">No dishes registered in menu catalog</p>
+                      <p className="text-xs text-neutral-400">Click &quot;Add Menu Item&quot; to link your recipes and start selling on the POS terminal.</p>
+                    </td>
+                  </tr>
+                ) : (
+                  menuItems.map((item) => {
+                    const price = Number(item.price);
+                    const cost = Number(item.costPrice);
+                    const margin = price > 0 ? (((price - cost) / price) * 100).toFixed(1) : '0';
 
-                  return (
-                    <tr key={item.id} className="hover:bg-slate-50/80 transition">
-                      <td className="p-4">
-                        <div className="font-bold text-slate-900">{item.name}</div>
-                        <span className="text-xs text-slate-400">{item.code}</span>
-                      </td>
-                      <td className="p-4 text-slate-600">{item.category?.name || 'General'}</td>
-                      <td className="p-4 font-extrabold text-slate-900">{formatINR(price)}</td>
-                      <td className="p-4">
-                        <span className="font-semibold text-emerald-700">{formatINR(cost)}</span>
-                        {item.recipe && (
-                          <span className="ml-1 text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">
-                            BOM Linked
+                    return (
+                      <tr key={item.id} className="hover:bg-white/[0.02] transition">
+                        <td className="p-4">
+                          <div className="font-bold text-white">{item.name}</div>
+                          <span className="text-[10px] text-neutral-400 font-mono">{item.code}</span>
+                        </td>
+                        <td className="p-4 text-neutral-300">{item.category?.name || 'General'}</td>
+                        <td className="p-4 font-bold text-white font-mono">{formatINR(price)}</td>
+                        <td className="p-4">
+                          <span className="font-semibold text-[#3fbf6f] font-mono">{formatINR(cost)}</span>
+                          {item.recipe && (
+                            <span className="ml-2 text-[9px] bg-[#3fbf6f]/15 text-[#3fbf6f] border border-[#3fbf6f]/25 font-bold px-1.5 py-0.5 rounded">
+                              BOM Linked
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <span className="px-2 py-0.5 bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/25 font-bold rounded text-[10px]">
+                            {margin}%
                           </span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded text-xs">
-                          {margin}%
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-xs px-2 py-1 bg-slate-100 text-slate-700 rounded-md font-medium">
-                          {item.kitchenStation}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full">
-                          Available
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="p-4">
+                          <span className="text-[10px] px-2 py-1 bg-[#0c0c0e] text-neutral-300 rounded-lg font-mono border border-white/[0.06]">
+                            {item.kitchenStation}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <span className="px-2 py-0.5 bg-[#3fbf6f]/15 text-[#3fbf6f] border border-[#3fbf6f]/25 font-bold text-[10px] rounded-full">
+                            Active
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -1170,90 +1210,90 @@ export const RestaurantPOSPage: React.FC = () => {
         <div className="space-y-6">
           {/* KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-              <div className="flex items-center justify-between text-slate-400">
-                <span className="text-xs font-bold uppercase">Total Revenue</span>
-                <DollarSign className="w-5 h-5 text-emerald-600" />
+            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-xl space-y-2">
+              <div className="flex items-center justify-between text-neutral-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Total Revenue</span>
+                <IndianRupee className="w-4 h-4 text-[#3fbf6f]" />
               </div>
-              <div className="text-2xl font-extrabold text-slate-900">
+              <div className="text-2xl font-extrabold text-white font-mono">
                 {formatINR(salesAnalytics.summary.totalRevenue)}
               </div>
-              <div className="text-xs text-slate-500 font-medium">
+              <div className="text-xs text-neutral-400">
                 {salesAnalytics.summary.totalOrders} total completed orders
               </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-              <div className="flex items-center justify-between text-slate-400">
-                <span className="text-xs font-bold uppercase">Kitchen Food Cost (COGS)</span>
-                <ChefHat className="w-5 h-5 text-rose-600" />
+            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-xl space-y-2">
+              <div className="flex items-center justify-between text-neutral-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Food Cost (COGS)</span>
+                <ChefHat className="w-4 h-4 text-[#e5544d]" />
               </div>
-              <div className="text-2xl font-extrabold text-slate-900">
+              <div className="text-2xl font-extrabold text-[#e5544d] font-mono">
                 {formatINR(salesAnalytics.summary.totalCogs)}
               </div>
-              <div className="text-xs text-emerald-600 font-bold">
+              <div className="text-xs text-[#3fbf6f] font-bold">
                 Food Cost: {salesAnalytics.summary.foodCostPercentage}%
               </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-              <div className="flex items-center justify-between text-slate-400">
-                <span className="text-xs font-bold uppercase">Gross Profit Margin</span>
-                <TrendingUp className="w-5 h-5 text-indigo-600" />
+            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-xl space-y-2">
+              <div className="flex items-center justify-between text-neutral-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Gross Profit Margin</span>
+                <TrendingUp className="w-4 h-4 text-[#d4a437]" />
               </div>
-              <div className="text-2xl font-extrabold text-emerald-600">
+              <div className="text-2xl font-extrabold text-[#3fbf6f] font-mono">
                 {formatINR(salesAnalytics.summary.totalProfit)}
               </div>
-              <div className="text-xs text-slate-500 font-medium">
+              <div className="text-xs text-neutral-400">
                 Gross margin after recipe BOM deductions
               </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-              <div className="flex items-center justify-between text-slate-400">
-                <span className="text-xs font-bold uppercase">Average Check (Per Order)</span>
-                <Receipt className="w-5 h-5 text-amber-600" />
+            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-xl space-y-2">
+              <div className="flex items-center justify-between text-neutral-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Average Check</span>
+                <Receipt className="w-4 h-4 text-[#e5a33d]" />
               </div>
-              <div className="text-2xl font-extrabold text-slate-900">
+              <div className="text-2xl font-extrabold text-white font-mono">
                 {formatINR(salesAnalytics.summary.averageTicketSize)}
               </div>
-              <div className="text-xs text-slate-500 font-medium">Per table order size</div>
+              <div className="text-xs text-neutral-400">Per table check size</div>
             </div>
           </div>
 
           {/* Top Selling Items & Payment Methods */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <Flame className="w-4 h-4 text-rose-600" /> Top Selling Menu Items
+            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-xl space-y-4">
+              <h3 className="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+                <Flame className="w-4 h-4 text-[#e5544d]" /> Top Selling Dishes
               </h3>
               <div className="space-y-3">
                 {salesAnalytics.topSellingItems.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-sm">
+                  <div key={idx} className="flex items-center justify-between text-xs border-b border-white/[0.06] pb-2.5">
                     <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 rounded-full bg-slate-100 font-bold text-xs flex items-center justify-center text-slate-600">
+                      <span className="w-5 h-5 rounded-full bg-[#0c0c0e] font-bold text-[10px] flex items-center justify-center text-[#d4a437] border border-white/[0.06]">
                         {idx + 1}
                       </span>
-                      <span className="font-semibold text-slate-800">{item.name}</span>
+                      <span className="font-semibold text-white">{item.name}</span>
                     </div>
                     <div className="text-right">
-                      <span className="font-bold text-slate-900">{formatINR(item.revenue)}</span>
-                      <span className="text-xs text-slate-400 ml-2">({item.quantity} sold)</span>
+                      <span className="font-bold text-[#3fbf6f] font-mono">{formatINR(item.revenue)}</span>
+                      <span className="text-[10px] text-neutral-400 ml-2">({item.quantity} sold)</span>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-indigo-600" /> Payment Mode Breakdown
+            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-xl space-y-4">
+              <h3 className="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+                <CreditCard className="w-4 h-4 text-[#d4a437]" /> Settlement Mode Breakdown
               </h3>
               <div className="space-y-3">
                 {Object.entries(salesAnalytics.paymentBreakdown).map(([method, amt]) => (
-                  <div key={method} className="flex items-center justify-between text-sm">
-                    <span className="font-semibold text-slate-700">{method}</span>
-                    <span className="font-bold text-slate-900">{formatINR(amt)}</span>
+                  <div key={method} className="flex items-center justify-between text-xs border-b border-white/[0.06] pb-2.5">
+                    <span className="font-semibold text-neutral-300">{method}</span>
+                    <span className="font-bold text-white font-mono">{formatINR(amt)}</span>
                   </div>
                 ))}
               </div>
@@ -1266,59 +1306,59 @@ export const RestaurantPOSPage: React.FC = () => {
       {/* MODAL 1: CHECKOUT & SETTLE BILL */}
       {/* ========================================================== */}
       {isCheckoutModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2 text-rose-600">
-                <DollarSign className="w-6 h-6" />
-                <h3 className="text-lg font-bold text-slate-900">Settle POS Payment</h3>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#17171b] rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-white/[0.1]">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <div className="flex items-center gap-2 text-[#d4a437]">
+                <IndianRupee className="w-5 h-5" />
+                <h3 className="text-base font-bold text-white uppercase tracking-wider">Settle POS Payment</h3>
               </div>
               <button
                 onClick={() => setIsCheckoutModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+                className="text-neutral-400 hover:text-white text-lg font-bold"
               >
                 ✕
               </button>
             </div>
 
             {/* Bill Summary */}
-            <div className="bg-slate-50 p-4 rounded-2xl space-y-2 text-sm">
-              <div className="flex justify-between text-slate-600">
+            <div className="bg-[#0c0c0e] p-4 rounded-2xl space-y-2 text-xs border border-white/[0.06]">
+              <div className="flex justify-between text-neutral-400">
                 <span>Taxable Amount</span>
-                <span>{formatINR(cartSubtotal)}</span>
+                <span className="font-mono text-white">{formatINR(cartSubtotal)}</span>
               </div>
-              <div className="flex justify-between text-slate-600">
+              <div className="flex justify-between text-neutral-400">
                 <span>GST (CGST 2.5% + SGST 2.5%)</span>
-                <span>{formatINR(cartTax)}</span>
+                <span className="font-mono text-white">{formatINR(cartTax)}</span>
               </div>
               {activeDiscountAmount > 0 && (
-                <div className="flex justify-between text-rose-600 font-semibold">
+                <div className="flex justify-between text-[#e5544d] font-semibold">
                   <span>Discount</span>
-                  <span>-{formatINR(activeDiscountAmount)}</span>
+                  <span className="font-mono">-{formatINR(activeDiscountAmount)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-lg font-extrabold text-slate-900 pt-2 border-t border-slate-200">
+              <div className="flex justify-between text-sm font-extrabold text-white pt-2 border-t border-white/[0.08]">
                 <span>Grand Total Due</span>
-                <span className="text-rose-600 font-mono">{formatINR(cartGrandTotal)}</span>
+                <span className="text-[#3fbf6f] font-mono text-base">{formatINR(cartGrandTotal)}</span>
               </div>
             </div>
 
             {/* Payment Method Selector */}
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase text-slate-500">Select Payment Method</label>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Select Settlement Method</label>
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { id: 'CASH', label: 'Cash', icon: Banknote },
                   { id: 'CREDIT_CARD', label: 'Credit Card', icon: CreditCard },
-                  { id: 'MOBILE_BANKING', label: 'Mobile Pay', icon: Smartphone }
+                  { id: 'MOBILE_BANKING', label: 'UPI / Mobile', icon: Smartphone }
                 ].map((m) => (
                   <button
                     key={m.id}
                     onClick={() => setPaymentMethod(m.id)}
-                    className={`py-3 rounded-xl border flex flex-col items-center gap-1 font-bold text-xs transition ${
+                    className={`py-3 rounded-2xl border flex flex-col items-center gap-1 font-bold text-xs transition ${
                       paymentMethod === m.id
-                        ? 'bg-rose-50 border-rose-500 text-rose-700 shadow-sm'
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        ? 'bg-[#d4a437]/15 border-[#d4a437] text-[#d4a437] shadow-sm'
+                        : 'bg-[#0c0c0e] border-white/[0.06] text-neutral-400 hover:text-white'
                     }`}
                   >
                     <m.icon className="w-5 h-5" />
@@ -1330,14 +1370,14 @@ export const RestaurantPOSPage: React.FC = () => {
 
             {/* Quick Cash Buttons & Change Calculator */}
             {paymentMethod === 'CASH' && (
-              <div className="space-y-2 bg-amber-50/60 p-4 rounded-2xl border border-amber-200">
-                <label className="text-xs font-bold text-amber-900">Cash Tendered (₹)</label>
+              <div className="space-y-2 bg-[#0c0c0e] p-4 rounded-2xl border border-white/[0.08]">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Cash Tendered (₹)</label>
                 <input
                   type="number"
                   placeholder={`Exact ${formatINR(cartGrandTotal)}`}
                   value={receivedCash}
                   onChange={(e) => setReceivedCash(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-lg font-bold focus:outline-none font-mono"
+                  className="w-full px-3 py-2 bg-[#17171b] border border-white/[0.1] rounded-xl text-base font-bold text-white focus:outline-none focus:border-[#d4a437] font-mono"
                 />
 
                 <div className="flex gap-2 pt-1">
@@ -1345,7 +1385,7 @@ export const RestaurantPOSPage: React.FC = () => {
                     <button
                       key={bill}
                       onClick={() => setReceivedCash(String(bill))}
-                      className="px-3 py-1 bg-white border border-amber-300 rounded-lg text-xs font-bold text-amber-900 hover:bg-amber-100 font-mono"
+                      className="px-3 py-1 bg-[#202026] border border-white/[0.08] rounded-lg text-xs font-bold text-neutral-300 hover:bg-[#282832] font-mono"
                     >
                       ₹{bill}
                     </button>
@@ -1353,9 +1393,9 @@ export const RestaurantPOSPage: React.FC = () => {
                 </div>
 
                 {receivedCash && Number(receivedCash) >= cartGrandTotal && (
-                  <div className="flex justify-between font-extrabold text-sm text-emerald-800 pt-2 border-t border-amber-200">
+                  <div className="flex justify-between font-extrabold text-xs text-[#3fbf6f] pt-2 border-t border-white/[0.08]">
                     <span>Change Due to Guest:</span>
-                    <span>{formatINR(Number(receivedCash) - cartGrandTotal)}</span>
+                    <span className="font-mono">{formatINR(Number(receivedCash) - cartGrandTotal)}</span>
                   </div>
                 )}
               </div>
@@ -1364,7 +1404,7 @@ export const RestaurantPOSPage: React.FC = () => {
             <button
               onClick={handleCompleteCheckout}
               disabled={loading}
-              className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-2xl text-sm shadow-md transition disabled:opacity-50"
+              className="w-full py-3.5 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-2xl text-xs uppercase tracking-wider shadow-lg shadow-[#d4a437]/20 transition disabled:opacity-40"
             >
               Confirm Settlement & Print Receipt
             </button>
@@ -1373,25 +1413,25 @@ export const RestaurantPOSPage: React.FC = () => {
       )}
 
       {/* ========================================================== */}
-      {/* MODAL 2: DISCOUNT ENTRY & APPROVAL FLAG */}
+      {/* MODAL 2: DISCOUNT ENTRY */}
       {/* ========================================================== */}
       {isDiscountModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <Percent className="w-5 h-5 text-rose-600" /> Apply Order Discount
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#17171b] rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-white/[0.1]">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <h3 className="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+                <Percent className="w-4 h-4 text-[#d4a437]" /> Apply Order Discount
               </h3>
-              <button onClick={() => setIsDiscountModalOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+              <button onClick={() => setIsDiscountModalOpen(false)} className="text-neutral-400 hover:text-white">✕</button>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-bold text-slate-600">Discount Type</label>
+                <label className="text-xs font-semibold text-neutral-300">Discount Type</label>
                 <select
                   value={discountType}
                   onChange={(e) => setDiscountType(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 >
                   <option value="PERCENTAGE">Percentage (%)</option>
                   <option value="FIXED_AMOUNT">Fixed Amount ($)</option>
@@ -1400,28 +1440,28 @@ export const RestaurantPOSPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600">Value (% or $)</label>
+                <label className="text-xs font-semibold text-neutral-300">Value (% or $)</label>
                 <input
                   type="number"
                   value={discountValue}
                   onChange={(e) => setDiscountValue(Number(e.target.value))}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600">Reason / Justification</label>
+                <label className="text-xs font-semibold text-neutral-300">Reason / Justification</label>
                 <input
                   type="text"
                   value={discountReason}
                   onChange={(e) => setDiscountReason(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               {discountValue > 15 && (
-                <p className="text-xs text-amber-700 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
-                  ℹ️ Note: Discounts exceeding 15% are flagged for Manager Approval per ERP rules.
+                <p className="text-[11px] text-[#e5a33d] bg-[#e5a33d]/10 p-2.5 rounded-xl border border-[#e5a33d]/20">
+                  Note: Discounts exceeding 15% are flagged for Manager Approval per ERP rules.
                 </p>
               )}
             </div>
@@ -1435,7 +1475,7 @@ export const RestaurantPOSPage: React.FC = () => {
                 setActiveDiscountAmount(calculated);
                 setIsDiscountModalOpen(false);
               }}
-              className="w-full py-3 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-sm transition"
+              className="w-full py-3 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-xl text-xs uppercase tracking-wider transition"
             >
               Apply Discount
             </button>
@@ -1447,55 +1487,55 @@ export const RestaurantPOSPage: React.FC = () => {
       {/* MODAL 3: ADD DINING TABLE */}
       {/* ========================================================== */}
       {isNewTableModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleCreateTable} className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900">Add New Dining Table</h3>
-              <button type="button" onClick={() => setIsNewTableModalOpen(false)}>✕</button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={handleCreateTable} className="bg-[#17171b] rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-white/[0.1]">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <h3 className="font-bold text-white text-sm uppercase tracking-wider">Add New Dining Table</h3>
+              <button type="button" onClick={() => setIsNewTableModalOpen(false)} className="text-neutral-400 hover:text-white">✕</button>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-bold text-slate-600">Table Number / Code *</label>
+                <label className="text-xs font-semibold text-neutral-300">Table Number / Code *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. T-11"
                   value={newTableData.tableNumber}
                   onChange={(e) => setNewTableData({ ...newTableData, tableNumber: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600">Table Display Name</label>
+                <label className="text-xs font-semibold text-neutral-300">Table Display Name</label>
                 <input
                   type="text"
                   placeholder="e.g. Patio Booth 11"
                   value={newTableData.name}
                   onChange={(e) => setNewTableData({ ...newTableData, name: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-600">Seating Capacity</label>
+                  <label className="text-xs font-semibold text-neutral-300">Seating Capacity</label>
                   <input
                     type="number"
                     min="1"
                     value={newTableData.capacity}
                     onChange={(e) => setNewTableData({ ...newTableData, capacity: Number(e.target.value) })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                    className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-600">Floor Section</label>
+                  <label className="text-xs font-semibold text-neutral-300">Floor Section</label>
                   <select
                     value={newTableData.section}
                     onChange={(e) => setNewTableData({ ...newTableData, section: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs font-semibold text-white focus:outline-none focus:border-[#d4a437]"
                   >
                     <option value="Main Dining">Main Dining</option>
                     <option value="Outdoor Patio">Outdoor Patio</option>
@@ -1509,7 +1549,7 @@ export const RestaurantPOSPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-sm shadow transition"
+              className="w-full py-3 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-xl text-xs uppercase tracking-wider transition"
             >
               Create Dining Table
             </button>
@@ -1521,27 +1561,27 @@ export const RestaurantPOSPage: React.FC = () => {
       {/* MODAL 4: MERGE TABLES */}
       {/* ========================================================== */}
       {isMergeModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleMergeTables} className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <GitMerge className="w-5 h-5 text-rose-600" /> Merge Tables
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={handleMergeTables} className="bg-[#17171b] rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-white/[0.1]">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <h3 className="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+                <GitMerge className="w-4 h-4 text-[#d4a437]" /> Merge Tables
               </h3>
-              <button type="button" onClick={() => setIsMergeModalOpen(false)}>✕</button>
+              <button type="button" onClick={() => setIsMergeModalOpen(false)} className="text-neutral-400 hover:text-white">✕</button>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-bold text-slate-600">Source Table (Active Order) *</label>
+                <label className="text-xs font-semibold text-neutral-300">Source Table (Active Order) *</label>
                 <select
                   required
                   value={mergeSourceId}
                   onChange={(e) => setMergeSourceId(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 >
                   <option value="">Select source table</option>
                   {tables.filter((t) => t.status === 'OCCUPIED').map((t) => (
-                    <option key={t.id} value={t.id}>
+                    <option key={t.id} value={t.id} className="bg-[#17171b] text-white">
                       {t.name || `Table ${t.tableNumber}`} (Occupied)
                     </option>
                   ))}
@@ -1549,16 +1589,16 @@ export const RestaurantPOSPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600">Target Table *</label>
+                <label className="text-xs font-semibold text-neutral-300">Target Table *</label>
                 <select
                   required
                   value={mergeTargetId}
                   onChange={(e) => setMergeTargetId(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 >
                   <option value="">Select target table</option>
                   {tables.filter((t) => t.id !== mergeSourceId).map((t) => (
-                    <option key={t.id} value={t.id}>
+                    <option key={t.id} value={t.id} className="bg-[#17171b] text-white">
                       {t.name || `Table ${t.tableNumber}`} ({t.status})
                     </option>
                   ))}
@@ -1569,7 +1609,7 @@ export const RestaurantPOSPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-sm shadow transition"
+              className="w-full py-3 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-xl text-xs uppercase tracking-wider transition"
             >
               Confirm Table Merge
             </button>
@@ -1581,48 +1621,48 @@ export const RestaurantPOSPage: React.FC = () => {
       {/* MODAL 5: ADD MENU ITEM & LINK TO RECIPE BOM */}
       {/* ========================================================== */}
       {isNewMenuItemModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleCreateMenuItem} className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900">Add Menu Item with Recipe BOM</h3>
-              <button type="button" onClick={() => setIsNewMenuItemModalOpen(false)}>✕</button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={handleCreateMenuItem} className="bg-[#17171b] rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 border border-white/[0.1]">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <h3 className="font-bold text-white text-sm uppercase tracking-wider">Add Menu Item with Recipe BOM</h3>
+              <button type="button" onClick={() => setIsNewMenuItemModalOpen(false)} className="text-neutral-400 hover:text-white">✕</button>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
-                <label className="text-xs font-bold text-slate-600">Dish Name *</label>
+                <label className="text-xs font-semibold text-neutral-300">Dish Name *</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Truffle Mushroom Risotto"
+                  placeholder="e.g. Royal Shahi Paneer"
                   value={newMenuItemData.name}
                   onChange={(e) => setNewMenuItemData({ ...newMenuItemData, name: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600">Item Code *</label>
+                <label className="text-xs font-semibold text-neutral-300">Item Code *</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. MI-RISOTTO-01"
+                  placeholder="e.g. MI-PANEER-01"
                   value={newMenuItemData.code}
                   onChange={(e) => setNewMenuItemData({ ...newMenuItemData, code: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm uppercase font-bold"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs uppercase font-bold text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600">Menu Category *</label>
+                <label className="text-xs font-semibold text-neutral-300">Menu Category *</label>
                 <select
                   required
                   value={newMenuItemData.categoryId}
                   onChange={(e) => setNewMenuItemData({ ...newMenuItemData, categoryId: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 >
                   {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
+                    <option key={c.id} value={c.id} className="bg-[#17171b] text-white">
                       {c.name}
                     </option>
                   ))}
@@ -1630,23 +1670,23 @@ export const RestaurantPOSPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600">Selling Price ($) *</label>
+                <label className="text-xs font-semibold text-neutral-300">Selling Price (₹) *</label>
                 <input
                   type="number"
                   step="0.01"
                   required
                   value={newMenuItemData.price}
                   onChange={(e) => setNewMenuItemData({ ...newMenuItemData, price: Number(e.target.value) })}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#d4a437]"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600">Kitchen Station</label>
+                <label className="text-xs font-semibold text-neutral-300">Kitchen Station</label>
                 <select
                   value={newMenuItemData.kitchenStation}
                   onChange={(e) => setNewMenuItemData({ ...newMenuItemData, kitchenStation: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
                 >
                   <option value="MAIN_KITCHEN">Main Kitchen</option>
                   <option value="PIZZA_STATION">Pizza Station</option>
@@ -1658,17 +1698,17 @@ export const RestaurantPOSPage: React.FC = () => {
               </div>
 
               <div className="col-span-2">
-                <label className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
-                  <ChefHat className="w-3.5 h-3.5 text-emerald-600" /> Link to Recipe BOM (Bill of Materials)
+                <label className="text-xs font-semibold text-[#d4a437] flex items-center gap-1.5">
+                  <ChefHat className="w-3.5 h-3.5 text-[#d4a437]" /> Link to Recipe BOM (Bill of Materials)
                 </label>
                 <select
                   value={newMenuItemData.recipeId}
                   onChange={(e) => setNewMenuItemData({ ...newMenuItemData, recipeId: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-emerald-50 border border-emerald-300 rounded-xl text-sm font-medium text-emerald-900"
+                  className="w-full mt-1 px-3 py-2 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-[#d4a437]"
                 >
                   <option value="">No Recipe (Direct Retail Item)</option>
                   {recipesList.map((r) => (
-                    <option key={r.id} value={r.id}>
+                    <option key={r.id} value={r.id} className="bg-[#17171b] text-white">
                       {r.name} ({r.code})
                     </option>
                   ))}
@@ -1679,7 +1719,7 @@ export const RestaurantPOSPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-sm shadow transition"
+              className="w-full py-3 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-xl text-xs uppercase tracking-wider transition"
             >
               Save Menu Item
             </button>
@@ -1689,8 +1729,8 @@ export const RestaurantPOSPage: React.FC = () => {
 
       {/* Invoice receipt indicator */}
       {lastInvoiceNumber && (
-        <div className="text-center text-xs text-slate-400">
-          Last Settled Transaction: <span className="font-bold text-slate-700">{lastInvoiceNumber}</span>
+        <div className="text-center text-xs text-neutral-500">
+          Last Settled Transaction: <span className="font-mono font-bold text-[#d4a437]">{lastInvoiceNumber}</span>
         </div>
       )}
     </div>
