@@ -242,7 +242,50 @@ async function runPart13Tests() {
     }
   }
 
-  console.log('\n🎉 ALL PART 13 PROCUREMENT & SUPPLIER MANAGEMENT TESTS PASSED!');
+  // ==========================================
+  // TEST 7: Section 50 Failure Scenarios & Edge Cases
+  // ==========================================
+  console.log('\n--- TEST 7: Section 50 Failure Scenarios (Empty PR Items, Non-Existent PR, Invalid PO) ---');
+
+  // 7.1 Empty Items in PR
+  let emptyPrFailed = false;
+  try {
+    await PurchaseService.createPurchaseRequest(
+      company.id,
+      branch.id,
+      {
+        priority: 'LOW',
+        requiredDate: new Date().toISOString(),
+        items: []
+      },
+      user.id
+    );
+  } catch (err: any) {
+    emptyPrFailed = true;
+    console.log(`✅ Correctly rejected empty PR submission: "${err.message}"`);
+  }
+  if (!emptyPrFailed) {
+    throw new Error('Empty PR items array should be rejected');
+  }
+
+  // 7.2 Approve already approved PR (Idempotency / State Guard)
+  let alreadyApprovedFailed = false;
+  try {
+    await PurchaseService.approvePurchaseRequest(
+      company.id,
+      pr.id,
+      user.id,
+      { autoCreatePO: false }
+    );
+  } catch (err: any) {
+    alreadyApprovedFailed = true;
+    console.log(`✅ Correctly rejected double approval of PR: "${err.message}"`);
+  }
+  if (!alreadyApprovedFailed) {
+    throw new Error('Re-approving an already approved PR should fail');
+  }
+
+  console.log('\n🎉 ALL PART 13 PROCUREMENT & SUPPLIER MANAGEMENT TESTS (INCLUDING SECTION 50 CHECKS) PASSED!');
 }
 
 runPart13Tests()

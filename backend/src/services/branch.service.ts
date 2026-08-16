@@ -40,24 +40,57 @@ export class BranchService {
       where: { id: companyId }
     });
     if (!company || !company.isActive) {
-      throw new AppError('Active company not found', 404);
+      throw new AppError('Active company not found in system', 404);
     }
 
     // 2. Check for duplicate branch code
-    const existingBranch = await prisma.branch.findUnique({
-      where: { code: data.code.toUpperCase() }
+    const formattedCode = data.code.trim().toUpperCase();
+    const existingBranchCode = await prisma.branch.findUnique({
+      where: { code: formattedCode }
     });
-    if (existingBranch) {
-      throw new AppError(`Branch with code "${data.code}" already exists`, 409);
+    if (existingBranchCode) {
+      throw new AppError(
+        `Branch with code "${formattedCode}" already exists`,
+        409,
+        [
+          {
+            field: 'code',
+            issue: `Branch code "${formattedCode}" is already in use by "${existingBranchCode.name}"`,
+            message: `Branch code "${formattedCode}" is already in use`
+          }
+        ]
+      );
     }
 
-    // 3. Create branch in transaction & automatically grant access to creating user
+    // 3. Check for duplicate branch name in same company
+    const trimmedName = data.name.trim();
+    const existingBranchName = await prisma.branch.findFirst({
+      where: {
+        companyId,
+        name: { equals: trimmedName, mode: 'insensitive' }
+      }
+    });
+    if (existingBranchName) {
+      throw new AppError(
+        `An outlet named "${trimmedName}" already exists in this company`,
+        409,
+        [
+          {
+            field: 'name',
+            issue: `Outlet "${trimmedName}" already exists`,
+            message: `Outlet "${trimmedName}" already exists`
+          }
+        ]
+      );
+    }
+
+    // 4. Create branch in transaction & automatically grant access to creating user
     const newBranch = await prisma.$transaction(async (tx) => {
       const branch = await tx.branch.create({
         data: {
           companyId,
-          name: data.name.trim(),
-          code: data.code.trim().toUpperCase(),
+          name: trimmedName,
+          code: formattedCode,
           type: data.type,
           email: data.email?.trim() || null,
           phone: data.phone?.trim() || null,

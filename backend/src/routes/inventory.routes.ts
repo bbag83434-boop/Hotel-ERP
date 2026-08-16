@@ -15,7 +15,9 @@ import {
   approveRequisitionSchema,
   rejectRequisitionSchema,
   dispatchTransferSchema,
-  receiveTransferSchema
+  receiveTransferSchema,
+  recordWastageSchema,
+  reconcileStockCountSchema
 } from '../schemas/inventory.schema';
 
 const router = Router();
@@ -52,6 +54,14 @@ router.get('/ledger', InventoryController.getStockLedger);
 // Stock Transfers & Adjustments
 router.post('/transfer', validate(transferStockSchema), InventoryController.transferStock);
 router.post('/adjust', validate(adjustStockSchema), InventoryController.adjustStock);
+
+// Wastage & Loss Control (Part 12)
+router.get('/wastage', InventoryController.getWastageRecords);
+router.post('/wastage', validate(recordWastageSchema), InventoryController.recordWastage);
+
+// Stock Count & Auditing (Part 16)
+router.get('/stock-counts', InventoryController.getStockCountHistory);
+router.post('/stock-counts', validate(reconcileStockCountSchema), InventoryController.reconcilePhysicalCount);
 
 // Store Requisitions & Multi-Stage Warehouse Transfers (Part 4)
 router.get('/requisitions', InventoryController.getRequisitions);

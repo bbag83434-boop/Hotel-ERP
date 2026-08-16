@@ -143,3 +143,45 @@ export const receiveTransferSchema = z.object({
     ).optional()
   }).optional()
 });
+
+export const recordWastageSchema = z.object({
+  body: z.object({
+    branchId: z.string().uuid().optional(),
+    warehouseId: z.string().uuid('Warehouse ID is required'),
+    wastageType: z.enum([
+      'EXPIRED',
+      'SPOILED',
+      'DAMAGED',
+      'WRONG_PREPARATION',
+      'OVERPRODUCTION',
+      'RETURNED_DISCARDED',
+      'PRODUCTION_LOSS'
+    ]),
+    reason: z.string().min(1, 'Reason for wastage is required'),
+    items: z.array(
+      z.object({
+        itemId: z.string().uuid('Item ID is required'),
+        quantity: z.number().positive('Quantity must be greater than 0'),
+        batchNumber: z.string().optional(),
+        reason: z.string().optional()
+      })
+    ).min(1, 'At least one item must be specified for wastage recording'),
+    notes: z.string().optional()
+  })
+});
+
+export const reconcileStockCountSchema = z.object({
+  body: z.object({
+    branchId: z.string().uuid().optional(),
+    warehouseId: z.string().uuid('Warehouse ID is required'),
+    notes: z.string().optional(),
+    countedItems: z.array(
+      z.object({
+        itemId: z.string().uuid('Item ID is required'),
+        countedQty: z.number().min(0, 'Counted quantity cannot be negative'),
+        notes: z.string().optional()
+      })
+    ).min(1, 'At least one item must be included in the physical count')
+  })
+});
+

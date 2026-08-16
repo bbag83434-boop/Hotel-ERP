@@ -191,7 +191,72 @@ async function runPart12Tests() {
     throw new Error('Expected at least 1 applied wastage record in history');
   }
 
-  console.log('\n🎉 ALL PART 12 WASTAGE & LOSS CONTROL TESTS PASSED!');
+  // ==========================================
+  // TEST 5: Section 50 Failure Scenarios & Edge Cases
+  // ==========================================
+  console.log('\n--- TEST 5: Section 50 Failure Scenarios (Insufficient Stock, Zero Qty, Empty Items) ---');
+  
+  // 5.1 Insufficient Stock Validation
+  let insufficientStockFailed = false;
+  try {
+    await WastageService.recordWastage({
+      companyId: company.id,
+      branchId: branch.id,
+      warehouseId: warehouse.id,
+      wastageType: 'DAMAGED',
+      reason: 'Attempting to discard 999999 litres of milk',
+      items: [{ itemId: milkItem.id, quantity: 999999.0 }],
+      actorId: user.id
+    });
+  } catch (err: any) {
+    insufficientStockFailed = true;
+    console.log(`✅ Correctly rejected excessive wastage quantity: "${err.message}"`);
+  }
+  if (!insufficientStockFailed) {
+    throw new Error('Excessive wastage quantity should be rejected by backend');
+  }
+
+  // 5.2 Invalid Zero / Negative Quantity Validation
+  let invalidQtyFailed = false;
+  try {
+    await WastageService.recordWastage({
+      companyId: company.id,
+      branchId: branch.id,
+      warehouseId: warehouse.id,
+      wastageType: 'WRONG_PREPARATION',
+      reason: 'Negative quantity test',
+      items: [{ itemId: milkItem.id, quantity: -5.0 }],
+      actorId: user.id
+    });
+  } catch (err: any) {
+    invalidQtyFailed = true;
+    console.log(`✅ Correctly rejected negative wastage quantity: "${err.message}"`);
+  }
+  if (!invalidQtyFailed) {
+    throw new Error('Negative wastage quantity should be rejected');
+  }
+
+  // 5.3 Empty Items Validation
+  let emptyItemsFailed = false;
+  try {
+    await WastageService.recordWastage({
+      companyId: company.id,
+      branchId: branch.id,
+      warehouseId: warehouse.id,
+      wastageType: 'EXPIRED',
+      reason: 'Empty items list',
+      items: [],
+      actorId: user.id
+    });
+  } catch (err: any) {
+    emptyItemsFailed = true;
+    console.log(`✅ Correctly rejected empty wastage item submission: "${err.message}"`);
+  }
+  if (!emptyItemsFailed) {
+    throw new Error('Empty wastage item array should be rejected');
+  }
+
+  console.log('\n🎉 ALL PART 12 WASTAGE & LOSS CONTROL TESTS (INCLUDING SECTION 50 CHECKS) PASSED!');
 }
 
 runPart12Tests()

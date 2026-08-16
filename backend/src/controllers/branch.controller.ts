@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import { BranchService } from '../services/branch.service';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { sendSuccess, AppError } from '../utils/response.utils';
+import { logger } from '../utils/logger';
 
 export class BranchController {
   public static async getBranches(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -25,6 +26,12 @@ export class BranchController {
       if (!companyId || !userId) {
         throw new AppError('Unauthorized: Company context required', 401);
       }
+
+      logger.info('Branch creation request payload received:', {
+        companyId,
+        userId,
+        body: req.body
+      });
 
       const branch = await BranchService.createBranch(companyId, userId, req.body);
       return sendSuccess(res, branch, 'Branch created successfully', 201);
