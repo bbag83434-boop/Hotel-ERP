@@ -22,8 +22,12 @@ router.post('/expenses', requirePermission('accounting:manage'), AccountingContr
 router.get('/accounts-payable', AccountingController.getAccountsPayable);
 router.get('/accounts-receivable', AccountingController.getAccountsReceivable);
 
-// Financial Statements & Reports
+// Financial Statements & Reports (Part 18 Advanced Accounting)
 router.get('/reports/pnl', AccountingController.getProfitAndLoss);
 router.get('/reports/cash-flow', AccountingController.getCashFlow);
+router.get('/reports/trial-balance', AccountingController.getTrialBalance);
+router.get('/reports/balance-sheet', AccountingController.getBalanceSheet);
+router.get('/reports/tax-breakup', AccountingController.getTaxBreakupReport);
+router.get('/reports/cash-bank-reconciliation', AccountingController.getBankCashReconciliation);
 
 export default router;

@@ -168,4 +168,54 @@ export class AccountingController {
       next(err);
     }
   }
+
+  public static async getTrialBalance(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const branchId = (req.query.branchId as string) || undefined;
+      const asOfDate = (req.query.asOfDate as string) || undefined;
+      const tb = await AccountingService.getTrialBalance(companyId, { branchId, asOfDate });
+      return sendSuccess(res, tb, 'Trial Balance generated successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async getBalanceSheet(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const branchId = (req.query.branchId as string) || undefined;
+      const asOfDate = (req.query.asOfDate as string) || undefined;
+      const bs = await AccountingService.getBalanceSheet(companyId, { branchId, asOfDate });
+      return sendSuccess(res, bs, 'Balance Sheet generated successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async getTaxBreakupReport(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const branchId = (req.query.branchId as string) || undefined;
+      const startDate = (req.query.startDate as string) || undefined;
+      const endDate = (req.query.endDate as string) || undefined;
+      const tax = await AccountingService.getTaxBreakupReport(companyId, { branchId, startDate, endDate });
+      return sendSuccess(res, tax, 'GST Tax Breakup report generated successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async getBankCashReconciliation(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const branchId = (req.query.branchId as string) || undefined;
+      const startDate = (req.query.startDate as string) || undefined;
+      const endDate = (req.query.endDate as string) || undefined;
+      const recon = await AccountingService.getBankCashReconciliation(companyId, { branchId, startDate, endDate });
+      return sendSuccess(res, recon, 'Cash and Bank Reconciliation generated successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
 }

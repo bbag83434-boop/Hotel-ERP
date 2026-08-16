@@ -13,26 +13,35 @@ export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 
 export interface ApprovalRule {
   id: string;
+  companyId: string;
+  branchId?: string | null;
   transactionType: ApprovalType;
-  minAmount: number;
+  minAmount: number | string;
   requiredRole: string;
   stepNumber: number;
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  branch?: { id: string; name: string; code: string } | null;
 }
 
 export interface ApprovalRequest {
   id: string;
+  companyId: string;
+  branchId?: string | null;
   requestNumber: string;
   transactionType: ApprovalType;
   referenceId: string;
-  amount?: number;
+  amount?: number | string | null;
   title: string;
-  description?: string;
+  description?: string | null;
   status: ApprovalStatus;
   requestedById: string;
   currentStep: number;
   totalSteps: number;
   createdAt: string;
+  updatedAt: string;
+  branch?: { id: string; name: string; code: string } | null;
   requestedBy?: {
     id: string;
     firstName: string;
@@ -51,7 +60,36 @@ export interface ApprovalAction {
   action: ApprovalStatus;
   previousStatus: ApprovalStatus;
   newStatus: ApprovalStatus;
-  comment?: string;
+  comment?: string | null;
   createdAt: string;
   user?: { id: string; firstName: string; lastName: string };
+}
+
+export interface ApprovalSummary {
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  totalRules: number;
+  pendingByType: Array<{ type: ApprovalType; count: number }>;
+}
+
+export interface CreateApprovalRulePayload {
+  branchId?: string;
+  transactionType: ApprovalType;
+  minAmount: number;
+  requiredRole: string;
+  stepNumber: number;
+}
+
+export interface UpdateApprovalRulePayload {
+  branchId?: string;
+  minAmount?: number;
+  requiredRole?: string;
+  stepNumber?: number;
+  isActive?: boolean;
+}
+
+export interface ActOnApprovalPayload {
+  action: ApprovalStatus;
+  comment?: string;
 }

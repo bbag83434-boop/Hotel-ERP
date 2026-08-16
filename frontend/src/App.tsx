@@ -7,7 +7,7 @@ import { LoginPage } from './pages/auth/LoginPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 import { AIAssistantWidget } from './components/common/AIAssistantWidget';
 
-// Code-Splitting Lazy Loading Routes (Section 19 Performance Pass)
+// Code-Splitting Lazy Loading Routes
 const DashboardShellPage = lazy(() =>
   import('./pages/dashboard/DashboardShellPage').then((m) => ({ default: m.DashboardShellPage }))
 );
@@ -23,6 +23,9 @@ const ProductionPage = lazy(() =>
 const RestaurantPOSPage = lazy(() =>
   import('./pages/restaurant/RestaurantPOSPage').then((m) => ({ default: m.RestaurantPOSPage }))
 );
+const CashierShiftPage = lazy(() =>
+  import('./pages/cashier/CashierShiftPage').then((m) => ({ default: m.CashierShiftPage }))
+);
 const HotelPMSPage = lazy(() =>
   import('./pages/hotel/HotelPMSPage').then((m) => ({ default: m.HotelPMSPage }))
 );
@@ -34,6 +37,15 @@ const HRPage = lazy(() =>
 );
 const ApprovalCenterPage = lazy(() =>
   import('./pages/approval/ApprovalCenterPage').then((m) => ({ default: m.ApprovalCenterPage }))
+);
+const AuditCompliancePage = lazy(() =>
+  import('./pages/audit/AuditCompliancePage').then((m) => ({ default: m.AuditCompliancePage }))
+);
+const DigitalMenuOrderingPage = lazy(() =>
+  import('./pages/ordering/DigitalMenuOrderingPage').then((m) => ({ default: m.DigitalMenuOrderingPage }))
+);
+const TableQRDirectoryPage = lazy(() =>
+  import('./pages/ordering/TableQRDirectoryPage').then((m) => ({ default: m.TableQRDirectoryPage }))
 );
 const ReportsHubPage = lazy(() =>
   import('./pages/reports/ReportsHubPage').then((m) => ({ default: m.ReportsHubPage }))
@@ -61,6 +73,11 @@ export const App: React.FC = () => {
       <RenderServerWakeupScreen />
       <Suspense fallback={<RouteLoadingFallback />}>
         <Routes>
+          {/* Public Guest QR / Digital Ordering Routes (No login required) */}
+          <Route path="/order" element={<DigitalMenuOrderingPage />} />
+          <Route path="/menu" element={<DigitalMenuOrderingPage />} />
+          <Route path="/qr/:token" element={<DigitalMenuOrderingPage />} />
+
           {/* Public Auth Routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -84,6 +101,11 @@ export const App: React.FC = () => {
             <Route path="/kitchen" element={<ProductionPage />} />
             <Route path="/restaurant" element={<RestaurantPOSPage />} />
             <Route path="/pos" element={<RestaurantPOSPage />} />
+            <Route path="/shifts" element={<CashierShiftPage />} />
+            <Route path="/shift" element={<CashierShiftPage />} />
+            <Route path="/cashier-shift" element={<CashierShiftPage />} />
+            <Route path="/qr-tables" element={<TableQRDirectoryPage />} />
+            <Route path="/table-qrs" element={<TableQRDirectoryPage />} />
             <Route path="/hotel" element={<HotelPMSPage />} />
             <Route path="/pms" element={<HotelPMSPage />} />
             <Route path="/accounting" element={<AccountingPage />} />
@@ -92,9 +114,11 @@ export const App: React.FC = () => {
             <Route path="/payroll" element={<HRPage />} />
             <Route path="/approvals" element={<ApprovalCenterPage />} />
             <Route path="/approval" element={<ApprovalCenterPage />} />
+            <Route path="/audit" element={<AuditCompliancePage />} />
+            <Route path="/audit-logs" element={<AuditCompliancePage />} />
+            <Route path="/compliance" element={<AuditCompliancePage />} />
             <Route path="/reports" element={<ReportsHubPage />} />
             <Route path="/users" element={<DashboardShellPage />} />
-            <Route path="/audit-logs" element={<DashboardShellPage />} />
             <Route path="/settings" element={<DashboardShellPage />} />
           </Route>
 

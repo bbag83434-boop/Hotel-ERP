@@ -10,7 +10,10 @@ import {
   Building,
   Calculator,
   ShieldCheck,
-  BarChart3
+  BarChart3,
+  DollarSign,
+  FileText,
+  QrCode
 } from 'lucide-react';
 
 export interface NavigationItem {
@@ -31,6 +34,8 @@ export const navigationGroups: NavigationGroup[] = [
     items: [
       { name: 'Command Center', path: '/dashboard', icon: LayoutDashboard },
       { name: 'Restaurant POS', path: '/restaurant', icon: UtensilsCrossed },
+      { name: 'Table QR Ordering', path: '/qr-tables', icon: QrCode },
+      { name: 'Cashier Shift & Drawer', path: '/shifts', icon: DollarSign },
       { name: 'Hotel PMS', path: '/hotel', icon: Building }
     ]
   },
@@ -48,6 +53,7 @@ export const navigationGroups: NavigationGroup[] = [
       { name: 'Staff & Payroll', path: '/hr', icon: Users },
       { name: 'Accounting & Ledger', path: '/accounting', icon: Calculator },
       { name: 'Approval Center', path: '/approvals', icon: ShieldCheck },
+      { name: 'Audit & Compliance', path: '/compliance', icon: FileText },
       { name: 'Executive Reports', path: '/reports', icon: BarChart3 }
     ]
   }

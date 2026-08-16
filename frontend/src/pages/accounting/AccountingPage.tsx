@@ -12,7 +12,11 @@ import {
   CheckCircle2,
   AlertCircle,
   Scale,
-  X
+  Landmark,
+  Percent,
+  RefreshCw,
+  X,
+  Layers
 } from 'lucide-react';
 import { accountingApi } from '../../api/accounting.api';
 import {
@@ -21,12 +25,27 @@ import {
   AccountsPayable,
   AccountsReceivable,
   ProfitAndLossReport,
-  CashFlowReport
+  CashFlowReport,
+  TrialBalanceReport,
+  BalanceSheetReport,
+  TaxBreakupReport,
+  BankCashReconciliationReport
 } from '../../types/accounting.types';
 import { formatINR, formatDateIN, getIndianFinancialYear } from '../../utils/formatters';
 
+type TabKey =
+  | 'pnl'
+  | 'balance-sheet'
+  | 'cashflow'
+  | 'tax-breakup'
+  | 'reconciliation'
+  | 'gl'
+  | 'accounts'
+  | 'apar'
+  | 'trial';
+
 export const AccountingPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'pnl' | 'cashflow' | 'gl' | 'accounts' | 'apar' | 'trial'>('pnl');
+  const [activeTab, setActiveTab] = useState<TabKey>('pnl');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -37,7 +56,11 @@ export const AccountingPage: React.FC = () => {
   const [payables, setPayables] = useState<AccountsPayable[]>([]);
   const [receivables, setReceivables] = useState<AccountsReceivable[]>([]);
   const [pnlReport, setPnlReport] = useState<ProfitAndLossReport | null>(null);
+  const [balanceSheet, setBalanceSheet] = useState<BalanceSheetReport | null>(null);
   const [cashFlowReport, setCashFlowReport] = useState<CashFlowReport | null>(null);
+  const [trialBalance, setTrialBalance] = useState<TrialBalanceReport | null>(null);
+  const [taxReport, setTaxReport] = useState<TaxBreakupReport | null>(null);
+  const [cashRecon, setCashRecon] = useState<BankCashReconciliationReport | null>(null);
 
   // Modals
   const [showAccountModal, setShowAccountModal] = useState(false);
@@ -82,20 +105,29 @@ export const AccountingPage: React.FC = () => {
     try {
       setLoading(true);
       setErrorMsg('');
-      const [accs, jes, aps, ars, pnl, cf] = await Promise.all([
+      const [accs, jes, aps, ars, pnl, bs, cf, tb, tax, recon] = await Promise.all([
         accountingApi.getAccounts().catch(() => []),
         accountingApi.getGeneralLedger().catch(() => []),
         accountingApi.getAccountsPayable().catch(() => []),
         accountingApi.getAccountsReceivable().catch(() => []),
         accountingApi.getProfitAndLoss().catch(() => null),
-        accountingApi.getCashFlow().catch(() => null)
+        accountingApi.getBalanceSheet().catch(() => null),
+        accountingApi.getCashFlow().catch(() => null),
+        accountingApi.getTrialBalance().catch(() => null),
+        accountingApi.getTaxBreakup().catch(() => null),
+        accountingApi.getCashBankReconciliation().catch(() => null)
       ]);
+
       setAccounts(accs);
       setJournalEntries(jes);
       setPayables(aps);
       setReceivables(ars);
       setPnlReport(pnl);
+      setBalanceSheet(bs);
       setCashFlowReport(cf);
+      setTrialBalance(tb);
+      setTaxReport(tax);
+      setCashRecon(recon);
 
       // Pre-fill modal defaults if accounts exist
       if (accs.length > 0) {
@@ -217,16 +249,6 @@ export const AccountingPage: React.FC = () => {
   const totalCreditSum = newJournalForm.lines.reduce((s, l) => s + Number(l.credit || 0), 0);
   const isJournalBalanced = Math.abs(totalDebitSum - totalCreditSum) < 0.001 && totalDebitSum > 0;
 
-  // Trial balance calculations
-  const totalGlDebits = accounts.reduce((acc, a) => {
-    const bal = Number(a.balance);
-    return ['ASSET', 'EXPENSE'].includes(a.type) && bal > 0 ? acc + bal : acc;
-  }, 0);
-  const totalGlCredits = accounts.reduce((acc, a) => {
-    const bal = Number(a.balance);
-    return ['LIABILITY', 'EQUITY', 'REVENUE'].includes(a.type) && bal > 0 ? acc + bal : acc;
-  }, 0);
-
   return (
     <div className="min-h-screen bg-[#0c0c0e] text-neutral-100 pb-20 md:pb-8 space-y-6">
       {/* Top Banner */}
@@ -243,11 +265,21 @@ export const AccountingPage: React.FC = () => {
                   {getIndianFinancialYear()}
                 </span>
               </h1>
-              <p className="text-xs text-neutral-400">Double-Entry General Ledger, Real-Time P&L, Cash Flow, AP/AR & Trial Balance</p>
+              <p className="text-xs text-neutral-400">
+                Double-Entry General Ledger, Balance Sheet, P&L, GST Tax Breakup, Cash/Bank Reconciliation
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={loadData}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.08] text-neutral-300 border border-white/[0.08] font-semibold text-xs rounded-xl transition"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
             <button
               onClick={() => setShowExpenseModal(true)}
               className="flex items-center gap-2 px-3.5 py-2 bg-white/[0.04] hover:bg-white/[0.08] text-[#e5544d] border border-[#e5544d]/30 font-semibold text-xs rounded-xl transition"
@@ -292,9 +324,9 @@ export const AccountingPage: React.FC = () => {
             </div>
           </div>
           <div className="bg-[#0c0c0e] p-3 rounded-2xl border border-white/[0.06]">
-            <span className="text-[10px] text-neutral-400 uppercase font-semibold">Net Cash Flow</span>
+            <span className="text-[10px] text-neutral-400 uppercase font-semibold">Total Liquid Funds</span>
             <div className="text-base font-bold font-mono text-[#d4a437] mt-0.5">
-              {formatINR(cashFlowReport ? cashFlowReport.netCashFlow : 0)}
+              {formatINR(cashRecon ? cashRecon.totalLiquidFunds : 0)}
             </div>
           </div>
         </div>
@@ -304,26 +336,29 @@ export const AccountingPage: React.FC = () => {
       <div className="max-w-7xl mx-auto px-1">
         <div className="flex border-b border-white/[0.08] overflow-x-auto scrollbar-none gap-2 pb-1">
           {[
-            { key: 'pnl', label: 'Profit & Loss Statement', icon: TrendingUp },
-            { key: 'cashflow', label: 'Cash Flow Statement', icon: IndianRupee },
-            { key: 'gl', label: 'General Ledger & Journals', icon: BookOpen },
+            { key: 'pnl', label: 'Profit & Loss (P&L)', icon: TrendingUp },
+            { key: 'balance-sheet', label: 'Balance Sheet', icon: Landmark },
+            { key: 'cashflow', label: 'Cash Flow', icon: IndianRupee },
+            { key: 'tax-breakup', label: 'GST Tax Breakup', icon: Percent },
+            { key: 'reconciliation', label: 'Cash & Bank Recon', icon: Layers },
+            { key: 'trial', label: 'Trial Balance', icon: Scale },
+            { key: 'gl', label: 'General Ledger', icon: BookOpen },
             { key: 'accounts', label: 'Chart of Accounts', icon: FileText },
-            { key: 'apar', label: 'Payables & Receivables', icon: CreditCard },
-            { key: 'trial', label: 'Trial Balance Verification', icon: Scale }
+            { key: 'apar', label: 'Payables & Receivables', icon: CreditCard }
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
             return (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key as any)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs whitespace-nowrap transition ${
+                onClick={() => setActiveTab(tab.key as TabKey)}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-semibold text-xs whitespace-nowrap transition ${
                   isActive
                     ? 'bg-[#d4a437] text-black font-bold shadow-lg'
                     : 'text-neutral-400 hover:text-white hover:bg-white/[0.03]'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-3.5 h-3.5" />
                 {tab.label}
               </button>
             );
@@ -428,7 +463,104 @@ export const AccountingPage: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 2: CASH FLOW STATEMENT */}
+        {/* TAB 2: BALANCE SHEET */}
+        {activeTab === 'balance-sheet' && balanceSheet && (
+          <div className="mt-4 space-y-4 max-w-5xl mx-auto">
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-6">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white">Statement of Financial Position (Balance Sheet)</h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    Fundamental Accounting Equation: Total Assets = Total Liabilities + Total Equity
+                  </p>
+                </div>
+                <div className={`text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 ${
+                  balanceSheet.isBalanced ? 'bg-[#3fbf6f]/20 text-[#3fbf6f] border border-[#3fbf6f]/30' : 'bg-[#e5544d]/20 text-[#e5544d] border border-[#e5544d]/30'
+                }`}>
+                  {balanceSheet.isBalanced ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                  {balanceSheet.isBalanced ? 'EQUATION BALANCED' : 'IMBALANCE DETECTED'}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Left Column: ASSETS */}
+                <div className="bg-[#0c0c0e] p-5 rounded-2xl border border-white/[0.06] space-y-4">
+                  <div className="flex justify-between items-center text-xs font-bold text-[#4d9de5] pb-2 border-b border-white/[0.08] uppercase tracking-wider">
+                    <span>1. Total Assets</span>
+                    <span className="font-mono text-sm">{formatINR(balanceSheet.assets.totalAssets)}</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <span className="text-[11px] font-semibold text-neutral-400 uppercase">Current Assets</span>
+                      <div className="pl-3 mt-1 space-y-1 text-xs">
+                        {balanceSheet.assets.currentAssets.length === 0 && <p className="text-neutral-600 italic">No current assets</p>}
+                        {balanceSheet.assets.currentAssets.map((a) => (
+                          <div key={a.code} className="flex justify-between py-0.5">
+                            <span className="text-neutral-300">[{a.code}] {a.name}</span>
+                            <span className="font-mono font-semibold text-white">{formatINR(a.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {balanceSheet.assets.nonCurrentAssets.length > 0 && (
+                      <div>
+                        <span className="text-[11px] font-semibold text-neutral-400 uppercase">Fixed & Non-Current Assets</span>
+                        <div className="pl-3 mt-1 space-y-1 text-xs">
+                          {balanceSheet.assets.nonCurrentAssets.map((a) => (
+                            <div key={a.code} className="flex justify-between py-0.5">
+                              <span className="text-neutral-300">[{a.code}] {a.name}</span>
+                              <span className="font-mono font-semibold text-white">{formatINR(a.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right Column: LIABILITIES & EQUITY */}
+                <div className="bg-[#0c0c0e] p-5 rounded-2xl border border-white/[0.06] space-y-4">
+                  <div className="flex justify-between items-center text-xs font-bold text-[#d4a437] pb-2 border-b border-white/[0.08] uppercase tracking-wider">
+                    <span>2. Liabilities & Owner's Equity</span>
+                    <span className="font-mono text-sm">{formatINR(balanceSheet.totalLiabilitiesAndEquity)}</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <span className="text-[11px] font-semibold text-neutral-400 uppercase">Liabilities (Payables & Tax)</span>
+                      <div className="pl-3 mt-1 space-y-1 text-xs">
+                        {balanceSheet.liabilities.currentLiabilities.length === 0 && <p className="text-neutral-600 italic">No current liabilities</p>}
+                        {balanceSheet.liabilities.currentLiabilities.map((l) => (
+                          <div key={l.code} className="flex justify-between py-0.5">
+                            <span className="text-neutral-300">[{l.code}] {l.name}</span>
+                            <span className="font-mono font-semibold text-[#e5544d]">{formatINR(l.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-[11px] font-semibold text-neutral-400 uppercase">Owner's Equity & Retained Earnings</span>
+                      <div className="pl-3 mt-1 space-y-1 text-xs">
+                        {balanceSheet.equity.items.length === 0 && <p className="text-neutral-600 italic">No equity items</p>}
+                        {balanceSheet.equity.items.map((eq) => (
+                          <div key={eq.code} className="flex justify-between py-0.5">
+                            <span className="text-neutral-300">[{eq.code}] {eq.name}</span>
+                            <span className="font-mono font-semibold text-[#3fbf6f]">{formatINR(eq.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: CASH FLOW STATEMENT */}
         {activeTab === 'cashflow' && cashFlowReport && (
           <div className="mt-4 space-y-4 max-w-5xl mx-auto">
             <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-6">
@@ -455,150 +587,41 @@ export const AccountingPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="bg-[#0c0c0e] p-3.5 rounded-2xl border border-white/[0.06]">
-                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Net Cash Position</span>
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Net Cash Delta</span>
                   <div className="text-base font-bold font-mono text-[#d4a437] mt-1">
                     {formatINR(cashFlowReport.netCashFlow)}
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Cash Movement Ledger</h4>
-                <div className="divide-y divide-white/[0.04] bg-[#0c0c0e] rounded-2xl border border-white/[0.06] overflow-hidden">
-                  {cashFlowReport.transactions.length === 0 ? (
-                    <div className="p-6 text-center text-neutral-500 text-xs">No cash transactions in this period.</div>
-                  ) : (
-                    cashFlowReport.transactions.map((tx, idx) => (
-                      <div key={idx} className="p-3.5 flex items-center justify-between text-xs hover:bg-white/[0.02] transition">
-                        <div>
-                          <div className="font-semibold text-white">{tx.narration}</div>
-                          <div className="text-neutral-500 text-[11px] mt-0.5">
-                            {formatDateIN(tx.date)} • {tx.entryNumber} • {tx.accountName}
-                          </div>
-                        </div>
-                        <div className="text-right font-mono">
-                          {tx.inflow > 0 && <span className="font-bold text-[#3fbf6f]">+{formatINR(tx.inflow)}</span>}
-                          {tx.outflow > 0 && <span className="font-bold text-[#e5544d]">-{formatINR(tx.outflow)}</span>}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: GENERAL LEDGER & JOURNALS */}
-        {activeTab === 'gl' && (
-          <div className="mt-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#17171b] p-4 rounded-3xl border border-white/[0.08]">
-              <div className="text-xs text-neutral-300 font-semibold">
-                General Ledger Journals ({journalEntries.length} entries)
-              </div>
-              <button
-                onClick={() => setShowJournalModal(true)}
-                className="px-3.5 py-1.5 bg-[#d4a437] hover:bg-[#b88c2a] text-black font-bold text-xs rounded-xl transition flex items-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" /> Post Journal Entry
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {journalEntries.length === 0 ? (
-                <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl p-12 text-center text-neutral-500 text-xs">
-                  No journal entries posted yet.
-                </div>
-              ) : (
-                journalEntries.map((je) => (
-                  <div key={je.id} className="bg-[#17171b] p-4 rounded-3xl border border-white/[0.08] shadow-2xl space-y-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-[#d4a437] font-mono text-sm">{je.entryNumber}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-white/[0.06] text-neutral-300 font-semibold border border-white/[0.08]">
-                          {je.referenceType}
-                        </span>
-                        <span className="text-xs text-neutral-400 font-mono">{formatDateIN(je.date)}</span>
-                      </div>
-                      <div className="text-xs font-bold font-mono text-[#3fbf6f]">
-                        Total: {formatINR(Number(je.totalDebit))}
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-neutral-300">{je.narration}</p>
-
-                    <div className="bg-[#0c0c0e] rounded-2xl p-2.5 divide-y divide-white/[0.04] text-xs">
-                      {je.lines.map((l) => (
-                        <div key={l.id} className="py-1.5 flex items-center justify-between text-neutral-300">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[#d4a437] font-mono">[{l.account?.code}]</span>
-                            <span className="font-medium text-white">{l.account?.name}</span>
-                            {l.narration && <span className="text-neutral-500 text-[11px]">({l.narration})</span>}
-                          </div>
-                          <div className="flex items-center gap-4 font-mono">
-                            <span className="text-[#3fbf6f]">
-                              {Number(l.debit) > 0 ? `Dr: ${formatINR(Number(l.debit))}` : ''}
-                            </span>
-                            <span className="text-[#e5544d]">
-                              {Number(l.credit) > 0 ? `Cr: ${formatINR(Number(l.credit))}` : ''}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: CHART OF ACCOUNTS */}
-        {activeTab === 'accounts' && (
-          <div className="mt-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#17171b] p-4 rounded-3xl border border-white/[0.08]">
-              <div className="text-xs text-neutral-300 font-semibold">
-                Chart of Accounts Master ({accounts.length} accounts)
-              </div>
-              <button
-                onClick={() => setShowAccountModal(true)}
-                className="px-3.5 py-1.5 bg-[#d4a437] hover:bg-[#b88c2a] text-black font-bold text-xs rounded-xl transition flex items-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" /> Add Account
-              </button>
-            </div>
-
-            <div className="bg-[#17171b] rounded-3xl border border-white/[0.08] overflow-hidden shadow-2xl">
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-2xl border border-white/[0.06]">
                 <table className="w-full text-left text-xs text-neutral-300">
                   <thead className="bg-white/[0.03] text-[10px] uppercase text-neutral-400 border-b border-white/[0.08]">
                     <tr>
-                      <th className="px-4 py-3">Code</th>
-                      <th className="px-4 py-3">Account Name</th>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Entry #</th>
                       <th className="px-4 py-3">Type</th>
-                      <th className="px-4 py-3">Sub-Type</th>
-                      <th className="px-4 py-3 text-right">Balance (₹)</th>
+                      <th className="px-4 py-3">Description</th>
+                      <th className="px-4 py-3 text-right">Inflow (₹)</th>
+                      <th className="px-4 py-3 text-right">Outflow (₹)</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/[0.06]">
-                    {accounts.map((acc) => (
-                      <tr key={acc.id} className="hover:bg-white/[0.02] transition">
-                        <td className="px-4 py-3 font-mono font-bold text-[#d4a437]">{acc.code}</td>
-                        <td className="px-4 py-3 font-medium text-white">{acc.name}</td>
-                        <td className="px-4 py-3">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                            acc.type === 'ASSET' ? 'bg-[#4d9de5]/20 text-[#4d9de5] border border-[#4d9de5]/30' :
-                            acc.type === 'LIABILITY' ? 'bg-[#e5a33d]/20 text-[#e5a33d] border border-[#e5a33d]/30' :
-                            acc.type === 'REVENUE' ? 'bg-[#3fbf6f]/20 text-[#3fbf6f] border border-[#3fbf6f]/30' :
-                            acc.type === 'EXPENSE' ? 'bg-[#e5544d]/20 text-[#e5544d] border border-[#e5544d]/30' : 'bg-white/[0.06] text-neutral-300'
-                          }`}>
-                            {acc.type}
-                          </span>
+                  <tbody className="divide-y divide-white/[0.06] font-mono">
+                    {cashFlowReport.transactions.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-neutral-500 italic font-sans">
+                          No cash flow transactions recorded yet
                         </td>
-                        <td className="px-4 py-3 text-xs text-neutral-400">{acc.subType}</td>
-                        <td className="px-4 py-3 text-right font-bold font-mono text-white">
-                          {formatINR(Number(acc.balance))}
-                        </td>
+                      </tr>
+                    )}
+                    {cashFlowReport.transactions.map((tx, idx) => (
+                      <tr key={idx} className="hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 font-sans text-neutral-400">{formatDateIN(tx.date)}</td>
+                        <td className="px-4 py-3 text-[#d4a437] font-semibold">{tx.entryNumber}</td>
+                        <td className="px-4 py-3 font-sans text-neutral-300">{tx.referenceType}</td>
+                        <td className="px-4 py-3 font-sans text-white">{tx.narration}</td>
+                        <td className="px-4 py-3 text-right text-[#3fbf6f]">{tx.inflow > 0 ? formatINR(tx.inflow) : '-'}</td>
+                        <td className="px-4 py-3 text-right text-[#e5544d]">{tx.outflow > 0 ? formatINR(tx.outflow) : '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -608,95 +631,138 @@ export const AccountingPage: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 5: AP / AR */}
-        {activeTab === 'apar' && (
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Accounts Payable */}
-            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
-              <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
+        {/* TAB 4: GST TAX BREAKUP */}
+        {activeTab === 'tax-breakup' && taxReport && (
+          <div className="mt-4 space-y-4 max-w-5xl mx-auto">
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-6">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
                 <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <Receipt className="w-5 h-5 text-[#e5a33d]" /> Accounts Payable (Vendors / Suppliers)
-                  </h3>
-                  <p className="text-xs text-neutral-400">Purchasing tax invoices and vendor payables</p>
+                  <h3 className="text-lg font-bold text-white">GST / Indirect Tax Reconciliation</h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    Automated Indian GST Reconciliation (Output GST Collected on Sales vs Input Tax Credit on GRNs)
+                  </p>
                 </div>
               </div>
 
-              <div className="space-y-2.5">
-                {payables.length === 0 && <p className="text-xs text-neutral-500 italic p-3">No supplier payables currently due</p>}
-                {payables.map((ap) => (
-                  <div key={ap.id} className="p-3.5 bg-[#0c0c0e] rounded-2xl border border-white/[0.06] flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-white text-sm">{ap.supplier?.name}</div>
-                      <div className="text-xs text-neutral-400 mt-0.5">Inv: {ap.invoiceNumber} • {formatDateIN(ap.invoiceDate)}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-bold font-mono text-[#e5a33d] text-sm">{formatINR(Number(ap.balance))}</div>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#e5a33d]/20 text-[#e5a33d] font-semibold border border-[#e5a33d]/30">
-                        {ap.status}
-                      </span>
-                    </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-[#0c0c0e] p-3.5 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Output GST Collected</span>
+                  <div className="text-base font-bold font-mono text-[#3fbf6f] mt-1">
+                    {formatINR(taxReport.outputTaxCollected)}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Accounts Receivable */}
-            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
-              <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-[#4d9de5]" /> Accounts Receivable (Guests & City Ledger)
-                  </h3>
-                  <p className="text-xs text-neutral-400">Guest folios, banquet and corporate billing receivables</p>
+                  <span className="text-[10px] text-neutral-500">POS & Room Folio Billing</span>
+                </div>
+                <div className="bg-[#0c0c0e] p-3.5 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Input Tax Credit (ITC)</span>
+                  <div className="text-base font-bold font-mono text-[#4d9de5] mt-1">
+                    {formatINR(taxReport.inputTaxCredit)}
+                  </div>
+                  <span className="text-[10px] text-neutral-500">GRN Procurement Purchases</span>
+                </div>
+                <div className="bg-[#0c0c0e] p-3.5 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Net GST Liability</span>
+                  <div className="text-base font-bold font-mono text-[#d4a437] mt-1">
+                    {formatINR(taxReport.netTaxPayable)}
+                  </div>
+                  <span className="text-[10px] text-neutral-500">Net Payable to Government</span>
                 </div>
               </div>
 
-              <div className="space-y-2.5">
-                {receivables.length === 0 && <p className="text-xs text-neutral-500 italic p-3">No customer receivables pending</p>}
-                {receivables.map((ar) => (
-                  <div key={ar.id} className="p-3.5 bg-[#0c0c0e] rounded-2xl border border-white/[0.06] flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-white text-sm">{ar.guest?.firstName} {ar.guest?.lastName}</div>
-                      <div className="text-xs text-neutral-400 mt-0.5">Booking: {ar.booking?.bookingNumber} • {ar.invoiceNumber}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-bold font-mono text-[#4d9de5] text-sm">{formatINR(Number(ar.balance))}</div>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#4d9de5]/20 text-[#4d9de5] font-semibold border border-[#4d9de5]/30">
-                        {ar.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto rounded-2xl border border-white/[0.06]">
+                <table className="w-full text-left text-xs text-neutral-300">
+                  <thead className="bg-white/[0.03] text-[10px] uppercase text-neutral-400 border-b border-white/[0.08]">
+                    <tr>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Entry #</th>
+                      <th className="px-4 py-3">Tax Account</th>
+                      <th className="px-4 py-3">Source Ref</th>
+                      <th className="px-4 py-3 text-right">Tax Collected (₹)</th>
+                      <th className="px-4 py-3 text-right">ITC Credit (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06] font-mono">
+                    {taxReport.taxEntries.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-neutral-500 italic font-sans">
+                          No tax entries recorded for this period
+                        </td>
+                      </tr>
+                    )}
+                    {taxReport.taxEntries.map((t, idx) => (
+                      <tr key={idx} className="hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 font-sans text-neutral-400">{formatDateIN(t.date)}</td>
+                        <td className="px-4 py-3 text-[#d4a437] font-semibold">{t.entryNumber}</td>
+                        <td className="px-4 py-3 font-sans text-white">[{t.accountCode}] {t.accountName}</td>
+                        <td className="px-4 py-3 font-sans text-neutral-300">{t.referenceType}</td>
+                        <td className="px-4 py-3 text-right text-[#3fbf6f]">{t.taxCollected > 0 ? formatINR(t.taxCollected) : '-'}</td>
+                        <td className="px-4 py-3 text-right text-[#4d9de5]">{t.taxPaid > 0 ? formatINR(t.taxPaid) : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         )}
 
-        {/* TAB 6: TRIAL BALANCE */}
-        {activeTab === 'trial' && (
+        {/* TAB 5: CASH & BANK RECONCILIATION */}
+        {activeTab === 'reconciliation' && cashRecon && (
           <div className="mt-4 space-y-4 max-w-5xl mx-auto">
             <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-6">
               <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
                 <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Scale className="w-5 h-5 text-[#d4a437]" /> Trial Balance Verification
-                  </h3>
-                  <p className="text-xs text-neutral-400 mt-0.5">Verification that sum of all debit balances equals sum of all credit balances</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs px-3 py-1 rounded-full font-bold flex items-center gap-1.5 ${
-                    Math.abs(totalGlDebits - totalGlCredits) < 0.01
-                      ? 'bg-[#3fbf6f]/20 text-[#3fbf6f] border border-[#3fbf6f]/30'
-                      : 'bg-[#e5544d]/20 text-[#e5544d] border border-[#e5544d]/30'
-                  }`}>
-                    {Math.abs(totalGlDebits - totalGlCredits) < 0.01 ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                    {Math.abs(totalGlDebits - totalGlCredits) < 0.01 ? 'TRIAL BALANCE IN BALANCE' : 'TRIAL BALANCE OUT OF BALANCE'}
-                  </span>
+                  <h3 className="text-lg font-bold text-white">Cash & Bank Liquidity Reconciliation</h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    Real-time position of petty cash drawer balances and commercial bank accounts
+                  </p>
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-[#0c0c0e] p-4 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Cash Drawer [1010]</span>
+                  <div className="text-lg font-bold font-mono text-[#3fbf6f] mt-1">
+                    {formatINR(cashRecon.cashDrawerBalance)}
+                  </div>
+                  <span className="text-[10px] text-neutral-500">Physical till / POS cash floats</span>
+                </div>
+                <div className="bg-[#0c0c0e] p-4 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Operating Bank Account [1020]</span>
+                  <div className="text-lg font-bold font-mono text-[#4d9de5] mt-1">
+                    {formatINR(cashRecon.bankAccountBalance)}
+                  </div>
+                  <span className="text-[10px] text-neutral-500">HDFC Current Account Ledger</span>
+                </div>
+                <div className="bg-[#0c0c0e] p-4 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Total Liquid Availability</span>
+                  <div className="text-lg font-bold font-mono text-[#d4a437] mt-1">
+                    {formatINR(cashRecon.totalLiquidFunds)}
+                  </div>
+                  <span className="text-[10px] text-neutral-500">Consolidated liquid reserves</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 6: TRIAL BALANCE VERIFICATION */}
+        {activeTab === 'trial' && trialBalance && (
+          <div className="mt-4 space-y-4 max-w-5xl mx-auto">
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white">General Ledger Trial Balance</h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">Mathematical proof of double-entry integrity</p>
+                </div>
+                <div className={`text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 ${
+                  trialBalance.isBalanced ? 'bg-[#3fbf6f]/20 text-[#3fbf6f] border border-[#3fbf6f]/30' : 'bg-[#e5544d]/20 text-[#e5544d] border border-[#e5544d]/30'
+                }`}>
+                  {trialBalance.isBalanced ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                  {trialBalance.isBalanced ? 'TRIAL BALANCE EQUALIZED' : `VARIANCE: ${formatINR(trialBalance.variance)}`}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-white/[0.06]">
                 <table className="w-full text-left text-xs text-neutral-300">
                   <thead className="bg-white/[0.03] text-[10px] uppercase text-neutral-400 border-b border-white/[0.08]">
                     <tr>
@@ -708,32 +774,216 @@ export const AccountingPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/[0.06] font-mono">
-                    {accounts.map((acc) => {
-                      const bal = Number(acc.balance);
-                      const isDr = ['ASSET', 'EXPENSE'].includes(acc.type);
-                      const isCr = ['LIABILITY', 'EQUITY', 'REVENUE'].includes(acc.type);
-                      return (
-                        <tr key={acc.id} className="hover:bg-white/[0.02]">
-                          <td className="px-4 py-3 text-[#d4a437] font-bold">{acc.code}</td>
-                          <td className="px-4 py-3 font-sans font-medium text-white">{acc.name}</td>
-                          <td className="px-4 py-3 font-sans text-neutral-400">{acc.type}</td>
-                          <td className="px-4 py-3 text-right text-[#3fbf6f]">
-                            {isDr && bal > 0 ? formatINR(bal) : '-'}
-                          </td>
-                          <td className="px-4 py-3 text-right text-[#e5544d]">
-                            {isCr && bal > 0 ? formatINR(bal) : '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {trialBalance.accounts.map((acc) => (
+                      <tr key={acc.accountId} className="hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 text-[#d4a437] font-bold">{acc.code}</td>
+                        <td className="px-4 py-3 font-sans font-medium text-white">{acc.name}</td>
+                        <td className="px-4 py-3 font-sans text-neutral-400">{acc.type}</td>
+                        <td className="px-4 py-3 text-right text-[#3fbf6f]">
+                          {acc.closingDebit > 0 ? formatINR(acc.closingDebit) : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-right text-[#e5544d]">
+                          {acc.closingCredit > 0 ? formatINR(acc.closingCredit) : '-'}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                   <tfoot className="bg-[#0c0c0e] font-mono font-bold text-xs border-t-2 border-white/[0.1]">
                     <tr>
                       <td colSpan={3} className="px-4 py-3 font-sans text-white uppercase">Grand Total (Debits & Credits)</td>
-                      <td className="px-4 py-3 text-right text-[#3fbf6f]">{formatINR(totalGlDebits)}</td>
-                      <td className="px-4 py-3 text-right text-[#e5544d]">{formatINR(totalGlCredits)}</td>
+                      <td className="px-4 py-3 text-right text-[#3fbf6f]">{formatINR(trialBalance.totalDebit)}</td>
+                      <td className="px-4 py-3 text-right text-[#e5544d]">{formatINR(trialBalance.totalCredit)}</td>
                     </tr>
                   </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 7: GENERAL LEDGER */}
+        {activeTab === 'gl' && (
+          <div className="mt-4 space-y-4 max-w-5xl mx-auto">
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white">General Ledger Journal Entries</h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">Chronological double-entry transactions with complete audit links</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {journalEntries.length === 0 && (
+                  <div className="p-8 text-center text-neutral-500 italic">No general ledger entries recorded yet</div>
+                )}
+                {journalEntries.map((je) => (
+                  <div key={je.id} className="bg-[#0c0c0e] p-4 rounded-2xl border border-white/[0.06] space-y-3">
+                    <div className="flex justify-between items-center pb-2 border-b border-white/[0.04]">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-[#d4a437]">{je.entryNumber}</span>
+                        <span className="text-[10px] px-2 py-0.5 bg-white/[0.06] rounded-md font-semibold text-neutral-300">
+                          {je.referenceType}
+                        </span>
+                      </div>
+                      <div className="text-xs text-neutral-400">{formatDateIN(je.date)}</div>
+                    </div>
+                    <p className="text-xs text-neutral-200">{je.narration}</p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <tbody className="divide-y divide-white/[0.02]">
+                          {je.lines.map((l) => (
+                            <tr key={l.id}>
+                              <td className="py-1 text-neutral-300">[{l.account?.code}] {l.account?.name}</td>
+                              <td className="py-1 text-right font-mono text-[#3fbf6f]">{Number(l.debit) > 0 ? formatINR(Number(l.debit)) : '-'}</td>
+                              <td className="py-1 text-right font-mono text-[#e5544d]">{Number(l.credit) > 0 ? formatINR(Number(l.credit)) : '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 8: CHART OF ACCOUNTS */}
+        {activeTab === 'accounts' && (
+          <div className="mt-4 space-y-4 max-w-5xl mx-auto">
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white">Chart of Accounts Master</h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">Standardized Indian hospitality accounting taxonomy</p>
+                </div>
+                <button
+                  onClick={() => setShowAccountModal(true)}
+                  className="px-3 py-1.5 bg-[#d4a437] hover:bg-[#b88c2a] text-black text-xs rounded-xl font-bold flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Account
+                </button>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-white/[0.06]">
+                <table className="w-full text-left text-xs text-neutral-300">
+                  <thead className="bg-white/[0.03] text-[10px] uppercase text-neutral-400 border-b border-white/[0.08]">
+                    <tr>
+                      <th className="px-4 py-3">Code</th>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3">Sub-Type</th>
+                      <th className="px-4 py-3 text-right">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06]">
+                    {accounts.map((a) => (
+                      <tr key={a.id} className="hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 font-mono font-bold text-[#d4a437]">{a.code}</td>
+                        <td className="px-4 py-3 font-medium text-white">{a.name}</td>
+                        <td className="px-4 py-3 text-neutral-400">{a.type}</td>
+                        <td className="px-4 py-3 text-neutral-400">{a.subType}</td>
+                        <td className="px-4 py-3 text-right font-mono font-semibold text-neutral-200">
+                          {formatINR(Number(a.balance))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 9: PAYABLES & RECEIVABLES */}
+        {activeTab === 'apar' && (
+          <div className="mt-4 space-y-6 max-w-5xl mx-auto">
+            {/* Accounts Payable */}
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+                <h3 className="text-base font-bold text-white">Accounts Payable (Suppliers / Vendors)</h3>
+                <span className="text-xs text-neutral-400">{payables.length} open items</span>
+              </div>
+              <div className="overflow-x-auto rounded-2xl border border-white/[0.06]">
+                <table className="w-full text-left text-xs text-neutral-300">
+                  <thead className="bg-white/[0.03] text-[10px] uppercase text-neutral-400 border-b border-white/[0.08]">
+                    <tr>
+                      <th className="px-4 py-3">Invoice #</th>
+                      <th className="px-4 py-3">Supplier</th>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3 text-right">Amount (₹)</th>
+                      <th className="px-4 py-3 text-right">Balance (₹)</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06] font-mono">
+                    {payables.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-neutral-500 italic font-sans">
+                          No open accounts payable
+                        </td>
+                      </tr>
+                    )}
+                    {payables.map((ap) => (
+                      <tr key={ap.id} className="hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 text-[#d4a437] font-semibold">{ap.invoiceNumber}</td>
+                        <td className="px-4 py-3 font-sans text-white">{ap.supplier?.name || 'Vendor'}</td>
+                        <td className="px-4 py-3 font-sans text-neutral-400">{formatDateIN(ap.invoiceDate)}</td>
+                        <td className="px-4 py-3 text-right text-white">{formatINR(Number(ap.amount))}</td>
+                        <td className="px-4 py-3 text-right text-[#e5544d] font-bold">{formatINR(Number(ap.balance))}</td>
+                        <td className="px-4 py-3 font-sans">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/20 text-red-400 border border-red-500/30">
+                            {ap.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Accounts Receivable */}
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+                <h3 className="text-base font-bold text-white">Accounts Receivable (Hotel Room Guests / Corporate)</h3>
+                <span className="text-xs text-neutral-400">{receivables.length} open items</span>
+              </div>
+              <div className="overflow-x-auto rounded-2xl border border-white/[0.06]">
+                <table className="w-full text-left text-xs text-neutral-300">
+                  <thead className="bg-white/[0.03] text-[10px] uppercase text-neutral-400 border-b border-white/[0.08]">
+                    <tr>
+                      <th className="px-4 py-3">Invoice #</th>
+                      <th className="px-4 py-3">Guest / Account</th>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3 text-right">Amount (₹)</th>
+                      <th className="px-4 py-3 text-right">Balance (₹)</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06] font-mono">
+                    {receivables.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-neutral-500 italic font-sans">
+                          No open accounts receivable
+                        </td>
+                      </tr>
+                    )}
+                    {receivables.map((ar) => (
+                      <tr key={ar.id} className="hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 text-[#d4a437] font-semibold">{ar.invoiceNumber}</td>
+                        <td className="px-4 py-3 font-sans text-white">{ar.guest ? `${ar.guest.firstName} ${ar.guest.lastName}` : 'Guest Folio'}</td>
+                        <td className="px-4 py-3 font-sans text-neutral-400">{formatDateIN(ar.invoiceDate)}</td>
+                        <td className="px-4 py-3 text-right text-white">{formatINR(Number(ar.amount))}</td>
+                        <td className="px-4 py-3 text-right text-[#3fbf6f] font-bold">{formatINR(Number(ar.balance))}</td>
+                        <td className="px-4 py-3 font-sans">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] bg-green-500/20 text-green-400 border border-green-500/30">
+                            {ar.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>
               </div>
             </div>

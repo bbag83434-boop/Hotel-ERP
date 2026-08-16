@@ -7,13 +7,18 @@ const router = Router();
 
 router.use(authenticate);
 
-// Requests
+// Summary Metrics
+router.get('/summary', ApprovalController.getSummary);
+
+// Requests Queue
 router.get('/requests', ApprovalController.getRequests);
 router.post('/requests', ApprovalController.createRequest);
 router.post('/requests/:id/action', requirePermission('approval:manage'), ApprovalController.actOnRequest);
 
-// Rules
+// Rules Configuration Matrix
 router.get('/rules', ApprovalController.getRules);
 router.post('/rules', requirePermission('approval:manage'), ApprovalController.createRule);
+router.put('/rules/:id', requirePermission('approval:manage'), ApprovalController.updateRule);
+router.delete('/rules/:id', requirePermission('approval:manage'), ApprovalController.deleteRule);
 
 export default router;

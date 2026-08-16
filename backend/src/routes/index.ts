@@ -14,6 +14,9 @@ import dashboardRoutes from './dashboard.routes';
 import aiRoutes from './ai.routes';
 import routingRoutes from './routing.routes';
 import branchRoutes from './branch.routes';
+import cashierShiftRoutes from './cashier-shift.routes';
+import auditRoutes from './audit.routes';
+import onlineOrderRoutes from './online-order.routes';
 
 const router = Router();
 
@@ -30,8 +33,11 @@ router.use('/hotel', hotelRoutes);
 router.use('/accounting', accountingRoutes);
 router.use('/hr', hrRoutes);
 router.use('/approval', approvalRoutes);
+router.use('/audit', auditRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/ai', aiRoutes);
+router.use('/cashier-shifts', cashierShiftRoutes);
+router.use('/online-orders', onlineOrderRoutes);
 router.use('/', healthRoutes);
 
 export default router;

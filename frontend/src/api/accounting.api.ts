@@ -6,7 +6,11 @@ import {
   AccountsReceivable,
   ExpenseEntry,
   ProfitAndLossReport,
-  CashFlowReport
+  CashFlowReport,
+  TrialBalanceReport,
+  BalanceSheetReport,
+  TaxBreakupReport,
+  BankCashReconciliationReport
 } from '../types/accounting.types';
 
 export const accountingApi = {
@@ -49,7 +53,7 @@ export const accountingApi = {
     return res.data.data;
   },
 
-  // Reports
+  // Reports (Part 18 Advanced Accounting)
   getProfitAndLoss: async (params?: { branchId?: string; startDate?: string; endDate?: string }): Promise<ProfitAndLossReport> => {
     const res = await apiClient.get('/accounting/reports/pnl', { params });
     return res.data.data;
@@ -57,6 +61,26 @@ export const accountingApi = {
 
   getCashFlow: async (params?: { branchId?: string; startDate?: string; endDate?: string }): Promise<CashFlowReport> => {
     const res = await apiClient.get('/accounting/reports/cash-flow', { params });
+    return res.data.data;
+  },
+
+  getTrialBalance: async (params?: { branchId?: string; asOfDate?: string }): Promise<TrialBalanceReport> => {
+    const res = await apiClient.get('/accounting/reports/trial-balance', { params });
+    return res.data.data;
+  },
+
+  getBalanceSheet: async (params?: { branchId?: string; asOfDate?: string }): Promise<BalanceSheetReport> => {
+    const res = await apiClient.get('/accounting/reports/balance-sheet', { params });
+    return res.data.data;
+  },
+
+  getTaxBreakup: async (params?: { branchId?: string; startDate?: string; endDate?: string }): Promise<TaxBreakupReport> => {
+    const res = await apiClient.get('/accounting/reports/tax-breakup', { params });
+    return res.data.data;
+  },
+
+  getCashBankReconciliation: async (params?: { branchId?: string; startDate?: string; endDate?: string }): Promise<BankCashReconciliationReport> => {
+    const res = await apiClient.get('/accounting/reports/cash-bank-reconciliation', { params });
     return res.data.data;
   }
 };

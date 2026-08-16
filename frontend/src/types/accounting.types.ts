@@ -131,3 +131,81 @@ export interface CashFlowReport {
     netCash: number;
   }>;
 }
+
+export interface TrialBalanceRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  subType: AccountSubType;
+  totalDebits: number;
+  totalCredits: number;
+  closingDebit: number;
+  closingCredit: number;
+}
+
+export interface TrialBalanceReport {
+  asOfDate: string;
+  isBalanced: boolean;
+  totalDebit: number;
+  totalCredit: number;
+  variance: number;
+  accounts: TrialBalanceRow[];
+}
+
+export interface BalanceSheetReport {
+  asOfDate: string;
+  isBalanced: boolean;
+  assets: {
+    currentAssets: Array<{ code: string; name: string; amount: number }>;
+    nonCurrentAssets: Array<{ code: string; name: string; amount: number }>;
+    totalAssets: number;
+  };
+  liabilities: {
+    currentLiabilities: Array<{ code: string; name: string; amount: number }>;
+    longTermLiabilities: Array<{ code: string; name: string; amount: number }>;
+    totalLiabilities: number;
+  };
+  equity: {
+    items: Array<{ code: string; name: string; amount: number }>;
+    totalEquity: number;
+  };
+  totalLiabilitiesAndEquity: number;
+}
+
+export interface TaxBreakupReport {
+  period: { startDate: string; endDate: string };
+  outputTaxCollected: number;
+  inputTaxCredit: number;
+  netTaxPayable: number;
+  taxEntries: Array<{
+    date: string;
+    entryNumber: string;
+    referenceType: string;
+    accountCode: string;
+    accountName: string;
+    narration: string;
+    taxCollected: number;
+    taxPaid: number;
+  }>;
+}
+
+export interface BankCashReconciliationReport {
+  period: { startDate: string; endDate: string };
+  cashDrawerBalance: number;
+  bankAccountBalance: number;
+  totalLiquidFunds: number;
+  periodInflows: number;
+  periodOutflows: number;
+  netChange: number;
+  recentCashTransactions: Array<{
+    date: string;
+    entryNumber: string;
+    referenceType: string;
+    narration: string;
+    accountName: string;
+    inflow: number;
+    outflow: number;
+    netCash: number;
+  }>;
+}

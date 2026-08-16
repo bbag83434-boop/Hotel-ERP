@@ -920,11 +920,16 @@ export class RestaurantService {
       const cashReceived = receivedAmount ? new Prisma.Decimal(receivedAmount) : paymentAmount;
       const changeAmount = cashReceived.greaterThan(paymentAmount) ? cashReceived.minus(paymentAmount) : new Prisma.Decimal(0);
 
+      let normalizedMethod: any = paymentMethod;
+      if (normalizedMethod === 'UPI' || normalizedMethod === 'QR' || normalizedMethod === 'GPAY' || normalizedMethod === 'PAYTM' || normalizedMethod === 'PHONEPE') {
+        normalizedMethod = 'MOBILE_BANKING';
+      }
+
       const payment = await tx.payment.create({
         data: {
           orderId,
           amount: paymentAmount,
-          method: paymentMethod,
+          method: normalizedMethod,
           status: 'SUCCESS',
           receivedAmount: cashReceived,
           changeAmount,
@@ -1080,7 +1085,7 @@ export class RestaurantService {
           grandTotal: order.grandTotal,
           totalCogs,
           grossProfit,
-          paymentMethod
+          paymentMethod: normalizedMethod
         }
       });
 
