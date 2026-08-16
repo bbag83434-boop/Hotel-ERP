@@ -18,8 +18,12 @@ import {
   Banknote,
   Send,
   GitMerge,
-  Users
+  Users,
+  Printer,
+  CheckCircle2,
+  X
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { restaurantApi } from '../../api/restaurant.api';
 import { productionApi } from '../../api/production.api';
 import {
@@ -41,9 +45,11 @@ interface BranchOption {
 }
 
 export const RestaurantPOSPage: React.FC = () => {
+  const { user, selectedBranchId: authBranchId } = useAuth();
   const [activeTab, setActiveTab] = useState<'tables' | 'pos' | 'kds' | 'menu' | 'sales'>('pos');
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+  const [settledReceipt, setSettledReceipt] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -112,17 +118,17 @@ export const RestaurantPOSPage: React.FC = () => {
         setLoading(true);
         const [branchList, recipes] = await Promise.all([
           restaurantApi.getBranches().catch(() => []),
-          productionApi.getRecipes()
+          productionApi.getRecipes().catch(() => ({ recipes: [] }))
         ]);
         setBranches(branchList);
-        setRecipesList(recipes.recipes || []);
+        setRecipesList(recipes?.recipes || []);
 
         const restBr = branchList.find((b: BranchOption) => b.type === 'RESTAURANT') || branchList[0];
         if (restBr) {
           setSelectedBranchId(restBr.id);
         }
       } catch (err: any) {
-        setErrorMsg(err.response?.data?.message || 'Failed to load restaurant initial data');
+        console.error('Initial restaurant load warning:', err);
       } finally {
         setLoading(false);
       }
@@ -280,26 +286,40 @@ export const RestaurantPOSPage: React.FC = () => {
 
   // Process Checkout / Settle Bill
   const handleCompleteCheckout = async () => {
+    if (!cartItems.length && !activeOrder) {
+      setErrorMsg('Your cart is empty. Please add items before settling.');
+      return;
+    }
+
+    const branchIdToUse = selectedBranchId || authBranchId || branches[0]?.id || user?.branches?.[0]?.id;
+    if (!branchIdToUse) {
+      setErrorMsg('Please select an active outlet/branch before proceeding with settlement.');
+      return;
+    }
+
     try {
       setLoading(true);
       setErrorMsg(null);
 
       let orderId = activeOrder?.id;
+      let currentOrderNumber = activeOrder?.orderNumber;
+
       if (!orderId) {
         const newOrder = await restaurantApi.createOrder({
-          branchId: selectedBranchId,
+          branchId: branchIdToUse,
           tableId: posTableId || null,
           orderType: posOrderType,
           guestCount: posGuestCount,
-          customerName: posCustomerName,
-          notes: posOrderNotes,
+          customerName: posCustomerName || undefined,
+          notes: posOrderNotes || undefined,
           items: cartItems.map((c) => ({
             menuItemId: c.menuItem.id,
             quantity: c.quantity,
-            notes: c.notes
+            notes: c.notes || undefined
           }))
         });
         orderId = newOrder.id;
+        currentOrderNumber = newOrder.orderNumber;
       }
 
       if (activeDiscountAmount > 0) {
@@ -310,23 +330,43 @@ export const RestaurantPOSPage: React.FC = () => {
         });
       }
 
+      const receivedNum = receivedCash ? Number(receivedCash) : cartGrandTotal;
       const paymentRes = await restaurantApi.completeOrderCheckout(orderId, {
         paymentMethod,
         amount: cartGrandTotal,
-        receivedAmount: receivedCash ? Number(receivedCash) : cartGrandTotal
+        receivedAmount: receivedNum
       });
 
-      setLastInvoiceNumber(paymentRes.invoiceNumber);
-      setSuccessMsg(`Order settled! Invoice: ${paymentRes.invoiceNumber}. Kitchen inventory deducted automatically per Recipe BOM.`);
+      const invNumber = paymentRes.invoiceNumber || `INV-${currentOrderNumber || orderId.slice(0, 8)}`;
+      setLastInvoiceNumber(invNumber);
+      setSuccessMsg(`Order settled! Invoice: ${invNumber}. Kitchen inventory deducted automatically per Recipe BOM.`);
+
+      // Build receipt modal payload
+      setSettledReceipt({
+        invoiceNumber: invNumber,
+        orderNumber: currentOrderNumber || paymentRes.orderNumber,
+        branchName: branches.find((b) => b.id === branchIdToUse)?.name || 'Grand Heritage Restaurant',
+        orderType: posOrderType,
+        paymentMethod,
+        items: [...cartItems],
+        subtotal: cartSubtotal,
+        tax: cartTax,
+        discount: activeDiscountAmount,
+        grandTotal: cartGrandTotal,
+        receivedAmount: receivedNum,
+        changeDue: Math.max(0, receivedNum - cartGrandTotal),
+        date: new Date()
+      });
+
       setCartItems([]);
       setActiveOrder(null);
       setPosTableId('');
       setActiveDiscountAmount(0);
       setReceivedCash('');
       setIsCheckoutModalOpen(false);
-      loadBranchData(selectedBranchId);
+      loadBranchData(branchIdToUse);
     } catch (err: any) {
-      setErrorMsg(err.response?.data?.message || 'Checkout failed');
+      setErrorMsg(err.response?.data?.message || 'Checkout settlement failed. Please review errors.');
     } finally {
       setLoading(false);
     }
@@ -1354,6 +1394,7 @@ export const RestaurantPOSPage: React.FC = () => {
                 ].map((m) => (
                   <button
                     key={m.id}
+                    type="button"
                     onClick={() => setPaymentMethod(m.id)}
                     className={`py-3 rounded-2xl border flex flex-col items-center gap-1 font-bold text-xs transition ${
                       paymentMethod === m.id
@@ -1384,6 +1425,7 @@ export const RestaurantPOSPage: React.FC = () => {
                   {[100, 200, 500, 2000].map((bill) => (
                     <button
                       key={bill}
+                      type="button"
                       onClick={() => setReceivedCash(String(bill))}
                       className="px-3 py-1 bg-[#202026] border border-white/[0.08] rounded-lg text-xs font-bold text-neutral-300 hover:bg-[#282832] font-mono"
                     >
@@ -1402,12 +1444,121 @@ export const RestaurantPOSPage: React.FC = () => {
             )}
 
             <button
+              type="button"
               onClick={handleCompleteCheckout}
               disabled={loading}
               className="w-full py-3.5 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold rounded-2xl text-xs uppercase tracking-wider shadow-lg shadow-[#d4a437]/20 transition disabled:opacity-40"
             >
-              Confirm Settlement & Print Receipt
+              {loading ? 'Settling Payment...' : 'Confirm Settlement & Print Receipt'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================== */}
+      {/* SETTLEMENT TAX INVOICE & PRINT RECEIPT MODAL */}
+      {/* ========================================================== */}
+      {settledReceipt && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#17171b] rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-white/[0.1] animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#3fbf6f]/15 border border-[#3fbf6f]/30 flex items-center justify-center text-[#3fbf6f]">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm uppercase tracking-wider">Settlement Complete</h3>
+                  <p className="text-[11px] text-neutral-400 font-mono">{settledReceipt.invoiceNumber}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettledReceipt(null)}
+                className="text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.06] transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Printable Receipt Paper Card */}
+            <div className="bg-white text-black p-5 rounded-2xl space-y-3 font-mono text-xs shadow-inner">
+              <div className="text-center border-b border-neutral-300 pb-3">
+                <h4 className="font-bold text-sm tracking-wider uppercase">Grand Heritage Resort</h4>
+                <p className="text-[10px] text-neutral-600 uppercase">{settledReceipt.branchName}</p>
+                <p className="text-[10px] text-neutral-500 mt-1">Tax Invoice • GST Registered</p>
+                <div className="text-[9px] text-neutral-500 mt-0.5">
+                  Inv: {settledReceipt.invoiceNumber} | {new Date(settledReceipt.date).toLocaleDateString('en-IN')} {new Date(settledReceipt.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+
+              <div className="space-y-1.5 divide-y divide-neutral-200 text-xs">
+                {settledReceipt.items.map((it: any, idx: number) => (
+                  <div key={idx} className="pt-1.5 flex justify-between">
+                    <div>
+                      <span className="font-bold">{it.menuItem?.name || 'Menu Item'}</span>
+                      <span className="text-neutral-500 text-[10px] block">
+                        x{it.quantity} @ {formatINR(Number(it.menuItem?.price || 0))}
+                      </span>
+                    </div>
+                    <div className="font-bold">
+                      {formatINR(Number(it.menuItem?.price || 0) * it.quantity)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t-2 border-dashed border-neutral-400 pt-2 space-y-1 text-xs">
+                <div className="flex justify-between text-neutral-600">
+                  <span>Subtotal:</span>
+                  <span>{formatINR(settledReceipt.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-neutral-600">
+                  <span>GST (5%):</span>
+                  <span>{formatINR(settledReceipt.tax)}</span>
+                </div>
+                {settledReceipt.discount > 0 && (
+                  <div className="flex justify-between text-neutral-600">
+                    <span>Discount:</span>
+                    <span>-{formatINR(settledReceipt.discount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-extrabold text-sm pt-1 border-t border-neutral-300">
+                  <span>Grand Total:</span>
+                  <span>{formatINR(settledReceipt.grandTotal)}</span>
+                </div>
+                <div className="flex justify-between text-[11px] pt-1 text-neutral-700">
+                  <span>Method: {settledReceipt.paymentMethod}</span>
+                  <span>Paid: {formatINR(settledReceipt.receivedAmount)}</span>
+                </div>
+                {settledReceipt.changeDue > 0 && (
+                  <div className="flex justify-between font-bold text-xs text-neutral-800">
+                    <span>Change Returned:</span>
+                    <span>{formatINR(settledReceipt.changeDue)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="text-center text-[10px] text-neutral-500 pt-2 border-t border-neutral-200">
+                Thank you for dining with us!
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="flex-1 py-3 bg-white/[0.08] hover:bg-white/[0.12] text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 border border-white/[0.1] transition"
+              >
+                <Printer className="w-4 h-4 text-[#d4a437]" /> Print Receipt
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettledReceipt(null)}
+                className="flex-1 py-3 bg-[#d4a437] hover:bg-[#b88c2c] text-black font-bold text-xs uppercase tracking-wider rounded-xl transition shadow-lg"
+              >
+                Next Order
+              </button>
+            </div>
           </div>
         </div>
       )}

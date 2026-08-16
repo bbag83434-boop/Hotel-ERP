@@ -10,7 +10,9 @@ import {
   ArrowDownRight,
   TrendingUp,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Scale,
+  X
 } from 'lucide-react';
 import { accountingApi } from '../../api/accounting.api';
 import {
@@ -24,7 +26,7 @@ import {
 import { formatINR, formatDateIN, getIndianFinancialYear } from '../../utils/formatters';
 
 export const AccountingPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'pnl' | 'gl' | 'accounts' | 'apar' | 'expenses' | 'cashflow'>('pnl');
+  const [activeTab, setActiveTab] = useState<'pnl' | 'cashflow' | 'gl' | 'accounts' | 'apar' | 'trial'>('pnl');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -215,37 +217,47 @@ export const AccountingPage: React.FC = () => {
   const totalCreditSum = newJournalForm.lines.reduce((s, l) => s + Number(l.credit || 0), 0);
   const isJournalBalanced = Math.abs(totalDebitSum - totalCreditSum) < 0.001 && totalDebitSum > 0;
 
+  // Trial balance calculations
+  const totalGlDebits = accounts.reduce((acc, a) => {
+    const bal = Number(a.balance);
+    return ['ASSET', 'EXPENSE'].includes(a.type) && bal > 0 ? acc + bal : acc;
+  }, 0);
+  const totalGlCredits = accounts.reduce((acc, a) => {
+    const bal = Number(a.balance);
+    return ['LIABILITY', 'EQUITY', 'REVENUE'].includes(a.type) && bal > 0 ? acc + bal : acc;
+  }, 0);
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-20 md:pb-8">
+    <div className="min-h-screen bg-[#0c0c0e] text-neutral-100 pb-20 md:pb-8 space-y-6">
       {/* Top Banner */}
-      <header className="bg-slate-900/90 backdrop-blur border-b border-slate-800 sticky top-0 z-30 px-4 py-3 sm:px-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl p-6 relative overflow-hidden shadow-2xl">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-gradient-to-tr from-emerald-600 to-teal-400 rounded-xl shadow-lg shadow-emerald-900/20 text-slate-950 font-bold">
-              <IndianRupee className="w-6 h-6 text-slate-950" />
+            <div className="p-2.5 bg-[#d4a437]/10 border border-[#d4a437]/20 rounded-2xl text-[#d4a437] font-bold">
+              <IndianRupee className="w-6 h-6" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                Accounting & GST Controller
-                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium border border-emerald-500/30">
+                Advanced Accounting & Financial Statements
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-[#d4a437]/20 text-[#d4a437] font-bold border border-[#d4a437]/30">
                   {getIndianFinancialYear()}
                 </span>
               </h1>
-              <p className="text-xs text-slate-400">General Ledger, Dynamic P&L, Cash Flow, AP/AR & GST Input/Output Ledgers</p>
+              <p className="text-xs text-neutral-400">Double-Entry General Ledger, Real-Time P&L, Cash Flow, AP/AR & Trial Balance</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setShowExpenseModal(true)}
-              className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-500/30 font-medium text-sm rounded-lg transition"
+              className="flex items-center gap-2 px-3.5 py-2 bg-white/[0.04] hover:bg-white/[0.08] text-[#e5544d] border border-[#e5544d]/30 font-semibold text-xs rounded-xl transition"
             >
-              <Receipt className="w-4 h-4 text-rose-400" />
+              <Receipt className="w-4 h-4 text-[#e5544d]" />
               Record Expense
             </button>
             <button
               onClick={() => setShowJournalModal(true)}
-              className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-semibold text-sm rounded-lg shadow-md transition"
+              className="flex items-center gap-2 px-4 py-2 bg-[#d4a437] hover:bg-[#b88c2a] text-black font-bold text-xs rounded-xl shadow-lg transition"
             >
               <Plus className="w-4 h-4" />
               New Journal Entry
@@ -254,49 +266,50 @@ export const AccountingPage: React.FC = () => {
         </div>
 
         {/* Financial KPI Summary */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mt-3 pt-3 border-t border-slate-800/80">
-          <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/50">
-            <span className="text-[11px] text-slate-400 uppercase font-medium">Operating Revenue</span>
-            <div className="text-lg font-bold text-emerald-400 mt-0.5">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mt-4 pt-4 border-t border-white/[0.08]">
+          <div className="bg-[#0c0c0e] p-3 rounded-2xl border border-white/[0.06]">
+            <span className="text-[10px] text-neutral-400 uppercase font-semibold">Operating Revenue</span>
+            <div className="text-base font-bold font-mono text-[#3fbf6f] mt-0.5">
               {formatINR(pnlReport ? pnlReport.revenue.total : 0)}
             </div>
           </div>
-          <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/50">
-            <span className="text-[11px] text-slate-400 uppercase font-medium">COGS (Kitchen BOM)</span>
-            <div className="text-lg font-bold text-amber-400 mt-0.5">
+          <div className="bg-[#0c0c0e] p-3 rounded-2xl border border-white/[0.06]">
+            <span className="text-[10px] text-neutral-400 uppercase font-semibold">COGS (Kitchen BOM)</span>
+            <div className="text-base font-bold font-mono text-[#e5a33d] mt-0.5">
               {formatINR(pnlReport ? pnlReport.cogs.total : 0)}
             </div>
           </div>
-          <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/50">
-            <span className="text-[11px] text-slate-400 uppercase font-medium">Gross Profit</span>
-            <div className="text-lg font-bold text-sky-400 mt-0.5">
+          <div className="bg-[#0c0c0e] p-3 rounded-2xl border border-white/[0.06]">
+            <span className="text-[10px] text-neutral-400 uppercase font-semibold">Gross Profit</span>
+            <div className="text-base font-bold font-mono text-[#4d9de5] mt-0.5">
               {formatINR(pnlReport ? pnlReport.grossProfit : 0)}
             </div>
           </div>
-          <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/50">
-            <span className="text-[11px] text-slate-400 uppercase font-medium">Net Income (P&L)</span>
-            <div className={`text-lg font-bold mt-0.5 ${pnlReport && pnlReport.netIncome >= 0 ? 'text-teal-300' : 'text-rose-400'}`}>
+          <div className="bg-[#0c0c0e] p-3 rounded-2xl border border-white/[0.06]">
+            <span className="text-[10px] text-neutral-400 uppercase font-semibold">Net Income (P&L)</span>
+            <div className={`text-base font-bold font-mono mt-0.5 ${pnlReport && pnlReport.netIncome >= 0 ? 'text-[#3fbf6f]' : 'text-[#e5544d]'}`}>
               {formatINR(pnlReport ? pnlReport.netIncome : 0)}
             </div>
           </div>
-          <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/50">
-            <span className="text-[11px] text-slate-400 uppercase font-medium">Net Cash Flow</span>
-            <div className="text-lg font-bold text-purple-300 mt-0.5">
+          <div className="bg-[#0c0c0e] p-3 rounded-2xl border border-white/[0.06]">
+            <span className="text-[10px] text-neutral-400 uppercase font-semibold">Net Cash Flow</span>
+            <div className="text-base font-bold font-mono text-[#d4a437] mt-0.5">
               {formatINR(cashFlowReport ? cashFlowReport.netCashFlow : 0)}
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
       {/* Main Tab Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
-        <div className="flex border-b border-slate-800 overflow-x-auto scrollbar-none gap-2">
+      <div className="max-w-7xl mx-auto px-1">
+        <div className="flex border-b border-white/[0.08] overflow-x-auto scrollbar-none gap-2 pb-1">
           {[
             { key: 'pnl', label: 'Profit & Loss Statement', icon: TrendingUp },
             { key: 'cashflow', label: 'Cash Flow Statement', icon: IndianRupee },
             { key: 'gl', label: 'General Ledger & Journals', icon: BookOpen },
             { key: 'accounts', label: 'Chart of Accounts', icon: FileText },
-            { key: 'apar', label: 'Accounts Payable & Receivable', icon: CreditCard }
+            { key: 'apar', label: 'Payables & Receivables', icon: CreditCard },
+            { key: 'trial', label: 'Trial Balance Verification', icon: Scale }
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
@@ -304,10 +317,10 @@ export const AccountingPage: React.FC = () => {
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key as any)}
-                className={`flex items-center gap-2 px-4 py-3 font-medium text-sm whitespace-nowrap border-b-2 transition ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs whitespace-nowrap transition ${
                   isActive
-                    ? 'border-emerald-400 text-emerald-400 bg-emerald-400/5 font-semibold'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
+                    ? 'bg-[#d4a437] text-black font-bold shadow-lg'
+                    : 'text-neutral-400 hover:text-white hover:bg-white/[0.03]'
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -319,46 +332,46 @@ export const AccountingPage: React.FC = () => {
 
         {/* Feedback Alerts */}
         {errorMsg && (
-          <div className="mt-4 p-3 bg-rose-950/80 border border-rose-800/80 text-rose-200 rounded-lg text-sm flex items-center justify-between">
+          <div className="mt-4 p-4 bg-[#e5544d]/10 border border-[#e5544d]/20 text-[#e5544d] rounded-2xl text-xs flex items-center justify-between">
             <span>{errorMsg}</span>
-            <button onClick={() => setErrorMsg('')} className="text-rose-400 font-bold ml-3">✕</button>
+            <button onClick={() => setErrorMsg('')} className="text-neutral-400 hover:text-white ml-3"><X className="w-4 h-4" /></button>
           </div>
         )}
         {successMsg && (
-          <div className="mt-4 p-3 bg-emerald-950/80 border border-emerald-800/80 text-emerald-200 rounded-lg text-sm flex items-center justify-between">
+          <div className="mt-4 p-4 bg-[#3fbf6f]/10 border border-[#3fbf6f]/20 text-[#3fbf6f] rounded-2xl text-xs flex items-center justify-between">
             <span>{successMsg}</span>
-            <button onClick={() => setSuccessMsg('')} className="text-emerald-400 font-bold ml-3">✕</button>
+            <button onClick={() => setSuccessMsg('')} className="text-neutral-400 hover:text-white ml-3"><X className="w-4 h-4" /></button>
           </div>
         )}
 
         {/* TAB 1: PROFIT & LOSS STATEMENT */}
         {activeTab === 'pnl' && pnlReport && (
           <div className="mt-4 space-y-4 max-w-5xl mx-auto">
-            <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-6">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
                 <div>
                   <h3 className="text-lg font-bold text-white">Statement of Profit and Loss</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Computed in real time from double-entry General Ledger lines across POS, Hotel and Purchases
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    Real-time automated accrual P&L calculated directly from balanced double-entry general ledger journals
                   </p>
                 </div>
-                <div className="text-xs px-3 py-1.5 bg-slate-950 text-slate-300 rounded-lg border border-slate-800 font-medium">
-                  {getIndianFinancialYear()} (April - March)
+                <div className="text-xs px-3 py-1.5 bg-[#0c0c0e] text-[#d4a437] rounded-xl border border-white/[0.08] font-mono font-semibold">
+                  {getIndianFinancialYear()}
                 </div>
               </div>
 
               {/* 1. Operating Revenue */}
               <div className="space-y-2">
-                <div className="flex justify-between items-center text-sm font-bold text-emerald-400 pb-1 border-b border-slate-800">
-                  <span>1. OPERATING REVENUE</span>
-                  <span>{formatINR(pnlReport.revenue.total)}</span>
+                <div className="flex justify-between items-center text-xs font-bold text-[#3fbf6f] pb-1 border-b border-white/[0.06] tracking-wider uppercase">
+                  <span>1. Operating Revenue & Outlet Sales</span>
+                  <span className="font-mono">{formatINR(pnlReport.revenue.total)}</span>
                 </div>
-                <div className="space-y-1 pl-4 text-xs text-slate-300">
-                  {pnlReport.revenue.items.length === 0 && <p className="text-slate-500 italic">No revenue recorded yet</p>}
+                <div className="space-y-1 pl-4 text-xs text-neutral-300">
+                  {pnlReport.revenue.items.length === 0 && <p className="text-neutral-500 italic">No revenue recorded yet</p>}
                   {pnlReport.revenue.items.map((it) => (
-                    <div key={it.code} className="flex justify-between py-0.5">
+                    <div key={it.code} className="flex justify-between py-1 border-b border-white/[0.02]">
                       <span>[{it.code}] {it.name}</span>
-                      <span className="font-semibold text-slate-100">{formatINR(it.amount)}</span>
+                      <span className="font-mono font-semibold text-white">{formatINR(it.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -366,48 +379,48 @@ export const AccountingPage: React.FC = () => {
 
               {/* 2. Cost of Goods Sold */}
               <div className="space-y-2">
-                <div className="flex justify-between items-center text-sm font-bold text-amber-400 pb-1 border-b border-slate-800">
-                  <span>2. COST OF GOODS SOLD (KITCHEN BOM INGREDIENTS)</span>
-                  <span>({formatINR(pnlReport.cogs.total)})</span>
+                <div className="flex justify-between items-center text-xs font-bold text-[#e5a33d] pb-1 border-b border-white/[0.06] tracking-wider uppercase">
+                  <span>2. Cost of Goods Sold (BOM & Ingredients)</span>
+                  <span className="font-mono">({formatINR(pnlReport.cogs.total)})</span>
                 </div>
-                <div className="space-y-1 pl-4 text-xs text-slate-300">
-                  {pnlReport.cogs.items.length === 0 && <p className="text-slate-500 italic">No COGS recorded yet</p>}
+                <div className="space-y-1 pl-4 text-xs text-neutral-300">
+                  {pnlReport.cogs.items.length === 0 && <p className="text-neutral-500 italic">No COGS recorded yet</p>}
                   {pnlReport.cogs.items.map((it) => (
-                    <div key={it.code} className="flex justify-between py-0.5">
+                    <div key={it.code} className="flex justify-between py-1 border-b border-white/[0.02]">
                       <span>[{it.code}] {it.name}</span>
-                      <span className="font-semibold text-slate-100">{formatINR(it.amount)}</span>
+                      <span className="font-mono font-semibold text-white">{formatINR(it.amount)}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* Gross Profit Subtotal */}
-              <div className="flex justify-between items-center text-base font-extrabold text-white p-3 bg-slate-950 rounded-xl border border-slate-800">
+              <div className="flex justify-between items-center text-sm font-extrabold text-white p-3.5 bg-[#0c0c0e] rounded-2xl border border-white/[0.06]">
                 <span>GROSS PROFIT</span>
-                <span className="text-sky-400">{formatINR(pnlReport.grossProfit)}</span>
+                <span className="text-[#4d9de5] font-mono">{formatINR(pnlReport.grossProfit)}</span>
               </div>
 
               {/* 3. Operating Expenses */}
               <div className="space-y-2">
-                <div className="flex justify-between items-center text-sm font-bold text-rose-400 pb-1 border-b border-slate-800">
-                  <span>3. OPERATING EXPENSES & UTILITIES</span>
-                  <span>({formatINR(pnlReport.operatingExpenses.total)})</span>
+                <div className="flex justify-between items-center text-xs font-bold text-[#e5544d] pb-1 border-b border-white/[0.06] tracking-wider uppercase">
+                  <span>3. Operating Expenses & Utilities</span>
+                  <span className="font-mono">({formatINR(pnlReport.operatingExpenses.total)})</span>
                 </div>
-                <div className="space-y-1 pl-4 text-xs text-slate-300">
-                  {pnlReport.operatingExpenses.items.length === 0 && <p className="text-slate-500 italic">No operating expenses recorded yet</p>}
+                <div className="space-y-1 pl-4 text-xs text-neutral-300">
+                  {pnlReport.operatingExpenses.items.length === 0 && <p className="text-neutral-500 italic">No operating expenses recorded yet</p>}
                   {pnlReport.operatingExpenses.items.map((it) => (
-                    <div key={it.code} className="flex justify-between py-0.5">
+                    <div key={it.code} className="flex justify-between py-1 border-b border-white/[0.02]">
                       <span>[{it.code}] {it.name}</span>
-                      <span className="font-semibold text-slate-100">{formatINR(it.amount)}</span>
+                      <span className="font-mono font-semibold text-white">{formatINR(it.amount)}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* Net Income Final */}
-              <div className="flex justify-between items-center text-lg font-black text-white p-4 bg-gradient-to-r from-slate-950 via-emerald-950/40 to-slate-950 rounded-xl border border-emerald-700/60 shadow-lg">
+              <div className="flex justify-between items-center text-base font-black text-white p-4 bg-[#0c0c0e] rounded-2xl border border-[#d4a437]/40 shadow-2xl">
                 <span>NET INCOME / (NET PROFIT)</span>
-                <span className={pnlReport.netIncome >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                <span className={`font-mono text-lg ${pnlReport.netIncome >= 0 ? 'text-[#3fbf6f]' : 'text-[#e5544d]'}`}>
                   {formatINR(pnlReport.netIncome)}
                 </span>
               </div>
@@ -418,54 +431,58 @@ export const AccountingPage: React.FC = () => {
         {/* TAB 2: CASH FLOW STATEMENT */}
         {activeTab === 'cashflow' && cashFlowReport && (
           <div className="mt-4 space-y-4 max-w-5xl mx-auto">
-            <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-6">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
                 <div>
                   <h3 className="text-lg font-bold text-white">Dynamic Statement of Cash Flows</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Derived from Cash & Operating Bank General Ledger postings</p>
+                  <p className="text-xs text-neutral-400 mt-0.5">Automated cash ledger tracking for liquidity analysis</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-xs text-slate-400 uppercase font-semibold">Total Inflow</span>
-                  <div className="text-lg font-bold text-emerald-400 mt-1 flex items-center gap-1">
-                    <ArrowUpRight className="w-5 h-5 text-emerald-400" />
+                <div className="bg-[#0c0c0e] p-3.5 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Total Inflow</span>
+                  <div className="text-base font-bold font-mono text-[#3fbf6f] mt-1 flex items-center gap-1">
+                    <ArrowUpRight className="w-4 h-4" />
                     {formatINR(cashFlowReport.totalInflow)}
                   </div>
                 </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-xs text-slate-400 uppercase font-semibold">Total Outflow</span>
-                  <div className="text-lg font-bold text-rose-400 mt-1 flex items-center gap-1">
-                    <ArrowDownRight className="w-5 h-5 text-rose-400" />
+                <div className="bg-[#0c0c0e] p-3.5 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Total Outflow</span>
+                  <div className="text-base font-bold font-mono text-[#e5544d] mt-1 flex items-center gap-1">
+                    <ArrowDownRight className="w-4 h-4" />
                     {formatINR(cashFlowReport.totalOutflow)}
                   </div>
                 </div>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-xs text-slate-400 uppercase font-semibold">Net Cash Flow</span>
-                  <div className="text-lg font-bold text-sky-400 mt-1">
+                <div className="bg-[#0c0c0e] p-3.5 rounded-2xl border border-white/[0.06]">
+                  <span className="text-[10px] text-neutral-400 uppercase font-semibold">Net Cash Position</span>
+                  <div className="text-base font-bold font-mono text-[#d4a437] mt-1">
                     {formatINR(cashFlowReport.netCashFlow)}
                   </div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cash Movement Ledger</h4>
-                <div className="divide-y divide-slate-800/80 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden">
-                  {cashFlowReport.transactions.map((tx, idx) => (
-                    <div key={idx} className="p-3 flex items-center justify-between text-xs hover:bg-slate-900/50 transition">
-                      <div>
-                        <div className="font-semibold text-slate-200">{tx.narration}</div>
-                        <div className="text-slate-500 text-[11px] mt-0.5">
-                          {formatDateIN(tx.date)} • {tx.entryNumber} • {tx.accountName}
+                <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Cash Movement Ledger</h4>
+                <div className="divide-y divide-white/[0.04] bg-[#0c0c0e] rounded-2xl border border-white/[0.06] overflow-hidden">
+                  {cashFlowReport.transactions.length === 0 ? (
+                    <div className="p-6 text-center text-neutral-500 text-xs">No cash transactions in this period.</div>
+                  ) : (
+                    cashFlowReport.transactions.map((tx, idx) => (
+                      <div key={idx} className="p-3.5 flex items-center justify-between text-xs hover:bg-white/[0.02] transition">
+                        <div>
+                          <div className="font-semibold text-white">{tx.narration}</div>
+                          <div className="text-neutral-500 text-[11px] mt-0.5">
+                            {formatDateIN(tx.date)} • {tx.entryNumber} • {tx.accountName}
+                          </div>
+                        </div>
+                        <div className="text-right font-mono">
+                          {tx.inflow > 0 && <span className="font-bold text-[#3fbf6f]">+{formatINR(tx.inflow)}</span>}
+                          {tx.outflow > 0 && <span className="font-bold text-[#e5544d]">-{formatINR(tx.outflow)}</span>}
                         </div>
                       </div>
-                      <div className="text-right">
-                        {tx.inflow > 0 && <span className="font-bold text-emerald-400">+{formatINR(tx.inflow)}</span>}
-                        {tx.outflow > 0 && <span className="font-bold text-rose-400">-{formatINR(tx.outflow)}</span>}
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -475,57 +492,63 @@ export const AccountingPage: React.FC = () => {
         {/* TAB 3: GENERAL LEDGER & JOURNALS */}
         {activeTab === 'gl' && (
           <div className="mt-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800">
-              <div className="text-xs text-slate-300 font-semibold">
-                General Ledger Journal Entries ({journalEntries.length} entries)
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#17171b] p-4 rounded-3xl border border-white/[0.08]">
+              <div className="text-xs text-neutral-300 font-semibold">
+                General Ledger Journals ({journalEntries.length} entries)
               </div>
               <button
                 onClick={() => setShowJournalModal(true)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-lg transition flex items-center gap-1.5"
+                className="px-3.5 py-1.5 bg-[#d4a437] hover:bg-[#b88c2a] text-black font-bold text-xs rounded-xl transition flex items-center gap-1.5"
               >
                 <Plus className="w-4 h-4" /> Post Journal Entry
               </button>
             </div>
 
             <div className="space-y-3">
-              {journalEntries.map((je) => (
-                <div key={je.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-md space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-white text-sm">{je.entryNumber}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-semibold border border-emerald-500/20">
-                        {je.referenceType}
-                      </span>
-                      <span className="text-xs text-slate-400">{formatDateIN(je.date)}</span>
-                    </div>
-                    <div className="text-xs font-bold text-slate-200">
-                      Total: {formatINR(Number(je.totalDebit))}
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-300 font-medium">{je.narration}</p>
-
-                  <div className="bg-slate-950 rounded-lg p-2 divide-y divide-slate-800/60 text-xs">
-                    {je.lines.map((l) => (
-                      <div key={l.id} className="py-1.5 flex items-center justify-between text-slate-300">
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-500 font-mono">[{l.account?.code}]</span>
-                          <span className="font-medium text-slate-200">{l.account?.name}</span>
-                          {l.narration && <span className="text-slate-500 text-[11px]">({l.narration})</span>}
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <span className="text-slate-400">
-                            {Number(l.debit) > 0 ? `Dr: ${formatINR(Number(l.debit))}` : ''}
-                          </span>
-                          <span className="text-slate-400">
-                            {Number(l.credit) > 0 ? `Cr: ${formatINR(Number(l.credit))}` : ''}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              {journalEntries.length === 0 ? (
+                <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl p-12 text-center text-neutral-500 text-xs">
+                  No journal entries posted yet.
                 </div>
-              ))}
+              ) : (
+                journalEntries.map((je) => (
+                  <div key={je.id} className="bg-[#17171b] p-4 rounded-3xl border border-white/[0.08] shadow-2xl space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-[#d4a437] font-mono text-sm">{je.entryNumber}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-white/[0.06] text-neutral-300 font-semibold border border-white/[0.08]">
+                          {je.referenceType}
+                        </span>
+                        <span className="text-xs text-neutral-400 font-mono">{formatDateIN(je.date)}</span>
+                      </div>
+                      <div className="text-xs font-bold font-mono text-[#3fbf6f]">
+                        Total: {formatINR(Number(je.totalDebit))}
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-neutral-300">{je.narration}</p>
+
+                    <div className="bg-[#0c0c0e] rounded-2xl p-2.5 divide-y divide-white/[0.04] text-xs">
+                      {je.lines.map((l) => (
+                        <div key={l.id} className="py-1.5 flex items-center justify-between text-neutral-300">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[#d4a437] font-mono">[{l.account?.code}]</span>
+                            <span className="font-medium text-white">{l.account?.name}</span>
+                            {l.narration && <span className="text-neutral-500 text-[11px]">({l.narration})</span>}
+                          </div>
+                          <div className="flex items-center gap-4 font-mono">
+                            <span className="text-[#3fbf6f]">
+                              {Number(l.debit) > 0 ? `Dr: ${formatINR(Number(l.debit))}` : ''}
+                            </span>
+                            <span className="text-[#e5544d]">
+                              {Number(l.credit) > 0 ? `Cr: ${formatINR(Number(l.credit))}` : ''}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         )}
@@ -533,22 +556,22 @@ export const AccountingPage: React.FC = () => {
         {/* TAB 4: CHART OF ACCOUNTS */}
         {activeTab === 'accounts' && (
           <div className="mt-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800">
-              <div className="text-xs text-slate-300 font-semibold">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#17171b] p-4 rounded-3xl border border-white/[0.08]">
+              <div className="text-xs text-neutral-300 font-semibold">
                 Chart of Accounts Master ({accounts.length} accounts)
               </div>
               <button
                 onClick={() => setShowAccountModal(true)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-lg transition flex items-center gap-1.5"
+                className="px-3.5 py-1.5 bg-[#d4a437] hover:bg-[#b88c2a] text-black font-bold text-xs rounded-xl transition flex items-center gap-1.5"
               >
                 <Plus className="w-4 h-4" /> Add Account
               </button>
             </div>
 
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl">
+            <div className="bg-[#17171b] rounded-3xl border border-white/[0.08] overflow-hidden shadow-2xl">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm text-slate-300">
-                  <thead className="bg-slate-950/80 text-xs uppercase text-slate-400 border-b border-slate-800">
+                <table className="w-full text-left text-xs text-neutral-300">
+                  <thead className="bg-white/[0.03] text-[10px] uppercase text-neutral-400 border-b border-white/[0.08]">
                     <tr>
                       <th className="px-4 py-3">Code</th>
                       <th className="px-4 py-3">Account Name</th>
@@ -557,23 +580,23 @@ export const AccountingPage: React.FC = () => {
                       <th className="px-4 py-3 text-right">Balance (₹)</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/80">
+                  <tbody className="divide-y divide-white/[0.06]">
                     {accounts.map((acc) => (
-                      <tr key={acc.id} className="hover:bg-slate-800/40 transition">
-                        <td className="px-4 py-3 font-mono font-bold text-white">{acc.code}</td>
-                        <td className="px-4 py-3 font-medium text-slate-200">{acc.name}</td>
+                      <tr key={acc.id} className="hover:bg-white/[0.02] transition">
+                        <td className="px-4 py-3 font-mono font-bold text-[#d4a437]">{acc.code}</td>
+                        <td className="px-4 py-3 font-medium text-white">{acc.name}</td>
                         <td className="px-4 py-3">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                            acc.type === 'ASSET' ? 'bg-sky-500/20 text-sky-300' :
-                            acc.type === 'LIABILITY' ? 'bg-amber-500/20 text-amber-300' :
-                            acc.type === 'REVENUE' ? 'bg-emerald-500/20 text-emerald-300' :
-                            acc.type === 'EXPENSE' ? 'bg-rose-500/20 text-rose-300' : 'bg-purple-500/20 text-purple-300'
+                            acc.type === 'ASSET' ? 'bg-[#4d9de5]/20 text-[#4d9de5] border border-[#4d9de5]/30' :
+                            acc.type === 'LIABILITY' ? 'bg-[#e5a33d]/20 text-[#e5a33d] border border-[#e5a33d]/30' :
+                            acc.type === 'REVENUE' ? 'bg-[#3fbf6f]/20 text-[#3fbf6f] border border-[#3fbf6f]/30' :
+                            acc.type === 'EXPENSE' ? 'bg-[#e5544d]/20 text-[#e5544d] border border-[#e5544d]/30' : 'bg-white/[0.06] text-neutral-300'
                           }`}>
                             {acc.type}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-400">{acc.subType}</td>
-                        <td className="px-4 py-3 text-right font-bold text-slate-100">
+                        <td className="px-4 py-3 text-xs text-neutral-400">{acc.subType}</td>
+                        <td className="px-4 py-3 text-right font-bold font-mono text-white">
                           {formatINR(Number(acc.balance))}
                         </td>
                       </tr>
@@ -589,27 +612,27 @@ export const AccountingPage: React.FC = () => {
         {activeTab === 'apar' && (
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Accounts Payable */}
-            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
                 <div>
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <Receipt className="w-5 h-5 text-amber-400" /> Accounts Payable (Vendors / Suppliers)
+                    <Receipt className="w-5 h-5 text-[#e5a33d]" /> Accounts Payable (Vendors / Suppliers)
                   </h3>
-                  <p className="text-xs text-slate-400">Purchasing tax invoices and vendor payables</p>
+                  <p className="text-xs text-neutral-400">Purchasing tax invoices and vendor payables</p>
                 </div>
               </div>
 
               <div className="space-y-2.5">
-                {payables.length === 0 && <p className="text-xs text-slate-500 italic p-3">No supplier payables currently due</p>}
+                {payables.length === 0 && <p className="text-xs text-neutral-500 italic p-3">No supplier payables currently due</p>}
                 {payables.map((ap) => (
-                  <div key={ap.id} className="p-3 bg-slate-950/70 rounded-lg border border-slate-800 flex items-center justify-between">
+                  <div key={ap.id} className="p-3.5 bg-[#0c0c0e] rounded-2xl border border-white/[0.06] flex items-center justify-between">
                     <div>
                       <div className="font-bold text-white text-sm">{ap.supplier?.name}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">Inv: {ap.invoiceNumber} • {formatDateIN(ap.invoiceDate)}</div>
+                      <div className="text-xs text-neutral-400 mt-0.5">Inv: {ap.invoiceNumber} • {formatDateIN(ap.invoiceDate)}</div>
                     </div>
                     <div className="text-right">
-                      <div className="font-bold text-amber-300 text-sm">{formatINR(Number(ap.balance))}</div>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950 text-amber-400 font-semibold border border-amber-800">
+                      <div className="font-bold font-mono text-[#e5a33d] text-sm">{formatINR(Number(ap.balance))}</div>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#e5a33d]/20 text-[#e5a33d] font-semibold border border-[#e5a33d]/30">
                         {ap.status}
                       </span>
                     </div>
@@ -619,27 +642,27 @@ export const AccountingPage: React.FC = () => {
             </div>
 
             {/* Accounts Receivable */}
-            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-[#17171b] p-5 rounded-3xl border border-white/[0.08] shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
                 <div>
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-sky-400" /> Accounts Receivable (Guests & City Ledger)
+                    <CreditCard className="w-5 h-5 text-[#4d9de5]" /> Accounts Receivable (Guests & City Ledger)
                   </h3>
-                  <p className="text-xs text-slate-400">Guest folios, banquet and corporate billing receivables</p>
+                  <p className="text-xs text-neutral-400">Guest folios, banquet and corporate billing receivables</p>
                 </div>
               </div>
 
               <div className="space-y-2.5">
-                {receivables.length === 0 && <p className="text-xs text-slate-500 italic p-3">No customer receivables pending</p>}
+                {receivables.length === 0 && <p className="text-xs text-neutral-500 italic p-3">No customer receivables pending</p>}
                 {receivables.map((ar) => (
-                  <div key={ar.id} className="p-3 bg-slate-950/70 rounded-lg border border-slate-800 flex items-center justify-between">
+                  <div key={ar.id} className="p-3.5 bg-[#0c0c0e] rounded-2xl border border-white/[0.06] flex items-center justify-between">
                     <div>
                       <div className="font-bold text-white text-sm">{ar.guest?.firstName} {ar.guest?.lastName}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">Booking: {ar.booking?.bookingNumber} • {ar.invoiceNumber}</div>
+                      <div className="text-xs text-neutral-400 mt-0.5">Booking: {ar.booking?.bookingNumber} • {ar.invoiceNumber}</div>
                     </div>
                     <div className="text-right">
-                      <div className="font-bold text-sky-300 text-sm">{formatINR(Number(ar.balance))}</div>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-sky-950 text-sky-400 font-semibold border border-sky-800">
+                      <div className="font-bold font-mono text-[#4d9de5] text-sm">{formatINR(Number(ar.balance))}</div>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#4d9de5]/20 text-[#4d9de5] font-semibold border border-[#4d9de5]/30">
                         {ar.status}
                       </span>
                     </div>
@@ -649,33 +672,103 @@ export const AccountingPage: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* TAB 6: TRIAL BALANCE */}
+        {activeTab === 'trial' && (
+          <div className="mt-4 space-y-4 max-w-5xl mx-auto">
+            <div className="bg-[#17171b] p-6 rounded-3xl border border-white/[0.08] shadow-2xl space-y-6">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Scale className="w-5 h-5 text-[#d4a437]" /> Trial Balance Verification
+                  </h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">Verification that sum of all debit balances equals sum of all credit balances</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs px-3 py-1 rounded-full font-bold flex items-center gap-1.5 ${
+                    Math.abs(totalGlDebits - totalGlCredits) < 0.01
+                      ? 'bg-[#3fbf6f]/20 text-[#3fbf6f] border border-[#3fbf6f]/30'
+                      : 'bg-[#e5544d]/20 text-[#e5544d] border border-[#e5544d]/30'
+                  }`}>
+                    {Math.abs(totalGlDebits - totalGlCredits) < 0.01 ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                    {Math.abs(totalGlDebits - totalGlCredits) < 0.01 ? 'TRIAL BALANCE IN BALANCE' : 'TRIAL BALANCE OUT OF BALANCE'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-neutral-300">
+                  <thead className="bg-white/[0.03] text-[10px] uppercase text-neutral-400 border-b border-white/[0.08]">
+                    <tr>
+                      <th className="px-4 py-3">Account Code</th>
+                      <th className="px-4 py-3">Account Title</th>
+                      <th className="px-4 py-3">Category</th>
+                      <th className="px-4 py-3 text-right">Debit Balance (₹)</th>
+                      <th className="px-4 py-3 text-right">Credit Balance (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06] font-mono">
+                    {accounts.map((acc) => {
+                      const bal = Number(acc.balance);
+                      const isDr = ['ASSET', 'EXPENSE'].includes(acc.type);
+                      const isCr = ['LIABILITY', 'EQUITY', 'REVENUE'].includes(acc.type);
+                      return (
+                        <tr key={acc.id} className="hover:bg-white/[0.02]">
+                          <td className="px-4 py-3 text-[#d4a437] font-bold">{acc.code}</td>
+                          <td className="px-4 py-3 font-sans font-medium text-white">{acc.name}</td>
+                          <td className="px-4 py-3 font-sans text-neutral-400">{acc.type}</td>
+                          <td className="px-4 py-3 text-right text-[#3fbf6f]">
+                            {isDr && bal > 0 ? formatINR(bal) : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-right text-[#e5544d]">
+                            {isCr && bal > 0 ? formatINR(bal) : '-'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-[#0c0c0e] font-mono font-bold text-xs border-t-2 border-white/[0.1]">
+                    <tr>
+                      <td colSpan={3} className="px-4 py-3 font-sans text-white uppercase">Grand Total (Debits & Credits)</td>
+                      <td className="px-4 py-3 text-right text-[#3fbf6f]">{formatINR(totalGlDebits)}</td>
+                      <td className="px-4 py-3 text-right text-[#e5544d]">{formatINR(totalGlCredits)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* MODALS */}
       {/* 1. New Account Modal */}
       {showAccountModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
-            <h3 className="text-lg font-bold text-white">Create New Account (GL Master)</h3>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+              <h3 className="text-base font-bold text-white">Create New Account (GL Master)</h3>
+              <button onClick={() => setShowAccountModal(false)}><X className="w-5 h-5 text-neutral-400 hover:text-white" /></button>
+            </div>
             <form onSubmit={handleCreateAccount} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 font-semibold block mb-1">Account Code *</label>
+                  <label className="text-xs text-neutral-400 font-semibold block mb-1">Account Code *</label>
                   <input
                     type="text"
                     placeholder="e.g. 6040"
                     value={newAccountForm.code}
                     onChange={(e) => setNewAccountForm({ ...newAccountForm, code: e.target.value })}
-                    className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700 font-mono"
+                    className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] font-mono focus:border-[#d4a437] outline-none"
                     required
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 font-semibold block mb-1">Account Type *</label>
+                  <label className="text-xs text-neutral-400 font-semibold block mb-1">Account Type *</label>
                   <select
                     value={newAccountForm.type}
                     onChange={(e) => setNewAccountForm({ ...newAccountForm, type: e.target.value })}
-                    className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700"
+                    className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] focus:border-[#d4a437] outline-none"
                   >
                     <option value="ASSET">Asset</option>
                     <option value="LIABILITY">Liability</option>
@@ -687,23 +780,23 @@ export const AccountingPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs text-slate-400 font-semibold block mb-1">Account Name *</label>
+                <label className="text-xs text-neutral-400 font-semibold block mb-1">Account Name *</label>
                 <input
                   type="text"
                   placeholder="e.g. Input GST Credit Account"
                   value={newAccountForm.name}
                   onChange={(e) => setNewAccountForm({ ...newAccountForm, name: e.target.value })}
-                  className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700"
+                  className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] focus:border-[#d4a437] outline-none"
                   required
                 />
               </div>
 
               <div>
-                <label className="text-xs text-slate-400 font-semibold block mb-1">Sub-Category *</label>
+                <label className="text-xs text-neutral-400 font-semibold block mb-1">Sub-Category *</label>
                 <select
                   value={newAccountForm.subType}
                   onChange={(e) => setNewAccountForm({ ...newAccountForm, subType: e.target.value })}
-                  className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700"
+                  className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] focus:border-[#d4a437] outline-none"
                 >
                   <option value="CURRENT_ASSET">Current Asset</option>
                   <option value="FIXED_ASSET">Fixed Asset</option>
@@ -715,18 +808,18 @@ export const AccountingPage: React.FC = () => {
                 </select>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-white/[0.08]">
                 <button
                   type="button"
                   onClick={() => setShowAccountModal(false)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-lg font-semibold"
+                  className="px-4 py-2 bg-white/[0.04] text-neutral-300 text-xs rounded-xl font-semibold hover:bg-white/[0.08]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs rounded-lg font-bold"
+                  className="px-4 py-2 bg-[#d4a437] hover:bg-[#b88c2a] text-black text-xs rounded-xl font-bold"
                 >
                   Save Account
                 </button>
@@ -738,12 +831,12 @@ export const AccountingPage: React.FC = () => {
 
       {/* 2. New Double-Entry Journal Modal */}
       {showJournalModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-white">Post Double-Entry Journal Entry</h3>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl w-full max-w-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+              <h3 className="text-base font-bold text-white">Post Double-Entry Journal</h3>
               <div className={`text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1 ${
-                isJournalBalanced ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                isJournalBalanced ? 'bg-[#3fbf6f]/20 text-[#3fbf6f] border border-[#3fbf6f]/30' : 'bg-[#e5544d]/20 text-[#e5544d] border border-[#e5544d]/30'
               }`}>
                 {isJournalBalanced ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
                 {isJournalBalanced ? 'BALANCED' : 'UNBALANCED'}
@@ -752,26 +845,26 @@ export const AccountingPage: React.FC = () => {
 
             <form onSubmit={handleCreateJournal} className="space-y-3">
               <div>
-                <label className="text-xs text-slate-400 font-semibold block mb-1">Narration / Description *</label>
+                <label className="text-xs text-neutral-400 font-semibold block mb-1">Narration / Description *</label>
                 <input
                   type="text"
                   placeholder="e.g. Monthly GST liability settlement"
                   value={newJournalForm.narration}
                   onChange={(e) => setNewJournalForm({ ...newJournalForm, narration: e.target.value })}
-                  className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700"
+                  className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] focus:border-[#d4a437] outline-none"
                   required
                 />
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs text-slate-400 font-semibold block">Journal Lines (Debit / Credit ₹)</label>
+                <label className="text-xs text-neutral-400 font-semibold block">Journal Lines (Debit / Credit ₹)</label>
                 {newJournalForm.lines.map((l, idx) => (
-                  <div key={idx} className="grid grid-cols-12 gap-2 bg-slate-950 p-2.5 rounded-lg border border-slate-800 items-center">
+                  <div key={idx} className="grid grid-cols-12 gap-2 bg-[#0c0c0e] p-2.5 rounded-xl border border-white/[0.06] items-center">
                     <div className="col-span-6">
                       <select
                         value={l.accountId}
                         onChange={(e) => updateJournalLine(idx, 'accountId', e.target.value)}
-                        className="w-full bg-slate-900 text-slate-200 text-xs p-2 rounded border border-slate-700"
+                        className="w-full bg-[#17171b] text-white text-xs p-2 rounded-lg border border-white/[0.1] focus:border-[#d4a437] outline-none"
                         required
                       >
                         <option value="">Select Account</option>
@@ -786,7 +879,7 @@ export const AccountingPage: React.FC = () => {
                         placeholder="Debit (₹)"
                         value={l.debit || ''}
                         onChange={(e) => updateJournalLine(idx, 'debit', Number(e.target.value))}
-                        className="w-full bg-slate-900 text-slate-200 text-xs p-2 rounded border border-slate-700 font-mono"
+                        className="w-full bg-[#17171b] text-white text-xs p-2 rounded-lg border border-white/[0.1] font-mono text-[#3fbf6f]"
                       />
                     </div>
                     <div className="col-span-3">
@@ -795,7 +888,7 @@ export const AccountingPage: React.FC = () => {
                         placeholder="Credit (₹)"
                         value={l.credit || ''}
                         onChange={(e) => updateJournalLine(idx, 'credit', Number(e.target.value))}
-                        className="w-full bg-slate-900 text-slate-200 text-xs p-2 rounded border border-slate-700 font-mono"
+                        className="w-full bg-[#17171b] text-white text-xs p-2 rounded-lg border border-white/[0.1] font-mono text-[#e5544d]"
                       />
                     </div>
                   </div>
@@ -806,29 +899,29 @@ export const AccountingPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={addJournalLine}
-                  className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1"
+                  className="text-xs text-[#d4a437] hover:underline font-semibold flex items-center gap-1"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add Line
                 </button>
                 <div className="text-xs space-x-3 font-mono">
-                  <span className="text-slate-400">Total Debit: <strong className="text-white">{formatINR(totalDebitSum)}</strong></span>
-                  <span className="text-slate-400">Total Credit: <strong className="text-white">{formatINR(totalCreditSum)}</strong></span>
+                  <span className="text-neutral-400">Total Dr: <strong className="text-[#3fbf6f]">{formatINR(totalDebitSum)}</strong></span>
+                  <span className="text-neutral-400">Total Cr: <strong className="text-[#e5544d]">{formatINR(totalCreditSum)}</strong></span>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-white/[0.08]">
                 <button
                   type="button"
                   onClick={() => setShowJournalModal(false)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-lg font-semibold"
+                  className="px-4 py-2 bg-white/[0.04] text-neutral-300 text-xs rounded-xl font-semibold hover:bg-white/[0.08]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={loading || !isJournalBalanced}
-                  className={`px-4 py-2 text-xs rounded-lg font-bold transition ${
-                    isJournalBalanced ? 'bg-emerald-600 hover:bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  className={`px-4 py-2 text-xs rounded-xl font-bold transition ${
+                    isJournalBalanced ? 'bg-[#d4a437] hover:bg-[#b88c2a] text-black' : 'bg-white/[0.06] text-neutral-500 cursor-not-allowed'
                   }`}
                 >
                   Post to General Ledger
@@ -841,29 +934,32 @@ export const AccountingPage: React.FC = () => {
 
       {/* 3. Record Expense Modal */}
       {showExpenseModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
-            <h3 className="text-lg font-bold text-white">Record Operating Expense Voucher</h3>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#17171b] border border-white/[0.08] rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+              <h3 className="text-base font-bold text-white">Record Operating Expense</h3>
+              <button onClick={() => setShowExpenseModal(false)}><X className="w-5 h-5 text-neutral-400 hover:text-white" /></button>
+            </div>
             <form onSubmit={handleCreateExpense} className="space-y-3">
               <div>
-                <label className="text-xs text-slate-400 font-semibold block mb-1">Paid To (Vendor/Entity) *</label>
+                <label className="text-xs text-neutral-400 font-semibold block mb-1">Paid To (Vendor/Entity) *</label>
                 <input
                   type="text"
                   placeholder="e.g. State Electricity Board / Amul Dairy"
                   value={newExpenseForm.paidTo}
                   onChange={(e) => setNewExpenseForm({ ...newExpenseForm, paidTo: e.target.value })}
-                  className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700"
+                  className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] focus:border-[#d4a437] outline-none"
                   required
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 font-semibold block mb-1">Expense Account *</label>
+                  <label className="text-xs text-neutral-400 font-semibold block mb-1">Expense Account *</label>
                   <select
                     value={newExpenseForm.expenseAccountId}
                     onChange={(e) => setNewExpenseForm({ ...newExpenseForm, expenseAccountId: e.target.value })}
-                    className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700"
+                    className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] focus:border-[#d4a437] outline-none"
                     required
                   >
                     {accounts.filter(a => a.type === 'EXPENSE').map((a) => (
@@ -872,11 +968,11 @@ export const AccountingPage: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 font-semibold block mb-1">Paid From *</label>
+                  <label className="text-xs text-neutral-400 font-semibold block mb-1">Paid From *</label>
                   <select
                     value={newExpenseForm.paidFromAccountId}
                     onChange={(e) => setNewExpenseForm({ ...newExpenseForm, paidFromAccountId: e.target.value })}
-                    className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700"
+                    className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] focus:border-[#d4a437] outline-none"
                     required
                   >
                     {accounts.filter(a => a.type === 'ASSET').map((a) => (
@@ -888,21 +984,21 @@ export const AccountingPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 font-semibold block mb-1">Amount (₹) *</label>
+                  <label className="text-xs text-neutral-400 font-semibold block mb-1">Amount (₹) *</label>
                   <input
                     type="number"
                     value={newExpenseForm.amount}
                     onChange={(e) => setNewExpenseForm({ ...newExpenseForm, amount: Number(e.target.value) })}
-                    className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700 font-mono"
+                    className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] font-mono focus:border-[#d4a437] outline-none text-[#e5544d]"
                     required
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 font-semibold block mb-1">Payment Method</label>
+                  <label className="text-xs text-neutral-400 font-semibold block mb-1">Payment Method</label>
                   <select
                     value={newExpenseForm.paymentMethod}
                     onChange={(e) => setNewExpenseForm({ ...newExpenseForm, paymentMethod: e.target.value })}
-                    className="w-full bg-slate-950 text-slate-200 text-xs p-2.5 rounded-lg border border-slate-700"
+                    className="w-full bg-[#0c0c0e] text-white text-xs p-2.5 rounded-xl border border-white/[0.1] focus:border-[#d4a437] outline-none"
                   >
                     <option value="MOBILE_BANKING">UPI / QR Payment</option>
                     <option value="CASH">Cash</option>
@@ -913,18 +1009,18 @@ export const AccountingPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-white/[0.08]">
                 <button
                   type="button"
                   onClick={() => setShowExpenseModal(false)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-lg font-semibold"
+                  className="px-4 py-2 bg-white/[0.04] text-neutral-300 text-xs rounded-xl font-semibold hover:bg-white/[0.08]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs rounded-lg font-bold"
+                  className="px-4 py-2 bg-[#e5544d] hover:bg-[#c9453f] text-white text-xs rounded-xl font-bold"
                 >
                   Record Expense Voucher
                 </button>
@@ -936,3 +1032,5 @@ export const AccountingPage: React.FC = () => {
     </div>
   );
 };
+
+export default AccountingPage;

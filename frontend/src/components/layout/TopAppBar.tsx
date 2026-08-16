@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   Building2,
@@ -10,12 +11,15 @@ import {
   Crown,
   Plus,
   X,
-  Store
+  Store,
+  AlertCircle
 } from 'lucide-react';
 import { branchApi, CreateBranchInput } from '../../api/branch.api';
 
 export const TopAppBar: React.FC = () => {
   const { user, selectedBranchId, setSelectedBranchId, refreshUser, logout } = useAuth();
+  const location = useLocation();
+
   const [showBranchMenu, setShowBranchMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
@@ -23,6 +27,7 @@ export const TopAppBar: React.FC = () => {
   const [showAddBranchModal, setShowAddBranchModal] = useState(false);
   const [isSubmittingBranch, setIsSubmittingBranch] = useState(false);
   const [branchError, setBranchError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [branchSuccess, setBranchSuccess] = useState('');
   const [newBranchData, setNewBranchData] = useState<CreateBranchInput>({
     name: '',
@@ -33,23 +38,59 @@ export const TopAppBar: React.FC = () => {
     phone: ''
   });
 
+  // Reset any open menus or modal error states when navigating to a new route
+  useEffect(() => {
+    setShowBranchMenu(false);
+    setShowUserMenu(false);
+    setBranchError('');
+    setFieldErrors({});
+  }, [location.pathname]);
+
   const activeBranch =
     user?.branches?.find((b) => b.id === selectedBranchId) || user?.branches?.[0];
+
+  const handleCloseModal = () => {
+    setShowAddBranchModal(false);
+    setBranchError('');
+    setFieldErrors({});
+    setBranchSuccess('');
+    setIsSubmittingBranch(false);
+  };
+
+  const handleFieldChange = (field: keyof CreateBranchInput, value: string) => {
+    setNewBranchData((prev) => ({ ...prev, [field]: value }));
+    if (fieldErrors[field]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+    }
+  };
 
   const handleCreateBranch = async (e: React.FormEvent) => {
     e.preventDefault();
     setBranchError('');
+    setFieldErrors({});
     setBranchSuccess('');
     setIsSubmittingBranch(true);
 
     try {
-      const created = await branchApi.createBranch(newBranchData);
+      const payload: CreateBranchInput = {
+        name: newBranchData.name.trim(),
+        code: newBranchData.code.trim().toUpperCase(),
+        type: newBranchData.type,
+        address: newBranchData.address.trim(),
+        email: newBranchData.email?.trim() || undefined,
+        phone: newBranchData.phone?.trim() || undefined
+      };
+
+      const created = await branchApi.createBranch(payload);
       setBranchSuccess(`Outlet "${created.name}" created successfully!`);
       await refreshUser();
       setSelectedBranchId(created.id);
       setTimeout(() => {
-        setShowAddBranchModal(false);
-        setBranchSuccess('');
+        handleCloseModal();
         setNewBranchData({
           name: '',
           code: '',
@@ -58,9 +99,41 @@ export const TopAppBar: React.FC = () => {
           email: '',
           phone: ''
         });
-      }, 1000);
+      }, 1200);
     } catch (err: any) {
-      setBranchError(err.response?.data?.message || 'Failed to create branch. Please check inputs.');
+      if (err.response?.status === 401) {
+        setBranchError('Session expired or unauthorized. Please re-login to create an outlet.');
+        return;
+      }
+
+      const respData = err.response?.data;
+      const mainMsg = respData?.message || 'Failed to create outlet. Please review the highlighted fields.';
+      setBranchError(mainMsg);
+
+      if (Array.isArray(respData?.errors) && respData.errors.length > 0) {
+        const errorsMap: Record<string, string> = {};
+        respData.errors.forEach((eItem: any) => {
+          if (eItem.field) {
+            const rawField = eItem.field.toLowerCase();
+            const mappedKey = rawField.includes('code')
+              ? 'code'
+              : rawField.includes('name')
+              ? 'name'
+              : rawField.includes('address') || rawField.includes('location')
+              ? 'address'
+              : rawField.includes('type')
+              ? 'type'
+              : rawField.includes('email')
+              ? 'email'
+              : rawField.includes('phone')
+              ? 'phone'
+              : eItem.field;
+            errorsMap[mappedKey] = eItem.issue || eItem.message || 'Invalid input';
+            errorsMap[eItem.field] = eItem.issue || eItem.message || 'Invalid input';
+          }
+        });
+        setFieldErrors(errorsMap);
+      }
     } finally {
       setIsSubmittingBranch(false);
     }
@@ -140,6 +213,9 @@ export const TopAppBar: React.FC = () => {
                   <button
                     onClick={() => {
                       setShowBranchMenu(false);
+                      setBranchError('');
+                      setFieldErrors({});
+                      setBranchSuccess('');
                       setShowAddBranchModal(true);
                     }}
                     className="w-full py-2 px-3 bg-[#d4a437]/10 hover:bg-[#d4a437]/20 text-[#d4a437] font-bold text-xs rounded-xl flex items-center justify-center space-x-2 border border-[#d4a437]/30 transition active:scale-98"
@@ -238,16 +314,12 @@ export const TopAppBar: React.FC = () => {
                     Register New Outlet / Branch
                   </h3>
                   <p className="text-[11px] text-neutral-400">
-                    Part 4 Multi-Tenant Organizational Structure
+                    Multi-Tenant Multi-Branch Operating Architecture
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => {
-                  setShowAddBranchModal(false);
-                  setBranchError('');
-                  setBranchSuccess('');
-                }}
+                onClick={handleCloseModal}
                 className="text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.06] transition"
               >
                 <X className="w-4 h-4" />
@@ -255,14 +327,23 @@ export const TopAppBar: React.FC = () => {
             </div>
 
             {branchError && (
-              <div className="p-3 bg-[#e5544d]/10 border border-[#e5544d]/25 text-[#e5544d] rounded-xl text-xs font-medium">
-                {branchError}
+              <div className="p-3 bg-[#e5544d]/10 border border-[#e5544d]/25 text-[#e5544d] rounded-xl text-xs font-medium flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <div>
+                  <div className="font-semibold">{branchError}</div>
+                  {Object.keys(fieldErrors).length > 0 && (
+                    <div className="mt-1 text-[11px] opacity-90">
+                      Please correct the {Object.keys(fieldErrors).length} invalid field(s) indicated below.
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
             {branchSuccess && (
-              <div className="p-3 bg-[#3fbf6f]/10 border border-[#3fbf6f]/25 text-[#3fbf6f] rounded-xl text-xs font-medium">
-                {branchSuccess}
+              <div className="p-3 bg-[#3fbf6f]/10 border border-[#3fbf6f]/25 text-[#3fbf6f] rounded-xl text-xs font-medium flex items-center gap-2">
+                <Check className="w-4 h-4 flex-shrink-0" />
+                <span>{branchSuccess}</span>
               </div>
             )}
 
@@ -278,11 +359,19 @@ export const TopAppBar: React.FC = () => {
                     required
                     placeholder="e.g. Royal Bistro & Fine Dining"
                     value={newBranchData.name}
-                    onChange={(e) =>
-                      setNewBranchData({ ...newBranchData, name: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                    onChange={(e) => handleFieldChange('name', e.target.value)}
+                    className={`w-full px-3.5 py-2.5 bg-[#0c0c0e] border rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none transition ${
+                      fieldErrors.name || fieldErrors.branchName || fieldErrors.outletName
+                        ? 'border-[#e5544d] focus:border-[#e5544d]'
+                        : 'border-white/[0.09] focus:border-[#d4a437]'
+                    }`}
                   />
+                  {(fieldErrors.name || fieldErrors.branchName || fieldErrors.outletName) && (
+                    <p className="mt-1.5 text-[11px] text-[#e5544d] flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      {fieldErrors.name || fieldErrors.branchName || fieldErrors.outletName}
+                    </p>
+                  )}
                 </div>
 
                 {/* Branch Code */}
@@ -295,14 +384,19 @@ export const TopAppBar: React.FC = () => {
                     required
                     placeholder="e.g. BR-BISTRO-01"
                     value={newBranchData.code}
-                    onChange={(e) =>
-                      setNewBranchData({
-                        ...newBranchData,
-                        code: e.target.value.toUpperCase()
-                      })
-                    }
-                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs font-mono uppercase font-bold text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                    onChange={(e) => handleFieldChange('code', e.target.value.toUpperCase())}
+                    className={`w-full px-3.5 py-2.5 bg-[#0c0c0e] border rounded-xl text-xs font-mono uppercase font-bold text-white placeholder:text-neutral-600 focus:outline-none transition ${
+                      fieldErrors.code || fieldErrors.branchCode || fieldErrors.outletCode
+                        ? 'border-[#e5544d] focus:border-[#e5544d]'
+                        : 'border-white/[0.09] focus:border-[#d4a437]'
+                    }`}
                   />
+                  {(fieldErrors.code || fieldErrors.branchCode || fieldErrors.outletCode) && (
+                    <p className="mt-1.5 text-[11px] text-[#e5544d] flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      {fieldErrors.code || fieldErrors.branchCode || fieldErrors.outletCode}
+                    </p>
+                  )}
                 </div>
 
                 {/* Branch Type */}
@@ -312,21 +406,23 @@ export const TopAppBar: React.FC = () => {
                   </label>
                   <select
                     value={newBranchData.type}
-                    onChange={(e) =>
-                      setNewBranchData({
-                        ...newBranchData,
-                        type: e.target.value as any
-                      })
-                    }
-                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white focus:outline-none focus:border-[#d4a437]"
+                    onChange={(e) => handleFieldChange('type', e.target.value as any)}
+                    className={`w-full px-3.5 py-2.5 bg-[#0c0c0e] border rounded-xl text-xs text-white focus:outline-none transition ${
+                      fieldErrors.type || fieldErrors.branchType || fieldErrors.outletType
+                        ? 'border-[#e5544d] focus:border-[#e5544d]'
+                        : 'border-white/[0.09] focus:border-[#d4a437]'
+                    }`}
                   >
                     <option value="RESTAURANT" className="bg-[#17171b] text-white">Restaurant & Bar (POS/KDS)</option>
                     <option value="HOTEL" className="bg-[#17171b] text-white">Hotel Property (PMS/Rooms)</option>
                     <option value="HYBRID" className="bg-[#17171b] text-white">Hybrid (Hotel & F&B Combined)</option>
-                    <option value="CENTRAL_KITCHEN" className="bg-[#17171b] text-white">Central Production Kitchen</option>
-                    <option value="MAIN_STORE" className="bg-[#17171b] text-white">Central Logistics & Main Stores</option>
-                    <option value="RETAIL" className="bg-[#17171b] text-white">Retail / Gift Shop Counter</option>
                   </select>
+                  {(fieldErrors.type || fieldErrors.branchType || fieldErrors.outletType) && (
+                    <p className="mt-1.5 text-[11px] text-[#e5544d] flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      {fieldErrors.type || fieldErrors.branchType || fieldErrors.outletType}
+                    </p>
+                  )}
                 </div>
 
                 {/* Address */}
@@ -339,11 +435,19 @@ export const TopAppBar: React.FC = () => {
                     required
                     placeholder="e.g. Ground Floor, Courtyard Pavilion, Grand Heritage"
                     value={newBranchData.address}
-                    onChange={(e) =>
-                      setNewBranchData({ ...newBranchData, address: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                    onChange={(e) => handleFieldChange('address', e.target.value)}
+                    className={`w-full px-3.5 py-2.5 bg-[#0c0c0e] border rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none transition ${
+                      fieldErrors.address || fieldErrors.location
+                        ? 'border-[#e5544d] focus:border-[#e5544d]'
+                        : 'border-white/[0.09] focus:border-[#d4a437]'
+                    }`}
                   />
+                  {(fieldErrors.address || fieldErrors.location) && (
+                    <p className="mt-1.5 text-[11px] text-[#e5544d] flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      {fieldErrors.address || fieldErrors.location}
+                    </p>
+                  )}
                 </div>
 
                 {/* Email (Optional) */}
@@ -355,11 +459,19 @@ export const TopAppBar: React.FC = () => {
                     type="email"
                     placeholder="e.g. bistro@grandheritage.in"
                     value={newBranchData.email || ''}
-                    onChange={(e) =>
-                      setNewBranchData({ ...newBranchData, email: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                    onChange={(e) => handleFieldChange('email', e.target.value)}
+                    className={`w-full px-3.5 py-2.5 bg-[#0c0c0e] border rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none transition ${
+                      fieldErrors.email || fieldErrors.contactEmail
+                        ? 'border-[#e5544d] focus:border-[#e5544d]'
+                        : 'border-white/[0.09] focus:border-[#d4a437]'
+                    }`}
                   />
+                  {(fieldErrors.email || fieldErrors.contactEmail) && (
+                    <p className="mt-1.5 text-[11px] text-[#e5544d] flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      {fieldErrors.email || fieldErrors.contactEmail}
+                    </p>
+                  )}
                 </div>
 
                 {/* Phone (Optional) */}
@@ -371,18 +483,26 @@ export const TopAppBar: React.FC = () => {
                     type="text"
                     placeholder="e.g. +91 98765 43210"
                     value={newBranchData.phone || ''}
-                    onChange={(e) =>
-                      setNewBranchData({ ...newBranchData, phone: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 bg-[#0c0c0e] border border-white/[0.09] rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-[#d4a437]"
+                    onChange={(e) => handleFieldChange('phone', e.target.value)}
+                    className={`w-full px-3.5 py-2.5 bg-[#0c0c0e] border rounded-xl text-xs text-white placeholder:text-neutral-600 focus:outline-none transition ${
+                      fieldErrors.phone || fieldErrors.contactPhone
+                        ? 'border-[#e5544d] focus:border-[#e5544d]'
+                        : 'border-white/[0.09] focus:border-[#d4a437]'
+                    }`}
                   />
+                  {(fieldErrors.phone || fieldErrors.contactPhone) && (
+                    <p className="mt-1.5 text-[11px] text-[#e5544d] flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      {fieldErrors.phone || fieldErrors.contactPhone}
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="pt-2 flex items-center justify-end space-x-3">
                 <button
                   type="button"
-                  onClick={() => setShowAddBranchModal(false)}
+                  onClick={handleCloseModal}
                   className="px-4 py-2.5 bg-[#202026] hover:bg-[#282832] text-neutral-300 text-xs font-semibold rounded-xl transition"
                 >
                   Cancel

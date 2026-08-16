@@ -105,5 +105,41 @@ export const inventoryApi = {
   }): Promise<StockBalance> => {
     const res = await apiClient.post('/inventory/adjust', data);
     return res.data.data;
+  },
+
+  // Wastage & Loss Control (Part 12)
+  recordWastage: async (data: {
+    warehouseId: string;
+    branchId?: string;
+    wastageType: string;
+    reason: string;
+    items: Array<{ itemId: string; quantity: number; batchNumber?: string; reason?: string }>;
+    notes?: string;
+  }): Promise<any> => {
+    const res = await apiClient.post('/inventory/wastage', data);
+    return res.data.data;
+  },
+  getWastageRecords: async (params?: {
+    warehouseId?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ entries: StockLedgerEntry[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> => {
+    const res = await apiClient.get('/inventory/wastage', { params });
+    return { entries: res.data.data, pagination: res.data.meta };
+  },
+
+  // Stock Count & Reconciliation (Part 16)
+  reconcileStockCount: async (data: {
+    warehouseId: string;
+    branchId?: string;
+    countedItems: Array<{ itemId: string; countedQty: number; notes?: string }>;
+    notes?: string;
+  }): Promise<any> => {
+    const res = await apiClient.post('/inventory/stock-counts', data);
+    return res.data.data;
+  },
+  getStockCountHistory: async (params?: { warehouseId?: string }): Promise<StockLedgerEntry[]> => {
+    const res = await apiClient.get('/inventory/stock-counts', { params });
+    return res.data.data;
   }
 };
