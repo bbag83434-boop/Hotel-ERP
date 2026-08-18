@@ -30,6 +30,12 @@ router.get('/ledger', inventory_controller_1.InventoryController.getStockLedger)
 // Stock Transfers & Adjustments
 router.post('/transfer', (0, validate_middleware_1.validate)(inventory_schema_1.transferStockSchema), inventory_controller_1.InventoryController.transferStock);
 router.post('/adjust', (0, validate_middleware_1.validate)(inventory_schema_1.adjustStockSchema), inventory_controller_1.InventoryController.adjustStock);
+// Wastage & Loss Control (Part 12)
+router.get('/wastage', inventory_controller_1.InventoryController.getWastageRecords);
+router.post('/wastage', (0, validate_middleware_1.validate)(inventory_schema_1.recordWastageSchema), inventory_controller_1.InventoryController.recordWastage);
+// Stock Count & Auditing (Part 16)
+router.get('/stock-counts', inventory_controller_1.InventoryController.getStockCountHistory);
+router.post('/stock-counts', (0, validate_middleware_1.validate)(inventory_schema_1.reconcileStockCountSchema), inventory_controller_1.InventoryController.reconcilePhysicalCount);
 // Store Requisitions & Multi-Stage Warehouse Transfers (Part 4)
 router.get('/requisitions', inventory_controller_1.InventoryController.getRequisitions);
 router.get('/requisitions/:id', inventory_controller_1.InventoryController.getRequisitionById);

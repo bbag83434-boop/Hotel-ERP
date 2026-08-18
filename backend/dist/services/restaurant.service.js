@@ -725,11 +725,15 @@ class RestaurantService {
             const paymentAmount = new client_1.Prisma.Decimal(amount);
             const cashReceived = receivedAmount ? new client_1.Prisma.Decimal(receivedAmount) : paymentAmount;
             const changeAmount = cashReceived.greaterThan(paymentAmount) ? cashReceived.minus(paymentAmount) : new client_1.Prisma.Decimal(0);
+            let normalizedMethod = paymentMethod;
+            if (normalizedMethod === 'UPI' || normalizedMethod === 'QR' || normalizedMethod === 'GPAY' || normalizedMethod === 'PAYTM' || normalizedMethod === 'PHONEPE') {
+                normalizedMethod = 'MOBILE_BANKING';
+            }
             const payment = await tx.payment.create({
                 data: {
                     orderId,
                     amount: paymentAmount,
-                    method: paymentMethod,
+                    method: normalizedMethod,
                     status: 'SUCCESS',
                     receivedAmount: cashReceived,
                     changeAmount,
@@ -874,7 +878,7 @@ class RestaurantService {
                     grandTotal: order.grandTotal,
                     totalCogs,
                     grossProfit,
-                    paymentMethod
+                    paymentMethod: normalizedMethod
                 }
             });
             // 8. Create Accounting Entry Stub (Journal Hook ready for Part 4 Full Accounting Module)

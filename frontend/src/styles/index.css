@@ -2,39 +2,121 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer utilities {
-  .pb-safe {
-    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+@layer base {
+  :root {
+    --bg-main: #0c0c0e;
+    --bg-card: #17171b;
+    --bg-card-hover: #1e1e24;
+    --accent-gold: #d4a437;
+    --accent-gold-glow: rgba(212, 164, 55, 0.18);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --color-text: #ffffff;
+    --color-muted: #8e8e93;
+    --color-success: #3fbf6f;
+    --color-danger: #e5544d;
+    --color-warning: #e5a33d;
+    --color-info: #4d9de5;
   }
-  .pt-safe {
-    padding-top: max(1rem, env(safe-area-inset-top));
+
+  body {
+    background-color: var(--bg-main);
+    color: var(--color-text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
   }
-  .px-safe {
-    padding-left: max(1rem, env(safe-area-inset-left));
-    padding-right: max(1rem, env(safe-area-inset-right));
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', 'Inter', sans-serif;
+    letter-spacing: -0.02em;
   }
-  .mb-safe {
-    margin-bottom: max(1rem, env(safe-area-inset-bottom));
+
+  .font-mono-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* Custom scrollbars for dark theme */
+@layer components {
+  .apex-card {
+    background-color: #17171b;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .apex-card-hover:hover {
+    background-color: #1e1e24;
+    border-color: rgba(212, 164, 55, 0.25);
+    transform: translateY(-1px);
+  }
+
+  .apex-gold-badge {
+    background: linear-gradient(135deg, rgba(212, 164, 55, 0.15), rgba(212, 164, 55, 0.05));
+    border: 1px solid rgba(212, 164, 55, 0.3);
+    color: #d4a437;
+  }
+
+  .apex-btn-primary {
+    background: linear-gradient(135deg, #d4a437, #b8861b);
+    color: #0c0c0e;
+    font-weight: 600;
+    border-radius: 0.75rem;
+    padding: 0.625rem 1.25rem;
+    transition: all 0.15s ease;
+    box-shadow: 0 4px 14px rgba(212, 164, 55, 0.25);
+  }
+
+  .apex-btn-primary:active {
+    transform: scale(0.98);
+    opacity: 0.9;
+  }
+
+  .apex-btn-secondary {
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-weight: 500;
+    border-radius: 0.75rem;
+    padding: 0.625rem 1.25rem;
+    transition: all 0.15s ease;
+  }
+
+  .apex-btn-secondary:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .apex-btn-secondary:active {
+    transform: scale(0.98);
+  }
+}
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 1rem));
+  }
+  .pt-safe {
+    padding-top: max(1rem, env(safe-area-inset-top, 1rem));
+  }
+  .px-safe {
+    padding-left: max(1rem, env(safe-area-inset-left, 1rem));
+    padding-right: max(1rem, env(safe-area-inset-right, 1rem));
+  }
+}
+
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #0c0c0e;
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
-}
-
-/* Disable tap highlight on mobile browsers for native feel */
-* {
-  -webkit-tap-highlight-color: transparent;
+  background: rgba(212, 164, 55, 0.4);
 }

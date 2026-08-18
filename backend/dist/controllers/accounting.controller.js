@@ -149,5 +149,55 @@ class AccountingController {
             next(err);
         }
     }
+    static async getTrialBalance(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const branchId = req.query.branchId || undefined;
+            const asOfDate = req.query.asOfDate || undefined;
+            const tb = await accounting_service_1.AccountingService.getTrialBalance(companyId, { branchId, asOfDate });
+            return (0, response_utils_1.sendSuccess)(res, tb, 'Trial Balance generated successfully', 200);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
+    static async getBalanceSheet(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const branchId = req.query.branchId || undefined;
+            const asOfDate = req.query.asOfDate || undefined;
+            const bs = await accounting_service_1.AccountingService.getBalanceSheet(companyId, { branchId, asOfDate });
+            return (0, response_utils_1.sendSuccess)(res, bs, 'Balance Sheet generated successfully', 200);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
+    static async getTaxBreakupReport(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const branchId = req.query.branchId || undefined;
+            const startDate = req.query.startDate || undefined;
+            const endDate = req.query.endDate || undefined;
+            const tax = await accounting_service_1.AccountingService.getTaxBreakupReport(companyId, { branchId, startDate, endDate });
+            return (0, response_utils_1.sendSuccess)(res, tax, 'GST Tax Breakup report generated successfully', 200);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
+    static async getBankCashReconciliation(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const branchId = req.query.branchId || undefined;
+            const startDate = req.query.startDate || undefined;
+            const endDate = req.query.endDate || undefined;
+            const recon = await accounting_service_1.AccountingService.getBankCashReconciliation(companyId, { branchId, startDate, endDate });
+            return (0, response_utils_1.sendSuccess)(res, recon, 'Cash and Bank Reconciliation generated successfully', 200);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
 }
 exports.AccountingController = AccountingController;

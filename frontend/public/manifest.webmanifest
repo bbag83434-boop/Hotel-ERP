@@ -35,17 +35,5 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ],
-  "shortcuts": [
-    {
-      "name": "Central Dashboard",
-      "url": "/",
-      "icons": [{ "src": "/icons/icon-192x192.png", "sizes": "192x192" }]
-    },
-    {
-      "name": "Outlet Operations",
-      "url": "/#outlets",
-      "icons": [{ "src": "/icons/icon-192x192.png", "sizes": "192x192" }]
-    }
   ]
 }

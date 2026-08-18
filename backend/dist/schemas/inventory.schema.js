@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.receiveTransferSchema = exports.dispatchTransferSchema = exports.rejectRequisitionSchema = exports.approveRequisitionSchema = exports.submitRequisitionSchema = exports.createRequisitionSchema = exports.adjustStockSchema = exports.transferStockSchema = exports.createWarehouseSchema = exports.updateItemSchema = exports.createItemSchema = exports.createUnitSchema = exports.createCategorySchema = void 0;
+exports.reconcileStockCountSchema = exports.recordWastageSchema = exports.receiveTransferSchema = exports.dispatchTransferSchema = exports.rejectRequisitionSchema = exports.approveRequisitionSchema = exports.submitRequisitionSchema = exports.createRequisitionSchema = exports.adjustStockSchema = exports.transferStockSchema = exports.createWarehouseSchema = exports.updateItemSchema = exports.createItemSchema = exports.createUnitSchema = exports.createCategorySchema = void 0;
 const zod_1 = require("zod");
 exports.createCategorySchema = zod_1.z.object({
     body: zod_1.z.object({
@@ -124,4 +124,39 @@ exports.receiveTransferSchema = zod_1.z.object({
             receivedQty: zod_1.z.number().positive('Received quantity must be greater than 0')
         })).optional()
     }).optional()
+});
+exports.recordWastageSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        branchId: zod_1.z.string().uuid().optional(),
+        warehouseId: zod_1.z.string().uuid('Warehouse ID is required'),
+        wastageType: zod_1.z.enum([
+            'EXPIRED',
+            'SPOILED',
+            'DAMAGED',
+            'WRONG_PREPARATION',
+            'OVERPRODUCTION',
+            'RETURNED_DISCARDED',
+            'PRODUCTION_LOSS'
+        ]),
+        reason: zod_1.z.string().min(1, 'Reason for wastage is required'),
+        items: zod_1.z.array(zod_1.z.object({
+            itemId: zod_1.z.string().uuid('Item ID is required'),
+            quantity: zod_1.z.number().positive('Quantity must be greater than 0'),
+            batchNumber: zod_1.z.string().optional(),
+            reason: zod_1.z.string().optional()
+        })).min(1, 'At least one item must be specified for wastage recording'),
+        notes: zod_1.z.string().optional()
+    })
+});
+exports.reconcileStockCountSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        branchId: zod_1.z.string().uuid().optional(),
+        warehouseId: zod_1.z.string().uuid('Warehouse ID is required'),
+        notes: zod_1.z.string().optional(),
+        countedItems: zod_1.z.array(zod_1.z.object({
+            itemId: zod_1.z.string().uuid('Item ID is required'),
+            countedQty: zod_1.z.number().min(0, 'Counted quantity cannot be negative'),
+            notes: zod_1.z.string().optional()
+        })).min(1, 'At least one item must be included in the physical count')
+    })
 });

@@ -1502,5 +1502,167 @@ class PurchaseService {
             }
         };
     }
+    // -------------------------------------------------------------
+    // SUPPLIER RETURN & DEBIT NOTE (PART 15 QC & DEFECT MANAGEMENT)
+    // -------------------------------------------------------------
+    static async returnGoodsToSupplier(params) {
+        const { companyId, branchId, warehouseId, supplierId, grnId, reason, items, actorId, ipAddress, userAgent } = params;
+        if (!items || items.length === 0) {
+            throw new response_utils_1.AppError('At least one item must be specified for supplier return', 400);
+        }
+        const [supplier, warehouse] = await Promise.all([
+            database_1.prisma.supplier.findFirst({ where: { id: supplierId, companyId } }),
+            database_1.prisma.warehouse.findFirst({ where: { id: warehouseId, companyId } })
+        ]);
+        if (!supplier)
+            throw new response_utils_1.AppError('Supplier not found', 404);
+        if (!warehouse)
+            throw new response_utils_1.AppError('Warehouse not found', 404);
+        return database_1.prisma.$transaction(async (tx) => {
+            const returnCount = await tx.stockLedger.count({ where: { movementType: 'RETURN' } });
+            const debitNoteNumber = `DN-${new Date().getFullYear()}-${String(returnCount + 1).padStart(5, '0')}`;
+            let totalReturnAmount = new client_1.Prisma.Decimal(0);
+            for (const line of items) {
+                const returnQty = new client_1.Prisma.Decimal(line.returnQty);
+                if (returnQty.isZero() || returnQty.isNegative()) {
+                    throw new response_utils_1.AppError('Return quantity must be greater than zero', 400);
+                }
+                const item = await tx.item.findFirst({ where: { id: line.itemId, companyId } });
+                if (!item)
+                    throw new response_utils_1.AppError(`Item not found: ${line.itemId}`, 404);
+                const currentBalance = await tx.stockBalance.findUnique({
+                    where: {
+                        warehouseId_itemId: { warehouseId, itemId: line.itemId }
+                    }
+                });
+                if (!currentBalance || currentBalance.quantity.lessThan(returnQty)) {
+                    const available = currentBalance ? currentBalance.quantity.toString() : '0';
+                    throw new response_utils_1.AppError(`Insufficient stock to return "${item.name}". Available: ${available}, Return requested: ${returnQty}`, 400);
+                }
+                const unitCost = line.unitCost !== undefined ? new client_1.Prisma.Decimal(line.unitCost) : item.costPrice;
+                const lineTotal = returnQty.times(unitCost);
+                totalReturnAmount = totalReturnAmount.plus(lineTotal);
+                // 1. Decrement StockBalance in warehouse
+                const updatedBalance = await tx.stockBalance.update({
+                    where: {
+                        warehouseId_itemId: { warehouseId, itemId: line.itemId }
+                    },
+                    data: {
+                        quantity: { decrement: returnQty }
+                    }
+                });
+                // 2. Create StockLedger entry (movementType: RETURN)
+                await tx.stockLedger.create({
+                    data: {
+                        warehouseId,
+                        itemId: line.itemId,
+                        batchNumber: line.batchNumber,
+                        movementType: 'RETURN',
+                        changeQty: returnQty.negated(),
+                        balanceQty: updatedBalance.quantity,
+                        unitCost,
+                        totalCost: lineTotal,
+                        referenceType: 'SUPPLIER_RETURN',
+                        referenceId: debitNoteNumber,
+                        notes: `Supplier Return: ${line.reason || reason} (${debitNoteNumber})`,
+                        createdById: actorId
+                    }
+                });
+            }
+            // 3. Update Supplier Balance & Post SupplierLedger (DEBIT NOTE)
+            const updatedSupplier = await tx.supplier.update({
+                where: { id: supplierId },
+                data: { balance: { decrement: totalReturnAmount } }
+            });
+            await tx.supplierLedger.create({
+                data: {
+                    supplierId,
+                    transactionType: 'RETURN',
+                    debit: totalReturnAmount,
+                    credit: new client_1.Prisma.Decimal(0),
+                    balance: updatedSupplier.balance,
+                    referenceType: 'DEBIT_NOTE',
+                    referenceId: debitNoteNumber,
+                    description: `Debit note for supplier return: ${reason} (${debitNoteNumber})`
+                }
+            });
+            // 4. Double-entry General Ledger (Debit: 2010 Accounts Payable, Credit: 1050 Raw Material Inventory)
+            try {
+                const [apAccount, inventoryAccount] = await Promise.all([
+                    tx.chartOfAccount.findFirst({ where: { companyId, code: '2010' } }),
+                    tx.chartOfAccount.findFirst({ where: { companyId, code: '1050' } }) ||
+                        tx.chartOfAccount.findFirst({ where: { companyId, code: '1010' } })
+                ]);
+                if (apAccount && inventoryAccount) {
+                    const jeCount = await tx.journalEntry.count({ where: { companyId } });
+                    const entryNumber = `JE-DN-${new Date().getFullYear()}-${String(jeCount + 1).padStart(6, '0')}`;
+                    const je = await tx.journalEntry.create({
+                        data: {
+                            companyId,
+                            branchId,
+                            entryNumber,
+                            referenceType: 'DEBIT_NOTE',
+                            referenceId: debitNoteNumber,
+                            narration: `Supplier debit note for return: ${reason} (${debitNoteNumber})`,
+                            status: 'POSTED',
+                            totalDebit: totalReturnAmount,
+                            totalCredit: totalReturnAmount,
+                            createdById: actorId
+                        }
+                    });
+                    await tx.journalEntryLine.createMany({
+                        data: [
+                            {
+                                journalEntryId: je.id,
+                                accountId: apAccount.id,
+                                debit: totalReturnAmount,
+                                credit: new client_1.Prisma.Decimal(0),
+                                narration: `AP Debit Note for ${supplier.name}`
+                            },
+                            {
+                                journalEntryId: je.id,
+                                accountId: inventoryAccount.id,
+                                debit: new client_1.Prisma.Decimal(0),
+                                credit: totalReturnAmount,
+                                narration: `Inventory Return to ${supplier.name}`
+                            }
+                        ]
+                    });
+                    await tx.chartOfAccount.update({
+                        where: { id: apAccount.id },
+                        data: { balance: { decrement: totalReturnAmount } }
+                    });
+                    await tx.chartOfAccount.update({
+                        where: { id: inventoryAccount.id },
+                        data: { balance: { decrement: totalReturnAmount } }
+                    });
+                }
+            }
+            catch (glErr) {
+                console.warn('Debit note GL journal posting notice:', glErr);
+            }
+            await audit_service_1.AuditService.log({
+                userId: actorId,
+                action: 'SUPPLIER_GOODS_RETURNED',
+                entity: 'SupplierReturn',
+                entityId: debitNoteNumber,
+                details: {
+                    debitNoteNumber,
+                    supplier: supplier.name,
+                    totalReturnAmount: totalReturnAmount.toString(),
+                    reason
+                },
+                ipAddress,
+                userAgent
+            });
+            return {
+                debitNoteNumber,
+                supplierName: supplier.name,
+                totalReturnAmount,
+                itemCount: items.length,
+                message: `Debit Note ${debitNoteNumber} generated and $${totalReturnAmount} credited to supplier ledger`
+            };
+        }, { maxWait: 10000, timeout: 30000 });
+    }
 }
 exports.PurchaseService = PurchaseService;

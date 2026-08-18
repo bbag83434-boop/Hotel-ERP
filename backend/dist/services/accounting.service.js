@@ -560,5 +560,255 @@ class AccountingService {
             orderBy: { invoiceDate: 'desc' }
         });
     }
+    // ==========================================
+    // ADVANCED ACCOUNTING ENGINE (PART 18)
+    // ==========================================
+    // Trial Balance (Verifies Double-Entry Equivalence Across All Accounts)
+    static async getTrialBalance(companyId, params) {
+        const asOf = params.asOfDate ? new Date(params.asOfDate) : new Date();
+        const accounts = await database_1.prisma.chartOfAccount.findMany({
+            where: {
+                companyId,
+                isActive: true,
+                ...(params.branchId ? { OR: [{ branchId: params.branchId }, { branchId: null }] } : {})
+            },
+            orderBy: { code: 'asc' }
+        });
+        const journalLines = await database_1.prisma.journalEntryLine.findMany({
+            where: {
+                journalEntry: {
+                    companyId,
+                    status: 'POSTED',
+                    date: { lte: asOf },
+                    ...(params.branchId ? { branchId: params.branchId } : {})
+                }
+            }
+        });
+        // Aggregate debits & credits per account
+        const debitMap = {};
+        const creditMap = {};
+        for (const line of journalLines) {
+            debitMap[line.accountId] = (debitMap[line.accountId] || 0) + Number(line.debit);
+            creditMap[line.accountId] = (creditMap[line.accountId] || 0) + Number(line.credit);
+        }
+        let totalDebitSum = 0;
+        let totalCreditSum = 0;
+        const rows = accounts.map((acc) => {
+            const totalDebits = debitMap[acc.id] || 0;
+            const totalCredits = creditMap[acc.id] || 0;
+            // Determine net closing debit or credit balance
+            let closingDebit = 0;
+            let closingCredit = 0;
+            if (['ASSET', 'EXPENSE'].includes(acc.type)) {
+                const net = totalDebits - totalCredits;
+                if (net >= 0)
+                    closingDebit = net;
+                else
+                    closingCredit = Math.abs(net);
+            }
+            else {
+                // LIABILITY, EQUITY, REVENUE (Credit Normal)
+                const net = totalCredits - totalDebits;
+                if (net >= 0)
+                    closingCredit = net;
+                else
+                    closingDebit = Math.abs(net);
+            }
+            totalDebitSum += closingDebit;
+            totalCreditSum += closingCredit;
+            return {
+                accountId: acc.id,
+                code: acc.code,
+                name: acc.name,
+                type: acc.type,
+                subType: acc.subType,
+                totalDebits,
+                totalCredits,
+                closingDebit,
+                closingCredit
+            };
+        });
+        const isBalanced = Math.abs(totalDebitSum - totalCreditSum) < 0.01;
+        return {
+            asOfDate: asOf,
+            isBalanced,
+            totalDebit: Number(totalDebitSum.toFixed(2)),
+            totalCredit: Number(totalCreditSum.toFixed(2)),
+            variance: Number((totalDebitSum - totalCreditSum).toFixed(2)),
+            accounts: rows
+        };
+    }
+    // Balance Sheet (Assets = Liabilities + Equity)
+    static async getBalanceSheet(companyId, params) {
+        const asOf = params.asOfDate ? new Date(params.asOfDate) : new Date();
+        const pnl = await this.getProfitAndLoss(companyId, {
+            branchId: params.branchId,
+            endDate: asOf.toISOString()
+        });
+        const accounts = await database_1.prisma.chartOfAccount.findMany({
+            where: {
+                companyId,
+                isActive: true,
+                type: { in: ['ASSET', 'LIABILITY', 'EQUITY'] },
+                ...(params.branchId ? { OR: [{ branchId: params.branchId }, { branchId: null }] } : {})
+            },
+            orderBy: { code: 'asc' }
+        });
+        const journalLines = await database_1.prisma.journalEntryLine.findMany({
+            where: {
+                journalEntry: {
+                    companyId,
+                    status: 'POSTED',
+                    date: { lte: asOf },
+                    ...(params.branchId ? { branchId: params.branchId } : {})
+                }
+            }
+        });
+        const debitMap = {};
+        const creditMap = {};
+        for (const line of journalLines) {
+            debitMap[line.accountId] = (debitMap[line.accountId] || 0) + Number(line.debit);
+            creditMap[line.accountId] = (creditMap[line.accountId] || 0) + Number(line.credit);
+        }
+        const currentAssets = [];
+        const nonCurrentAssets = [];
+        const currentLiabilities = [];
+        const longTermLiabilities = [];
+        const equityItems = [];
+        let totalAssets = 0;
+        let totalLiabilities = 0;
+        let totalEquity = 0;
+        for (const acc of accounts) {
+            const d = debitMap[acc.id] || 0;
+            const c = creditMap[acc.id] || 0;
+            if (acc.type === 'ASSET') {
+                const netAsset = d - c;
+                if (netAsset !== 0) {
+                    totalAssets += netAsset;
+                    const item = { code: acc.code, name: acc.name, amount: netAsset };
+                    if (acc.subType === 'FIXED_ASSET')
+                        nonCurrentAssets.push(item);
+                    else
+                        currentAssets.push(item);
+                }
+            }
+            else if (acc.type === 'LIABILITY') {
+                const netLiab = c - d;
+                if (netLiab !== 0) {
+                    totalLiabilities += netLiab;
+                    const item = { code: acc.code, name: acc.name, amount: netLiab };
+                    if (acc.subType === 'LONG_TERM_LIABILITY')
+                        longTermLiabilities.push(item);
+                    else
+                        currentLiabilities.push(item);
+                }
+            }
+            else if (acc.type === 'EQUITY') {
+                const netEq = c - d;
+                if (netEq !== 0) {
+                    totalEquity += netEq;
+                    equityItems.push({ code: acc.code, name: acc.name, amount: netEq });
+                }
+            }
+        }
+        // Add Net Period Income to Retained Equity
+        const retainedEarnings = pnl.netIncome;
+        totalEquity += retainedEarnings;
+        equityItems.push({ code: '3020', name: 'Net Period Earnings (Retained)', amount: retainedEarnings });
+        const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
+        const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01;
+        return {
+            asOfDate: asOf,
+            isBalanced,
+            assets: {
+                currentAssets,
+                nonCurrentAssets,
+                totalAssets: Number(totalAssets.toFixed(2))
+            },
+            liabilities: {
+                currentLiabilities,
+                longTermLiabilities,
+                totalLiabilities: Number(totalLiabilities.toFixed(2))
+            },
+            equity: {
+                items: equityItems,
+                totalEquity: Number(totalEquity.toFixed(2))
+            },
+            totalLiabilitiesAndEquity: Number(totalLiabilitiesAndEquity.toFixed(2))
+        };
+    }
+    // Tax / GST Breakdown (Output GST Collected vs Input GST Tax Credits)
+    static async getTaxBreakupReport(companyId, params) {
+        const start = params.startDate ? new Date(params.startDate) : new Date(new Date().getFullYear(), 0, 1);
+        const end = params.endDate ? new Date(params.endDate) : new Date();
+        const [taxPayableAccount, inputTaxCreditAccount] = await Promise.all([
+            database_1.prisma.chartOfAccount.findFirst({ where: { companyId, code: '2020' } }),
+            database_1.prisma.chartOfAccount.findFirst({ where: { companyId, code: '1040' } })
+        ]);
+        const targetAccountIds = [taxPayableAccount?.id, inputTaxCreditAccount?.id].filter(Boolean);
+        const taxLines = await database_1.prisma.journalEntryLine.findMany({
+            where: {
+                accountId: { in: targetAccountIds },
+                journalEntry: {
+                    companyId,
+                    status: 'POSTED',
+                    date: { gte: start, lte: end },
+                    ...(params.branchId ? { branchId: params.branchId } : {})
+                }
+            },
+            include: {
+                journalEntry: true,
+                account: true
+            },
+            orderBy: { journalEntry: { date: 'asc' } }
+        });
+        let outputTaxCollected = 0; // Tax collected from customers (Sales / Room billing)
+        let inputTaxCredit = 0; // Tax paid to suppliers on purchases
+        const entries = taxLines.map((l) => {
+            const creditAmt = Number(l.credit);
+            const debitAmt = Number(l.debit);
+            if (l.account.code === '2020') {
+                outputTaxCollected += creditAmt - debitAmt;
+            }
+            else if (l.account.code === '1040') {
+                inputTaxCredit += debitAmt - creditAmt;
+            }
+            return {
+                date: l.journalEntry.date,
+                entryNumber: l.journalEntry.entryNumber,
+                referenceType: l.journalEntry.referenceType,
+                accountCode: l.account.code,
+                accountName: l.account.name,
+                narration: l.narration || l.journalEntry.narration,
+                taxCollected: creditAmt,
+                taxPaid: debitAmt
+            };
+        });
+        const netTaxPayable = outputTaxCollected - inputTaxCredit;
+        return {
+            period: { startDate: start, endDate: end },
+            outputTaxCollected: Number(outputTaxCollected.toFixed(2)),
+            inputTaxCredit: Number(inputTaxCredit.toFixed(2)),
+            netTaxPayable: Number(netTaxPayable.toFixed(2)),
+            taxEntries: entries
+        };
+    }
+    // Cash & Bank Reconciliation
+    static async getBankCashReconciliation(companyId, params) {
+        const cashFlow = await this.getCashFlow(companyId, params);
+        const trialBalance = await this.getTrialBalance(companyId, { branchId: params.branchId });
+        const cashAccount = trialBalance.accounts.find((a) => a.code === '1010');
+        const bankAccount = trialBalance.accounts.find((a) => a.code === '1020');
+        return {
+            period: cashFlow.period,
+            cashDrawerBalance: cashAccount?.closingDebit || 0,
+            bankAccountBalance: bankAccount?.closingDebit || 0,
+            totalLiquidFunds: (cashAccount?.closingDebit || 0) + (bankAccount?.closingDebit || 0),
+            periodInflows: cashFlow.totalInflow,
+            periodOutflows: cashFlow.totalOutflow,
+            netChange: cashFlow.netCashFlow,
+            recentCashTransactions: cashFlow.transactions.slice(0, 25)
+        };
+    }
 }
 exports.AccountingService = AccountingService;

@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { env } from './env';
+import { env } from './environment';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -7,11 +7,31 @@ declare global {
 }
 
 export const prisma =
-  globalThis.prismaGlobal ||
+  globalThis.prismaGlobal ??
   new PrismaClient({
-    log: env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error']
+    log: env.isProduction ? ['error', 'warn'] : ['query', 'info', 'warn', 'error'],
   });
 
-if (env.NODE_ENV !== 'production') {
+if (!env.isProduction) {
   globalThis.prismaGlobal = prisma;
+}
+
+export async function connectDatabase(): Promise<boolean> {
+  try {
+    await prisma.$connect();
+    console.log('✅ Neon PostgreSQL Database Connected Successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to connect to Neon PostgreSQL Database:', error);
+    return false;
+  }
+}
+
+export async function disconnectDatabase(): Promise<void> {
+  try {
+    await prisma.$disconnect();
+    console.log('🔌 Database disconnected cleanly');
+  } catch (error) {
+    console.error('Error during database disconnect:', error);
+  }
 }

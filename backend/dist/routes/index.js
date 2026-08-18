@@ -4,34 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const auth_routes_1 = __importDefault(require("./auth.routes"));
-const user_routes_1 = __importDefault(require("./user.routes"));
 const health_routes_1 = __importDefault(require("./health.routes"));
-const inventory_routes_1 = __importDefault(require("./inventory.routes"));
-const purchase_routes_1 = __importDefault(require("./purchase.routes"));
-const production_routes_1 = __importDefault(require("./production.routes"));
-const restaurant_routes_1 = __importDefault(require("./restaurant.routes"));
-const hotel_routes_1 = __importDefault(require("./hotel.routes"));
-const accounting_routes_1 = __importDefault(require("./accounting.routes"));
-const hr_routes_1 = __importDefault(require("./hr.routes"));
-const approval_routes_1 = __importDefault(require("./approval.routes"));
-const dashboard_routes_1 = __importDefault(require("./dashboard.routes"));
-const ai_routes_1 = __importDefault(require("./ai.routes"));
-const routing_routes_1 = __importDefault(require("./routing.routes"));
 const router = (0, express_1.Router)();
-// Sub-routes under API_PREFIX (/api/v1)
-router.use('/auth', auth_routes_1.default);
-router.use('/users', user_routes_1.default);
-router.use('/routing', routing_routes_1.default);
-router.use('/inventory', inventory_routes_1.default);
-router.use('/purchasing', purchase_routes_1.default);
-router.use('/production', production_routes_1.default);
-router.use('/restaurant', restaurant_routes_1.default);
-router.use('/hotel', hotel_routes_1.default);
-router.use('/accounting', accounting_routes_1.default);
-router.use('/hr', hr_routes_1.default);
-router.use('/approval', approval_routes_1.default);
-router.use('/dashboard', dashboard_routes_1.default);
-router.use('/ai', ai_routes_1.default);
-router.use('/', health_routes_1.default);
+// Mount Health Check Routes
+router.use('/health', health_routes_1.default);
 exports.default = router;

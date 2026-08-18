@@ -1,52 +1,55 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    
+    <!-- Primary Meta Tags -->
+    <title>APEX ERP — Autonomous Multi-Outlet Restaurant Platform</title>
+    <meta name="title" content="APEX ERP — Autonomous Multi-Outlet Restaurant Platform" />
+    <meta name="description" content="Centralized Multi-Outlet Restaurant ERP, Central Kitchen, Central Purchase Control, Inventory & Bi-Monthly Closing Engine" />
+    
+    <!-- PWA / Mobile Web App Meta Tags -->
     <meta name="theme-color" content="#0c0c0e" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Hotel Management" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="description" content="Hotel Management - Hospitality Management System by Chef Bisu" />
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="APEX ERP" />
+    <meta name="format-detection" content="telephone=no" />
+    
+    <!-- Manifest & Icons -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    
+    <!-- Google Fonts: Inter & Outfit -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-    <title>CHEF BISU • Hotel Management • Hospitality Management System</title>
-    <script type="module" crossorigin src="/assets/index-pztKMhBF.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BUrqny5G.css">
-  <link rel="manifest" href="/manifest.webmanifest"></head>
-  <body class="h-full font-sans antialiased overflow-x-hidden selection:bg-amber-500 selection:text-slate-950 bg-[#0c0c0e]">
-    <div id="root" class="h-full flex flex-col">
-      <!-- Instant Pure CSS Splash Screen before React Hydration -->
-      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #0c0c0e; color: #f8fafc; font-family: 'Inter', system-ui, sans-serif; text-align: center; padding: 2rem;">
-        <div style="display: inline-block; padding: 0.35rem 0.85rem; border-radius: 9999px; background: rgba(23, 23, 27, 0.8); border: 1px solid rgba(212, 164, 55, 0.3); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.15em; color: #d4a437; font-family: monospace; margin-bottom: 1.5rem; text-transform: uppercase;">
-          CHEF BISU
-        </div>
-        <div style="width: 5rem; height: 5rem; border-radius: 1.25rem; background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(245, 158, 11, 0.4); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8); margin-bottom: 1.5rem;">
-          <span style="font-size: 1.75rem; font-weight: 900; color: #fbbf24; font-family: serif;">HM</span>
-          <span style="font-size: 0.55rem; font-weight: 800; color: #fde68a; letter-spacing: 0.1em; margin-top: -0.25rem; font-family: monospace;">ERP</span>
-        </div>
-        <h1 style="font-size: 1.75rem; font-weight: 800; color: #ffffff; margin: 0 0 0.25rem 0; letter-spacing: -0.025em;">
-          Hotel Management
-        </h1>
-        <p style="font-size: 0.875rem; font-weight: 500; color: #94a3b8; margin: 0 0 2rem 0;">
-          Hospitality Management System
-        </p>
-        <div style="width: 2.25rem; height: 2.25rem; border: 3px solid rgba(245, 158, 11, 0.8); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 1rem;"></div>
-        <p style="font-size: 0.8rem; font-weight: 600; color: #cbd5e1; margin: 0;">
-          Connecting to server...
-        </p>
-        <style>
-          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        </style>
-      </div>
-    </div>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    
+    <!-- Splash / Base Dark Background -->
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        background-color: #0c0c0e;
+        color: #ffffff;
+        margin: 0;
+        padding: 0;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+           -moz-user-select: none;
+                user-select: none;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-CAgBxO0Y.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-C3367n1o.css">
+  <link rel="manifest" href="/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>
+  <body class="bg-[#0c0c0e] text-white antialiased selection:bg-[#d4a437]/30 selection:text-white">
+    <div id="root"></div>
   </body>
 </html>

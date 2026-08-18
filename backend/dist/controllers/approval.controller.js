@@ -22,15 +22,28 @@ const getClientIp = (req) => {
     return req.ip || '';
 };
 class ApprovalController {
-    // Requests
+    // 1. Summary Metrics
+    static async getSummary(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const { branchId } = req.query;
+            const summary = await approval_service_1.ApprovalService.getApprovalSummary(companyId, branchId);
+            return (0, response_utils_1.sendSuccess)(res, summary, 'Approval summary retrieved', 200);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
+    // 2. Requests Queue
     static async getRequests(req, res, next) {
         try {
             const companyId = await resolveCompanyId(req);
-            const { branchId, status, transactionType } = req.query;
+            const { branchId, status, transactionType, requestedById } = req.query;
             const requests = await approval_service_1.ApprovalService.getApprovalRequests(companyId, {
                 branchId: branchId,
                 status: status,
-                transactionType: transactionType
+                transactionType: transactionType,
+                requestedById: requestedById
             });
             return (0, response_utils_1.sendSuccess)(res, requests, 'Approval requests retrieved', 200);
         }
@@ -63,7 +76,7 @@ class ApprovalController {
             next(err);
         }
     }
-    // Rules
+    // 3. Rules Matrix
     static async getRules(req, res, next) {
         try {
             const companyId = await resolveCompanyId(req);
@@ -79,8 +92,31 @@ class ApprovalController {
         try {
             const companyId = await resolveCompanyId(req);
             const data = approval_schema_1.createApprovalRuleSchema.parse(req.body);
-            const rule = await approval_service_1.ApprovalService.createApprovalRule(companyId, data);
+            const rule = await approval_service_1.ApprovalService.createApprovalRule(companyId, data, req.user?.userId);
             return (0, response_utils_1.sendSuccess)(res, rule, 'Approval rule created', 201);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
+    static async updateRule(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const { id } = req.params;
+            const data = approval_schema_1.updateApprovalRuleSchema.parse(req.body);
+            const rule = await approval_service_1.ApprovalService.updateApprovalRule(companyId, id, data, req.user?.userId);
+            return (0, response_utils_1.sendSuccess)(res, rule, 'Approval rule updated', 200);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
+    static async deleteRule(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const { id } = req.params;
+            const result = await approval_service_1.ApprovalService.deleteApprovalRule(companyId, id, req.user?.userId);
+            return (0, response_utils_1.sendSuccess)(res, result, 'Approval rule deleted', 200);
         }
         catch (err) {
             next(err);

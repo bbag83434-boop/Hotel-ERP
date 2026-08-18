@@ -17,7 +17,11 @@ router.post('/expenses', (0, rbac_middleware_1.requirePermission)('accounting:ma
 // AP / AR
 router.get('/accounts-payable', accounting_controller_1.AccountingController.getAccountsPayable);
 router.get('/accounts-receivable', accounting_controller_1.AccountingController.getAccountsReceivable);
-// Financial Statements & Reports
+// Financial Statements & Reports (Part 18 Advanced Accounting)
 router.get('/reports/pnl', accounting_controller_1.AccountingController.getProfitAndLoss);
 router.get('/reports/cash-flow', accounting_controller_1.AccountingController.getCashFlow);
+router.get('/reports/trial-balance', accounting_controller_1.AccountingController.getTrialBalance);
+router.get('/reports/balance-sheet', accounting_controller_1.AccountingController.getBalanceSheet);
+router.get('/reports/tax-breakup', accounting_controller_1.AccountingController.getTaxBreakupReport);
+router.get('/reports/cash-bank-reconciliation', accounting_controller_1.AccountingController.getBankCashReconciliation);
 exports.default = router;

@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.InventoryController = void 0;
 const inventory_service_1 = require("../services/inventory.service");
 const unitConversion_service_1 = require("../services/unitConversion.service");
+const wastage_service_1 = require("../services/wastage.service");
+const stockCount_service_1 = require("../services/stockCount.service");
 const response_utils_1 = require("../utils/response.utils");
 const database_1 = require("../config/database");
 const resolveCompanyId = async (req) => {
@@ -415,6 +417,78 @@ class InventoryController {
                 userAgent
             });
             return (0, response_utils_1.sendSuccess)(res, result, 'Transfer received and destination stock incremented');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // Wastage & Loss Recording (Part 12)
+    static async recordWastage(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const ipAddress = getClientIp(req);
+            const userAgent = req.headers['user-agent'] || '';
+            const result = await wastage_service_1.WastageService.recordWastage({
+                companyId,
+                branchId: req.body.branchId || req.user?.branchId || '',
+                warehouseId: req.body.warehouseId,
+                wastageType: req.body.wastageType,
+                reason: req.body.reason,
+                items: req.body.items,
+                actorId: req.user?.userId || '',
+                notes: req.body.notes,
+                ipAddress,
+                userAgent
+            });
+            return (0, response_utils_1.sendSuccess)(res, result, result.message, 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async getWastageRecords(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const result = await wastage_service_1.WastageService.getWastageRecords(companyId, {
+                warehouseId: req.query.warehouseId,
+                page: req.query.page ? parseInt(req.query.page, 10) : 1,
+                limit: req.query.limit ? parseInt(req.query.limit, 10) : 20
+            });
+            return (0, response_utils_1.sendSuccess)(res, result.entries, 'Wastage records retrieved', 200, result.pagination);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // Stock Count & Adjustment (Part 16)
+    static async reconcilePhysicalCount(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const ipAddress = getClientIp(req);
+            const userAgent = req.headers['user-agent'] || '';
+            const result = await stockCount_service_1.StockCountService.reconcilePhysicalCount({
+                companyId,
+                branchId: req.body.branchId || req.user?.branchId || '',
+                warehouseId: req.body.warehouseId,
+                countedItems: req.body.countedItems,
+                notes: req.body.notes,
+                actorId: req.user?.userId || '',
+                ipAddress,
+                userAgent
+            });
+            return (0, response_utils_1.sendSuccess)(res, result, result.message, 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    static async getStockCountHistory(req, res, next) {
+        try {
+            const companyId = await resolveCompanyId(req);
+            const records = await stockCount_service_1.StockCountService.getStockCountHistory(companyId, {
+                warehouseId: req.query.warehouseId
+            });
+            return (0, response_utils_1.sendSuccess)(res, records, 'Physical stock count history retrieved');
         }
         catch (error) {
             next(error);
