@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import {
   LayoutDashboard,
@@ -8,11 +10,11 @@ import {
 } from 'lucide-react';
 
 interface BottomNavProps {
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
+  activeTab?: string;
+  setActiveTab?: (tab: string) => void;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab }) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ activeTab = 'dashboard', setActiveTab }) => {
   const navItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'outlets', label: 'Outlets', icon: Building2 },
@@ -30,7 +32,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => setActiveTab?.(item.id)}
               className={`flex flex-col items-center justify-center w-16 py-1 rounded-xl transition-all duration-150 active:scale-95 ${
                 isActive ? 'text-[#d4a437]' : 'text-white/40 hover:text-white/70'
               }`}
@@ -51,3 +53,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
     </nav>
   );
 };
+
+export default BottomNav;
+

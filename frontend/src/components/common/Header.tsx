@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { useOutlet } from '../../context/OutletContext';
 import { usePWA } from '../../context/PWAContext';
@@ -131,3 +133,6 @@ export const Header: React.FC = () => {
     </header>
   );
 };
+
+export default Header;
+

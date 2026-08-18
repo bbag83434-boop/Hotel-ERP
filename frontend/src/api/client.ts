@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Get API base URL from environment or default to local/Render relative path
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
+// Get API base URL from environment or default to relative path
+const API_BASE_URL = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL) || '/api/v1';
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -14,14 +14,16 @@ export const apiClient = axios.create({
 
 // Request Interceptor to attach Active Outlet ID & Auth Token
 apiClient.interceptors.request.use((config) => {
-  const activeOutletId = localStorage.getItem('apex_active_outlet_id');
-  if (activeOutletId && config.headers) {
-    config.headers['X-Outlet-Id'] = activeOutletId;
-  }
+  if (typeof window !== 'undefined') {
+    const activeOutletId = localStorage.getItem('apex_active_outlet_id');
+    if (activeOutletId && config.headers) {
+      config.headers['X-Outlet-Id'] = activeOutletId;
+    }
 
-  const token = localStorage.getItem('apex_auth_token');
-  if (token && config.headers) {
-    config.headers['Authorization'] = `Bearer ${token}`;
+    const token = localStorage.getItem('apex_auth_token');
+    if (token && config.headers) {
+      config.headers['Authorization'] = `Bearer ${token}`;
+    }
   }
 
   return config;

@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { usePWA } from '../../context/PWAContext';
 import { WifiOff } from 'lucide-react';
@@ -20,3 +22,6 @@ export const OfflineBanner: React.FC = () => {
     </div>
   );
 };
+
+export default OfflineBanner;
+

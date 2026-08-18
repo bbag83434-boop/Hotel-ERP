@@ -1,3 +1,5 @@
+'use client';
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -21,11 +23,14 @@ export const PWAProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstallable, setIsInstallable] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isOnline, setIsOnline] = useState(true);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
 
   useEffect(() => {
+    if (typeof window !== 'undefined' && 'navigator' in window) {
+      setIsOnline(navigator.onLine);
+    }
     // Check if already in standalone mode
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
@@ -140,3 +145,6 @@ export function usePWA(): PWAContextType {
   }
   return context;
 }
+
+export default PWAProvider;
+

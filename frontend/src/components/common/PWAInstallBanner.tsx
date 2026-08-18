@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { usePWA } from '../../context/PWAContext';
 import { Download, X, Smartphone } from 'lucide-react';
@@ -52,3 +54,6 @@ export const PWAInstallBanner: React.FC = () => {
     </div>
   );
 };
+
+export default PWAInstallBanner;
+

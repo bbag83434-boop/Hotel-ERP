@@ -63,3 +63,6 @@ export interface ClosingPeriod {
   label: string;
   daysRemaining: number;
 }
+
+export type SystemHealth = SystemHealthData;
+

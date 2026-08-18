@@ -1,13 +1,61 @@
+'use client';
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Outlet } from '../types';
 import { apiClient } from '../api/client';
 
+export interface BiMonthlyPeriodInfo {
+  periodType: 'FIRST_HALF' | 'SECOND_HALF';
+  year: number;
+  month: number;
+  startDate: string;
+  endDate: string;
+  daysRemaining: number;
+  label: string;
+}
+
+export function getCurrentClosingPeriod(): BiMonthlyPeriodInfo {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+
+  const isFirstHalf = day <= 15;
+  const periodType = isFirstHalf ? 'FIRST_HALF' : 'SECOND_HALF';
+  const startDay = isFirstHalf ? 1 : 16;
+  const lastDayOfMonth = new Date(year, month, 0).getDate();
+  const endDay = isFirstHalf ? 15 : lastDayOfMonth;
+
+  const startDate = new Date(Date.UTC(year, month - 1, startDay, 0, 0, 0)).toISOString();
+  const endDate = new Date(Date.UTC(year, month - 1, endDay, 23, 59, 59, 999)).toISOString();
+  const daysRemaining = Math.max(0, endDay - day);
+
+  const monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  const monthStr = monthNames[month - 1];
+  const label = `${monthStr} ${year} - ${isFirstHalf ? '1st Half (1–15)' : '2nd Half (16–End)'}`;
+
+  return {
+    periodType,
+    year,
+    month,
+    startDate,
+    endDate,
+    daysRemaining,
+    label,
+  };
+}
+
 interface OutletContextType {
   outlets: Outlet[];
+  currentOutlet: Outlet;
   activeOutlet: Outlet;
   setActiveOutlet: (outlet: Outlet) => void;
   isLoading: boolean;
   isHeadOffice: boolean;
+  closingInfo: BiMonthlyPeriodInfo;
 }
 
 // 14+ Baseline Multi-Outlet Topology matching Master Blueprint
@@ -36,11 +84,15 @@ const OutletContext = createContext<OutletContextType | undefined>(undefined);
 export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [outlets, setOutlets] = useState<Outlet[]>(DEFAULT_TOPOLOGY);
   const [activeOutlet, setActiveOutletState] = useState<Outlet>(() => {
-    const saved = localStorage.getItem('apex_active_outlet_code');
-    const match = DEFAULT_TOPOLOGY.find((o) => o.code === saved);
-    return match || DEFAULT_TOPOLOGY[0];
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('apex_active_outlet_code');
+      const match = DEFAULT_TOPOLOGY.find((o) => o.code === saved);
+      if (match) return match;
+    }
+    return DEFAULT_TOPOLOGY[0];
   });
   const [isLoading, setIsLoading] = useState(false);
+  const closingInfo = getCurrentClosingPeriod();
 
   useEffect(() => {
     // Attempt to load dynamic outlet topology from database health endpoint
@@ -77,8 +129,10 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const setActiveOutlet = (outlet: Outlet) => {
     setActiveOutletState(outlet);
-    localStorage.setItem('apex_active_outlet_id', outlet.id);
-    localStorage.setItem('apex_active_outlet_code', outlet.code);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('apex_active_outlet_id', outlet.id);
+      localStorage.setItem('apex_active_outlet_code', outlet.code);
+    }
   };
 
   const isHeadOffice = activeOutlet.type === 'HEAD_OFFICE';
@@ -87,10 +141,12 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     <OutletContext.Provider
       value={{
         outlets,
+        currentOutlet: activeOutlet,
         activeOutlet,
         setActiveOutlet,
         isLoading,
         isHeadOffice,
+        closingInfo,
       }}
     >
       {children}
@@ -105,3 +161,5 @@ export function useOutlet(): OutletContextType {
   }
   return context;
 }
+
+export default OutletProvider;
