@@ -1,61 +1,53 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
-  darkMode: 'class',
+  content: ['./src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        brand: {
-          50: '#f0f6ff',
-          100: '#e0edff',
-          200: '#bae0ff',
-          300: '#7cc8ff',
-          400: '#36a9ff',
-          500: '#0088ff',
-          600: '#0066d6',
-          700: '#0050b0',
-          800: '#034491',
-          900: '#093a77',
-          950: '#06254f'
-        },
+        ivory: '#F5F3EE',
         sidebar: {
-          bg: '#0f172a',
-          hover: '#1e293b',
-          active: '#2563eb',
-          text: '#94a3b8',
-          textActive: '#ffffff'
+          bg: '#FFFFFF',
+          hover: '#FAF8F5',
+          active: '#F1E4C5',
+          text: '#707070',
+          textActive: '#B8862D',
+          border: 'rgba(45, 45, 45, 0.08)'
         },
         surface: {
-          light: '#ffffff',
-          dark: '#0f172a',
-          cardLight: '#ffffff',
-          cardDark: '#1e293b',
-          mutedLight: '#f8fafc',
-          mutedDark: '#334155'
+          glass: 'rgba(255, 255, 255, 0.78)',
+          card: '#FFFFFF',
+          subtle: '#FAF8F5'
         },
-        apex: {
-          bg: '#0c0c0e',
-          gold: '#d4a437',
-          card: '#17171b',
-          text: '#ffffff',
-          border: 'rgba(255,255,255,0.08)',
-          danger: '#e5544d',
-          warning: '#e5a33d',
-          success: '#3fbf6f',
-          info: '#4d9de5'
+        theme: {
+          bg: '#F5F3EE',
+          surface: 'rgba(255, 255, 255, 0.78)',
+          sidebar: '#FFFFFF',
+          primary: '#1C1C1C',
+          secondary: '#707070',
+          goldAccent: '#C79A3B',
+          premiumGold: '#B8862D',
+          activeMenu: '#F1E4C5',
+          success: '#2E8B57',
+          warning: '#D99625',
+          danger: '#D9534F',
+          info: '#3978B8',
+          border: 'rgba(45, 45, 45, 0.08)'
         }
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif']
+        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        display: ['Outfit', 'Inter', 'sans-serif']
       },
       borderRadius: {
+        '3xl': '1.5rem',
         '4xl': '2rem'
       },
       boxShadow: {
-        glass: '0 8px 32px 0 rgba(0, 0, 0, 0.08)',
-        subtle: '0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05)',
-        card: '0 4px 6px -1px rgba(0, 0, 0, 0.03), 0 2px 4px -2px rgba(0, 0, 0, 0.03)',
-        floating: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)'
+        glass: '0 8px 32px 0 rgba(45, 45, 45, 0.05)',
+        card: '0 4px 20px -2px rgba(45, 45, 45, 0.04), 0 2px 6px -1px rgba(45, 45, 45, 0.02)',
+        cardHover: '0 10px 30px -4px rgba(199, 154, 59, 0.12), 0 4px 12px -2px rgba(45, 45, 45, 0.04)',
+        subtle: '0 1px 3px 0 rgba(45, 45, 45, 0.05)',
+        floating: '0 20px 25px -5px rgba(45, 45, 45, 0.08), 0 8px 10px -6px rgba(45, 45, 45, 0.04)'
       }
     }
   },

@@ -12,7 +12,7 @@ export const OfflineBanner: React.FC = () => {
   }
 
   return (
-    <div className="bg-[#e5544d]/15 border-b border-[#e5544d]/30 text-[#e5544d] px-4 py-2 text-xs flex items-center justify-between gap-2 sticky top-[61px] z-30 backdrop-blur-md">
+    <div className="bg-[#D9534F]/10 border-b border-[#D9534F]/25 text-[#D9534F] px-4 py-2 text-xs flex items-center justify-between gap-2 sticky top-[61px] z-30 backdrop-blur-md">
       <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
         <WifiOff className="w-4 h-4 shrink-0 animate-bounce" />
         <span className="font-medium">
@@ -24,4 +24,3 @@ export const OfflineBanner: React.FC = () => {
 };
 
 export default OfflineBanner;
-

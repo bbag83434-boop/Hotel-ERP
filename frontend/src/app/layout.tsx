@@ -17,13 +17,13 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'black-translucent',
+    statusBarStyle: 'default',
     title: 'APEX ERP',
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0c0c0e',
+  themeColor: '#F5F3EE',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -37,16 +37,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet" />
         <link rel="manifest" href="/manifest.webmanifest" />
         <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       </head>
-      <body className="bg-[#0c0c0e] text-[#f5f5f7] min-h-screen flex flex-col antialiased selection:bg-[#d4a437]/30 selection:text-[#f3c969]">
+      <body className="bg-[#F5F3EE] text-[#1C1C1C] min-h-screen flex flex-col antialiased selection:bg-[#F1E4C5] selection:text-[#B8862D]">
         <PWAProvider>
           <OutletProvider>
             <div className="flex flex-col min-h-screen max-w-7xl mx-auto w-full relative">
