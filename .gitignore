@@ -13,16 +13,17 @@ __pycache__/
 
 # Build output
 frontend/dist/
-.next/
-frontend/.next/
+dist/
 out/
 frontend/out/
+.next/
+frontend/.next/
 
-# Allow server.js entrypoint wrappers for Render backend
+# Allow backend server.js entrypoint wrappers for Render backend
 !backend/dist/
 !backend/dist/server.js
-!dist/
-!dist/server.js
+!/dist/
+!/dist/server.js
 
 # Logs
 *.log
