@@ -2,11 +2,13 @@ services:
   # Python + FastAPI Backend Web Service
   - type: web
     name: hotel-erp-backend
-    env: python
+    runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: ENVIRONMENT
         value: production
       - key: PORT
@@ -23,7 +25,7 @@ services:
   # Next.js + React + Tailwind CSS + PWA Frontend Web Service
   - type: web
     name: hotel-erp-frontend
-    env: node
+    runtime: node
     rootDir: frontend
     buildCommand: npm install && npm run build
     startCommand: npm run start

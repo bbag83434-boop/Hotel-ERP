@@ -1,0 +1,11 @@
+{
+  "name": "hotel-erp-backend",
+  "version": "2.0.0",
+  "private": true,
+  "description": "APEX Multi-Outlet Restaurant ERP - Python FastAPI Backend",
+  "scripts": {
+    "build": "pip install -r requirements.txt",
+    "start": "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}",
+    "dev": "uvicorn app.main:app --reload --port ${PORT:-4000}"
+  }
+}
