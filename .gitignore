@@ -12,13 +12,17 @@ __pycache__/
 .pytest_cache/
 
 # Build output
-dist/
 frontend/dist/
-backend/dist/
 .next/
 frontend/.next/
 out/
 frontend/out/
+
+# Allow server.js entrypoint wrappers for Render backend
+!backend/dist/
+!backend/dist/server.js
+!dist/
+!dist/server.js
 
 # Logs
 *.log
