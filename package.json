@@ -4,10 +4,12 @@
   "private": true,
   "description": "APEX Multi-Outlet Restaurant ERP (Next.js + FastAPI + Neon PostgreSQL)",
   "scripts": {
+    "build": "pip3 install -r backend/requirements.txt || pip install -r backend/requirements.txt",
+    "start": "python3 -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-10000} || uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-10000}",
     "dev:backend": "uvicorn app.main:app --app-dir backend --reload --port 4000",
     "dev:frontend": "npm --prefix frontend run dev",
-    "build:backend": "pip install -r backend/requirements.txt",
-    "start:backend": "uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-10000}",
+    "build:backend": "pip3 install -r backend/requirements.txt || pip install -r backend/requirements.txt",
+    "start:backend": "python3 -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-10000}",
     "build:frontend": "npm --prefix frontend run build",
     "start:frontend": "npm --prefix frontend run start",
     "test:backend": "python backend/test_part1_part2_fastapi.py"

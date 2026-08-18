@@ -1,8 +1,9 @@
 services:
-  # Python + FastAPI Backend Web Service
+  # 1. Python + FastAPI Backend Web Service (Existing Render Service: Hotel-ERP)
   - type: web
-    name: hotel-erp-backend
+    name: Hotel-ERP
     runtime: python
+    env: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -22,10 +23,11 @@ services:
       - key: CORS_ORIGINS
         value: "*"
 
-  # Next.js + React + Tailwind CSS + PWA Frontend Web Service
+  # 2. Next.js App Router + Tailwind CSS + PWA Frontend Web Service (Hotel-ERP-Frontend)
   - type: web
-    name: hotel-erp-frontend
+    name: Hotel-ERP-Frontend
     runtime: node
+    env: node
     rootDir: frontend
     buildCommand: npm install && npm run build
     startCommand: npm run start
