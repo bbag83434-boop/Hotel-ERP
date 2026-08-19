@@ -1,7 +1,23 @@
 from app.models.base import BaseModel
-from app.models.organization import Company, Branch, Warehouse, BranchType
+from app.models.organization import Company, Branch, Department, Warehouse, StoreLocation, BranchType
 from app.models.user import User, Role, Permission, RolePermission, UserBranch
-from app.models.inventory import Item, Category, Unit, StockBalance, StockLedger, ItemType
+from app.models.hr import Staff, Attendance, Payroll, PayrollItem, StaffStatus, AttendanceStatus, PayrollStatus
+from app.models.inventory import (
+    Item,
+    Category,
+    Unit,
+    UnitConversion,
+    StockBalance,
+    StockBatch,
+    StockLedger,
+    StockTransfer,
+    StockTransferItem,
+    StockCount,
+    StockCountItem,
+    ItemType,
+    TransferStatus,
+    StockCountStatus,
+)
 from app.models.procurement import (
     Supplier,
     PurchaseRequest,
@@ -23,6 +39,7 @@ from app.models.closing import (
 )
 from app.models.recipe import Recipe, RecipeItem, ProductionOrder, ProductionConsumption, ProductionStatus
 from app.models.restaurant import DiningTable, Floor, RestaurantOrder, OrderItem, OrderStatus
+from app.models.customer import Customer, CustomerAddress, LoyaltyTransaction, QRSession, CustomerType, LoyaltyTransactionType
 from app.models.finance import ChartOfAccount, JournalEntry, JournalEntryLine, AccountsPayable, AccountType, JournalStatus
 from app.models.audit import AuditLog, IdempotencyRecord
 
@@ -30,19 +47,36 @@ __all__ = [
     "BaseModel",
     "Company",
     "Branch",
+    "Department",
     "Warehouse",
+    "StoreLocation",
     "BranchType",
     "User",
     "Role",
     "Permission",
     "RolePermission",
     "UserBranch",
+    "Staff",
+    "Attendance",
+    "Payroll",
+    "PayrollItem",
+    "StaffStatus",
+    "AttendanceStatus",
+    "PayrollStatus",
     "Item",
     "Category",
     "Unit",
+    "UnitConversion",
     "StockBalance",
+    "StockBatch",
     "StockLedger",
+    "StockTransfer",
+    "StockTransferItem",
+    "StockCount",
+    "StockCountItem",
     "ItemType",
+    "TransferStatus",
+    "StockCountStatus",
     "Supplier",
     "PurchaseRequest",
     "PurchaseRequestItem",
@@ -68,6 +102,12 @@ __all__ = [
     "RestaurantOrder",
     "OrderItem",
     "OrderStatus",
+    "Customer",
+    "CustomerAddress",
+    "LoyaltyTransaction",
+    "QRSession",
+    "CustomerType",
+    "LoyaltyTransactionType",
     "ChartOfAccount",
     "JournalEntry",
     "JournalEntryLine",

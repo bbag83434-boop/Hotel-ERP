@@ -5,8 +5,9 @@ import time
 import os
 import psutil
 from datetime import datetime
-from app.core.database import get_db
+from app.core.database import get_db, Base
 from app.core.config import settings
+import app.models  # register all models in metadata
 
 router = APIRouter()
 
@@ -61,7 +62,7 @@ def get_system_health(db: Session = Depends(get_db)):
         },
         "meta": {
             "project": settings.PROJECT_NAME,
-            "part": "PART 1 & 2 — FOUNDATION & DATABASE ENGINE"
+            "part": "PART 2 — DATABASE FOUNDATION & ENTERPRISE DOMAIN SCHEMA"
         },
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
@@ -103,6 +104,47 @@ def get_database_diagnostics(db: Session = Depends(get_db)):
             "error": {
                 "code": "DB_UNAVAILABLE",
                 "message": "Database connection check failed",
+                "details": str(e)
+            },
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
+@router.get("/db/schema", status_code=status.HTTP_200_OK)
+def get_database_schema_diagnostics(db: Session = Depends(get_db)):
+    try:
+        tables_meta = {}
+        for table_name, table in Base.metadata.tables.items():
+            tables_meta[table_name] = {
+                "columnsCount": len(table.columns),
+                "foreignKeys": [str(fk.target_fullname) for fk in table.foreign_keys],
+                "indexes": [idx.name for idx in table.indexes if idx.name]
+            }
+
+        return {
+            "success": True,
+            "data": {
+                "orm": "SQLAlchemy 2.0 Declarative",
+                "database": "Neon PostgreSQL",
+                "totalRegisteredEntities": len(tables_meta),
+                "tables": list(tables_meta.keys()),
+                "schemaMetadata": tables_meta,
+                "multiTenantIsolation": {
+                    "enabled": True,
+                    "tenantKeys": ["company_id", "branch_id"]
+                },
+                "numericPrecision": {
+                    "monetary": "NUMERIC(14,2)",
+                    "stockQuantity": "NUMERIC(14,4)"
+                }
+            },
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": {
+                "code": "SCHEMA_INSPECTION_ERROR",
+                "message": "Failed to inspect database schema metadata",
                 "details": str(e)
             },
             "timestamp": datetime.utcnow().isoformat() + "Z"
