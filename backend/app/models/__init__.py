@@ -1,7 +1,18 @@
 from app.models.base import BaseModel
-from app.models.organization import Company, Branch, Department, Warehouse, StoreLocation, BranchType
 from app.models.user import User, Role, Permission, RolePermission, UserBranch
-from app.models.hr import Staff, Attendance, Payroll, PayrollItem, StaffStatus, AttendanceStatus, PayrollStatus
+from app.models.organization import Company, Branch, Department, Warehouse, StoreLocation, BranchType
+from app.models.hr import (
+    Staff,
+    Attendance,
+    Payroll,
+    PayrollItem,
+    Shift,
+    LeaveType,
+    LeaveRequest,
+    StaffStatus,
+    AttendanceStatus,
+    PayrollStatus,
+)
 from app.models.inventory import (
     Item,
     Category,
@@ -60,6 +71,9 @@ __all__ = [
     "Attendance",
     "Payroll",
     "PayrollItem",
+    "Shift",
+    "LeaveType",
+    "LeaveRequest",
     "StaffStatus",
     "AttendanceStatus",
     "PayrollStatus",

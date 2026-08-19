@@ -56,6 +56,30 @@ class User(BaseModel):
     role = relationship("Role", back_populates="users")
     branches = relationship("UserBranch", back_populates="user", cascade="all, delete-orphan")
 
+    @property
+    def companyId(self):
+        return self.company_id
+
+    @companyId.setter
+    def companyId(self, value):
+        self.company_id = value
+
+    @property
+    def roleId(self):
+        return self.role_id
+
+    @property
+    def firstName(self):
+        return self.first_name
+
+    @property
+    def lastName(self):
+        return self.last_name
+
+    @property
+    def isActive(self):
+        return self.is_active
+
 class UserBranch(Base):
     __tablename__ = "user_branches"
 

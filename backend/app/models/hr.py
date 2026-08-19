@@ -1,6 +1,6 @@
 import enum
 from decimal import Decimal
-from sqlalchemy import Column, String, Boolean, ForeignKey, Numeric, Enum, Date, Time, Text, Integer, Index
+from sqlalchemy import Column, String, Boolean, ForeignKey, Numeric, Enum, Date, Time, DateTime, Text, Integer, Index
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
@@ -115,3 +115,63 @@ class PayrollItem(BaseModel):
 
     payroll = relationship("Payroll", back_populates="items")
     staff = relationship("Staff", back_populates="payroll_items")
+
+
+class Shift(BaseModel):
+    __tablename__ = "hr_shifts"
+
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column("branchId", String(36), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True, index=True)
+    
+    name = Column(String(100), nullable=False)
+    code = Column(String(50), nullable=False)
+    start_time = Column("startTime", String(10), nullable=False)
+    end_time = Column("endTime", String(10), nullable=False)
+    grace_period_mins = Column("gracePeriodMins", Integer, default=15, nullable=False)
+    is_active = Column("isActive", Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        Index("idx_shift_company_code", "companyId", "code"),
+    )
+
+
+class LeaveType(BaseModel):
+    __tablename__ = "hr_leave_types"
+
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    name = Column(String(100), nullable=False)
+    code = Column(String(50), nullable=False)
+    days_allowed = Column("daysAllowed", Integer, default=14, nullable=False)
+    is_paid = Column("isPaid", Boolean, default=True, nullable=False)
+
+    leave_requests = relationship("LeaveRequest", back_populates="leave_type")
+
+    __table_args__ = (
+        Index("idx_leave_type_company_code", "companyId", "code"),
+    )
+
+
+class LeaveRequest(BaseModel):
+    __tablename__ = "hr_leave_requests"
+
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column("branchId", String(36), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True, index=True)
+    employee_id = Column("employeeId", String(36), nullable=False, index=True)
+    leave_type_id = Column("leaveTypeId", String(36), ForeignKey("hr_leave_types.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    start_date = Column("startDate", Date, nullable=False)
+    end_date = Column("endDate", Date, nullable=False)
+    total_days = Column("totalDays", Integer, default=1, nullable=False)
+    reason = Column(Text, nullable=False)
+    status = Column(String(50), default="PENDING", nullable=False)
+    approved_by_id = Column("approvedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column("approvedAt", DateTime, nullable=True)
+    rejection_reason = Column("rejectionReason", Text, nullable=True)
+
+    leave_type = relationship("LeaveType", back_populates="leave_requests")
+
+    __table_args__ = (
+        Index("idx_leave_req_company_employee", "companyId", "employeeId"),
+    )
+

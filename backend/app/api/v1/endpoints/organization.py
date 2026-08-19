@@ -250,6 +250,43 @@ def create_warehouse(
     db.refresh(warehouse)
     return warehouse
 
+@router.get("/warehouses/{warehouse_id}", response_model=WarehouseResponse, status_code=status.HTTP_200_OK)
+def get_warehouse(
+    warehouse_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    if not warehouse:
+        raise NotFoundException("Warehouse", warehouse_id)
+    return warehouse
+
+@router.put("/warehouses/{warehouse_id}", response_model=WarehouseResponse, status_code=status.HTTP_200_OK)
+def update_warehouse(
+    warehouse_id: str,
+    payload: WarehouseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("organization:update"))
+):
+    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    if not warehouse:
+        raise NotFoundException("Warehouse", warehouse_id)
+
+    if payload.name is not None:
+        warehouse.name = payload.name
+    if payload.code is not None:
+        warehouse.code = payload.code.strip().upper()
+    if payload.branch_id is not None:
+        warehouse.branch_id = payload.branch_id
+    if payload.is_central is not None:
+        warehouse.is_central = payload.is_central
+    if payload.is_active is not None:
+        warehouse.is_active = payload.is_active
+
+    db.commit()
+    db.refresh(warehouse)
+    return warehouse
+
 # --- DEPARTMENTS ---
 
 @router.get("/departments", response_model=List[DepartmentResponse], status_code=status.HTTP_200_OK)
@@ -282,6 +319,39 @@ def create_department(
         is_active=payload.is_active
     )
     db.add(dept)
+    db.commit()
+    db.refresh(dept)
+    return dept
+
+@router.get("/departments/{department_id}", response_model=DepartmentResponse, status_code=status.HTTP_200_OK)
+def get_department(
+    department_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    dept = db.query(Department).filter(Department.id == department_id).first()
+    if not dept:
+        raise NotFoundException("Department", department_id)
+    return dept
+
+@router.put("/departments/{department_id}", response_model=DepartmentResponse, status_code=status.HTTP_200_OK)
+def update_department(
+    department_id: str,
+    payload: DepartmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("organization:update"))
+):
+    dept = db.query(Department).filter(Department.id == department_id).first()
+    if not dept:
+        raise NotFoundException("Department", department_id)
+
+    if payload.name is not None:
+        dept.name = payload.name
+    if payload.code is not None:
+        dept.code = payload.code.strip().upper()
+    if payload.is_active is not None:
+        dept.is_active = payload.is_active
+
     db.commit()
     db.refresh(dept)
     return dept
@@ -319,10 +389,13 @@ def create_staff(
 
     joining = date.today()
     if payload.joining_date:
-        try:
-            joining = datetime.strptime(payload.joining_date, "%Y-%m-%d").date()
-        except Exception:
-            joining = date.today()
+        if isinstance(payload.joining_date, date):
+            joining = payload.joining_date
+        else:
+            try:
+                joining = datetime.strptime(str(payload.joining_date), "%Y-%m-%d").date()
+            except Exception:
+                joining = date.today()
 
     staff_obj = Staff(
         company_id=company_id,
@@ -342,6 +415,55 @@ def create_staff(
         is_active=payload.is_active
     )
     db.add(staff_obj)
+    db.commit()
+    db.refresh(staff_obj)
+    return staff_obj
+
+@router.get("/staff/{staff_id}", response_model=StaffResponse, status_code=status.HTTP_200_OK)
+def get_staff(
+    staff_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    staff_obj = db.query(Staff).filter(Staff.id == staff_id).first()
+    if not staff_obj:
+        raise NotFoundException("Staff", staff_id)
+    return staff_obj
+
+@router.put("/staff/{staff_id}", response_model=StaffResponse, status_code=status.HTTP_200_OK)
+def update_staff(
+    staff_id: str,
+    payload: StaffUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("organization:update"))
+):
+    staff_obj = db.query(Staff).filter(Staff.id == staff_id).first()
+    if not staff_obj:
+        raise NotFoundException("Staff", staff_id)
+
+    if payload.first_name is not None:
+        staff_obj.first_name = payload.first_name
+    if payload.last_name is not None:
+        staff_obj.last_name = payload.last_name
+    if payload.email is not None:
+        staff_obj.email = payload.email
+    if payload.phone is not None:
+        staff_obj.phone = payload.phone
+    if payload.designation is not None:
+        staff_obj.designation = payload.designation
+    if payload.department is not None:
+        staff_obj.department = payload.department
+    if payload.branch_id is not None:
+        staff_obj.branch_id = payload.branch_id
+    if payload.base_salary is not None:
+        staff_obj.base_salary = Decimal(str(payload.base_salary))
+    if payload.hourly_rate is not None:
+        staff_obj.hourly_rate = Decimal(str(payload.hourly_rate))
+    if payload.status is not None:
+        staff_obj.status = payload.status
+    if payload.is_active is not None:
+        staff_obj.is_active = payload.is_active
+
     db.commit()
     db.refresh(staff_obj)
     return staff_obj

@@ -1,7 +1,9 @@
+from fastapi.encoders import jsonable_encoder
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+
 from contextlib import asynccontextmanager
 import time
 import logging
@@ -73,7 +75,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "error": {
                 "code": "VALIDATION_ERROR",
                 "message": "Input validation failed",
-                "details": exc.errors()
+                "details": jsonable_encoder(exc.errors())
             },
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         }

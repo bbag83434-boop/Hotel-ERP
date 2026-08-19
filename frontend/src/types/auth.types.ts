@@ -1,6 +1,7 @@
 export interface Role {
   id: string;
   name: string;
+  description?: string;
   permissions: string[];
 }
 
@@ -10,11 +11,12 @@ export interface Company {
   code: string;
 }
 
-export interface Branch {
+export interface BranchScopeInfo {
   id: string;
   name: string;
   code: string;
-  type: 'RESTAURANT' | 'HOTEL' | 'HYBRID';
+  type: string;
+  is_default?: boolean;
   isDefault?: boolean;
 }
 
@@ -24,22 +26,31 @@ export interface Department {
   code: string;
 }
 
-export interface User {
+export interface UserProfile {
   id: string;
   email: string;
   username: string;
-  firstName: string;
+  first_name?: string;
+  firstName?: string;
+  last_name?: string;
   lastName?: string;
   avatarUrl?: string;
-  role: Role;
-  department?: Department | null;
-  company: Company | null;
-  branches: Branch[];
-  defaultBranch: Branch | null;
+  role: string | Role;
+  is_active?: boolean;
+  isActive?: boolean;
+  company_id?: string | null;
+  companyId?: string | null;
+  permissions: string[];
+  assigned_branches?: BranchScopeInfo[];
+  assignedBranches?: BranchScopeInfo[];
+  active_branch?: BranchScopeInfo | null;
+  activeBranch?: BranchScopeInfo | null;
 }
 
+export type User = UserProfile;
+
 export interface AuthState {
-  user: User | null;
+  user: UserProfile | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;

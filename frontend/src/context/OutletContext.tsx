@@ -1,8 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Outlet } from '../types';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { Outlet, BranchType } from '../types';
 import { apiClient } from '../api/client';
+import { useAuth } from './AuthContext';
 
 export interface BiMonthlyPeriodInfo {
   periodType: 'FIRST_HALF' | 'SECOND_HALF';
@@ -48,6 +49,18 @@ export function getCurrentClosingPeriod(): BiMonthlyPeriodInfo {
   };
 }
 
+export function mapBranchType(type?: string, code?: string): BranchType {
+  if (!type && !code) return 'RESTAURANT_OUTLET';
+  const t = (type || '').toUpperCase();
+  const c = (code || '').toUpperCase();
+  if (t === 'HEAD_OFFICE' || c.includes('HQ') || t === 'HYBRID') return 'HEAD_OFFICE';
+  if (t === 'CENTRAL_STORE' || c.includes('CS-') || c.startsWith('HUB-')) return 'CENTRAL_STORE';
+  if (t === 'DESSERT_KITCHEN' || c.includes('DK-') || c.startsWith('SWEET-')) return 'DESSERT_KITCHEN';
+  if (t === 'HOTEL') return 'HOTEL';
+  if (t === 'HYBRID') return 'HYBRID';
+  return 'RESTAURANT_OUTLET';
+}
+
 interface OutletContextType {
   outlets: Outlet[];
   currentOutlet: Outlet;
@@ -56,37 +69,40 @@ interface OutletContextType {
   isLoading: boolean;
   isHeadOffice: boolean;
   closingInfo: BiMonthlyPeriodInfo;
+  refreshOutlets: () => Promise<void>;
 }
 
-// 14+ Baseline Multi-Outlet Topology matching Master Blueprint
+// 14+ Baseline Multi-Outlet Topology using valid PostgreSQL UUIDs matching live database
 const DEFAULT_TOPOLOGY: Outlet[] = [
-  { id: 'hq', code: 'HQ', name: 'Head Office (Central Control)', type: 'HEAD_OFFICE', isActive: true },
-  { id: 'cs-01', code: 'CS-01', name: 'Central Store (Warehouse)', type: 'CENTRAL_STORE', isActive: true },
-  { id: 'dk-01', code: 'DK-01', name: 'Dessert Kitchen (Sweet Unit)', type: 'DESSERT_KITCHEN', isActive: true },
-  { id: 'out-01', code: 'OUT-01', name: '01. Heritage Grand Bistro', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-02', code: 'OUT-02', name: '02. Palace Fine Dine', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-03', code: 'OUT-03', name: '03. Royal Banquet & Grill', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-04', code: 'OUT-04', name: '04. Lakeview Rooftop Lounge', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-05', code: 'OUT-05', name: '05. Golden Palm Cafe', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-06', code: 'OUT-06', name: '06. Spice Route Express', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-07', code: 'OUT-07', name: '07. City Heights Restaurant', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-08', code: 'OUT-08', name: '08. Emerald Bay Seafood', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-09', code: 'OUT-09', name: '09. Sapphire Court Trattoria', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-10', code: 'OUT-10', name: '10. Grand Pavilion Tavern', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-11', code: 'OUT-11', name: '11. Sunset Terrace Grill', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-12', code: 'OUT-12', name: '12. Silver Oak Coffee House', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-13', code: 'OUT-13', name: '13. Velvet Lounge & Bar', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'out-14', code: 'OUT-14', name: '14. Crown & Anchor Pub', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: 'fc4715cd-5a35-4d4c-9472-456356de0660', code: 'BR-HQ-01', name: 'Main HQ & Resort (Central Control)', type: 'HEAD_OFFICE', isActive: true },
+  { id: 'bd1f233e-fa09-45ba-bd1a-7247bd359dc0', code: 'HUB-0F0987', name: 'Apex Central Warehouse (CS-01)', type: 'CENTRAL_STORE', isActive: true },
+  { id: '5cb45b8e-a90c-45c9-84f3-c43db7121beb', code: 'SWEET-HUB-406C8A', name: 'Apex Central Bakery & Sweet Kitchen (DK-01)', type: 'DESSERT_KITCHEN', isActive: true },
+  { id: '1cc67b61-070a-49ac-8a19-8734f479e755', code: 'BR-BISTRO-01', name: '01. Royal Heritage Bistro & Lounge', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: 'c90e1dfd-0538-43bd-aab5-055f4714aa85', code: 'BR-HOTEL-01', name: '02. Grand Heritage Resort & Palace', type: 'HOTEL', isActive: true },
+  { id: '8cacf01e-c586-4efe-91c8-8759741bad34', code: 'BR-OUTLET-A', name: '03. Downtown Palace Fine Dine', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: 'e8715900-9b2e-441b-ac2c-e6be8fbd7325', code: 'BR-OUTLET-B', name: '04. Heritage Sweet & Bakery Shop', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: '6b093f72-c526-40c4-b49f-6babff145e0f', code: 'OUT-070BFD', name: '05. Apex Seaside Bistro Premium', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: '7f126117-cced-4649-93be-575361d555ed', code: 'OUT-117407', name: '06. Apex Fine Dining Lakeview', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: '770ddd92-9bfc-4adb-8e86-3c8fcc3349ed', code: 'OUT-3BBCD4', name: '07. Royal Banquet & Grill', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: '6025c3b5-7c4b-4ed4-a6e3-5b1f56b23197', code: 'OUT-4017CC', name: '08. Golden Palm Grand Cafe', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: '2d303c00-1961-41cc-a594-47a820f81886', code: 'OUT-425ACC', name: '09. Spice Route Express', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: '906ed86b-c7a2-409a-9f08-31f0eb1ddbb3', code: 'OUT-AAE4BA', name: '10. City Heights Rooftop Bar', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: '48494947-90d6-4d6a-b86c-41600aca7461', code: 'OUT-B6F404', name: '11. Emerald Bay Seafood Trattoria', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: 'e5a36cfe-d7dd-4e59-916d-dda136373a68', code: 'OUT-B88B0C', name: '12. Grand Pavilion Tavern', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: 'a439f316-4dc2-4092-87f8-4f1fdc43b3bd', code: 'OUT-D7DA36', name: '13. Silver Oak Coffee House', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: 'ee670ddf-aef9-4e62-b1e7-ebe563efc3c8', code: 'OUT-E2F690', name: '14. Velvet Crown & Anchor Pub', type: 'RESTAURANT_OUTLET', isActive: true },
 ];
 
 const OutletContext = createContext<OutletContextType | undefined>(undefined);
 
 export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, isAuthenticated } = useAuth();
   const [outlets, setOutlets] = useState<Outlet[]>(DEFAULT_TOPOLOGY);
   const [activeOutlet, setActiveOutletState] = useState<Outlet>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('apex_active_outlet_code');
-      const match = DEFAULT_TOPOLOGY.find((o) => o.code === saved);
+      const savedId = localStorage.getItem('apex_active_outlet_id');
+      const savedCode = localStorage.getItem('apex_active_outlet_code');
+      const match = DEFAULT_TOPOLOGY.find((o) => o.id === savedId || o.code === savedCode);
       if (match) return match;
     }
     return DEFAULT_TOPOLOGY[0];
@@ -94,38 +110,105 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isLoading, setIsLoading] = useState(false);
   const closingInfo = getCurrentClosingPeriod();
 
-  useEffect(() => {
-    // Attempt to load dynamic outlet topology from database health endpoint
+  const fetchOutlets = useCallback(async () => {
     setIsLoading(true);
-    apiClient
-      .get('/health/outlets')
-      .then((res) => {
-        if (res.data?.success && res.data?.data?.outlets?.length > 0) {
-          const dbOutlets: Outlet[] = res.data.data.outlets.map((b: any) => ({
-            id: b.id,
-            code: b.code,
-            name: b.name,
-            type: b.type === 'HOTEL' ? 'HOTEL' : b.type === 'HYBRID' ? 'HYBRID' : 'RESTAURANT_OUTLET',
-            isActive: b.isActive ?? true,
-          }));
+    try {
+      // If user has assigned branches in profile, prioritize them
+      const assignedBranches = user?.assigned_branches || user?.assignedBranches;
+      if (assignedBranches && assignedBranches.length > 0) {
+        const mappedUserBranches: Outlet[] = assignedBranches.map((b) => ({
+          id: b.id,
+          code: b.code,
+          name: b.name,
+          type: mapBranchType(b.type, b.code),
+          isActive: true,
+        }));
+        setOutlets(mappedUserBranches);
 
-          // Merge with core Head Office, Central Store, and Dessert Kitchen
-          const combined = [
-            DEFAULT_TOPOLOGY[0],
-            DEFAULT_TOPOLOGY[1],
-            DEFAULT_TOPOLOGY[2],
-            ...dbOutlets.filter((o) => !['HQ', 'CS-01', 'DK-01'].includes(o.code)),
-          ];
-          setOutlets(combined);
+        // Sync active branch if set
+        const activeBr = user?.active_branch || user?.activeBranch;
+        if (activeBr) {
+          const match = mappedUserBranches.find((o) => o.id === activeBr.id || o.code === activeBr.code);
+          if (match) {
+            setActiveOutletState(match);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('apex_active_outlet_id', match.id);
+              localStorage.setItem('apex_active_outlet_code', match.code);
+            }
+          }
         }
-      })
-      .catch(() => {
-        // Fallback to default 14-outlet topology
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
-  }, []);
+        return;
+      }
+
+      // If authenticated, fetch full branch list from /organization/branches
+      if (isAuthenticated) {
+        try {
+          const orgRes = await apiClient.get('/organization/branches');
+          if (Array.isArray(orgRes.data) && orgRes.data.length > 0) {
+            const liveBranches: Outlet[] = orgRes.data.map((b: any) => ({
+              id: b.id,
+              code: b.code,
+              name: b.name,
+              type: mapBranchType(b.type, b.code),
+              isActive: b.is_active ?? true,
+            }));
+            setOutlets(liveBranches);
+
+            // Re-sync current active outlet if it exists in live list
+            const savedId = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_id') : null;
+            const savedCode = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_code') : null;
+            const matched = liveBranches.find((o) => o.id === savedId || o.code === savedCode);
+            if (matched) {
+              setActiveOutletState(matched);
+            } else if (liveBranches.length > 0) {
+              setActiveOutletState(liveBranches[0]);
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('apex_active_outlet_id', liveBranches[0].id);
+                localStorage.setItem('apex_active_outlet_code', liveBranches[0].code);
+              }
+            }
+            return;
+          }
+        } catch {
+          // Fall through to public health check if organization endpoint is restricted
+        }
+      }
+
+      // Public health outlets endpoint fallback
+      const res = await apiClient.get('/health/outlets');
+      if (res.data?.success && res.data?.data?.outlets?.length > 0) {
+        const dbOutlets: Outlet[] = res.data.data.outlets.map((b: any) => ({
+          id: b.id,
+          code: b.code,
+          name: b.name,
+          type: mapBranchType(b.type, b.code),
+          isActive: b.isActive ?? true,
+        }));
+        setOutlets(dbOutlets);
+
+        const savedId = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_id') : null;
+        const savedCode = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_code') : null;
+        const matched = dbOutlets.find((o) => o.id === savedId || o.code === savedCode);
+        if (matched) {
+          setActiveOutletState(matched);
+        } else if (dbOutlets.length > 0) {
+          setActiveOutletState(dbOutlets[0]);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('apex_active_outlet_id', dbOutlets[0].id);
+            localStorage.setItem('apex_active_outlet_code', dbOutlets[0].code);
+          }
+        }
+      }
+    } catch {
+      // Keep DEFAULT_TOPOLOGY fallback with real UUIDs
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user, isAuthenticated]);
+
+  useEffect(() => {
+    fetchOutlets();
+  }, [fetchOutlets]);
 
   const setActiveOutlet = (outlet: Outlet) => {
     setActiveOutletState(outlet);
@@ -147,6 +230,7 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isLoading,
         isHeadOffice,
         closingInfo,
+        refreshOutlets: fetchOutlets,
       }}
     >
       {children}

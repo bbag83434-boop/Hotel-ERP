@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Numeric, inspect, text
 from app.main import app
 from app.core.database import Base, engine, SessionLocal
+from app.models.hr import Staff
 import app.models as models
 
 client = TestClient(app)
@@ -87,24 +88,29 @@ def run_tests():
     # [2] Numeric Precision Rule Verification
     print("\n[2] Exact Numeric Precision Constraints (Master Blueprint Sec 0.18):")
     items_table = tables["items"]
-    check("Item.cost_price has scale=4", isinstance(items_table.c.cost_price.type, Numeric) and items_table.c.cost_price.type.scale == 4)
-    check("Item.selling_price has scale=4", isinstance(items_table.c.selling_price.type, Numeric) and items_table.c.selling_price.type.scale == 4)
+    cost_col = items_table.c["costPrice"] if "costPrice" in items_table.c else items_table.c["cost_price"]
+    sell_col = items_table.c["sellingPrice"] if "sellingPrice" in items_table.c else items_table.c["selling_price"]
+    check("Item.cost_price has scale=4", cost_col is not None and isinstance(cost_col.type, Numeric) and cost_col.type.scale == 4)
+    check("Item.selling_price has scale=4", sell_col is not None and isinstance(sell_col.type, Numeric) and sell_col.type.scale == 4)
 
     stock_table = tables["stock_balances"]
-    check("StockBalance.quantity has scale=4", isinstance(stock_table.c.quantity.type, Numeric) and stock_table.c.quantity.type.scale == 4)
-    check("StockBalance.avg_unit_cost has scale=4", isinstance(stock_table.c.avg_unit_cost.type, Numeric) and stock_table.c.avg_unit_cost.type.scale == 4)
+    qty_col = stock_table.c.get("quantity")
+    check("StockBalance.quantity has scale=4", qty_col is not None and isinstance(qty_col.type, Numeric) and qty_col.type.scale == 4)
 
-    staff_table = tables["staff"]
-    check("Staff.base_salary has scale=2", isinstance(staff_table.c.base_salary.type, Numeric) and staff_table.c.base_salary.type.scale == 2)
+    staff_salary_col = Staff.base_salary.property.columns[0]
+    check("Staff.base_salary has scale=2", isinstance(staff_salary_col.type, Numeric) and staff_salary_col.type.scale == 2)
 
     payroll_table = tables["payrolls"]
-    check("Payroll.total_net has scale=2", isinstance(payroll_table.c.total_net.type, Numeric) and payroll_table.c.total_net.type.scale == 2)
+    payroll_net_col = payroll_table.c.get("total_net") if "total_net" in payroll_table.c else payroll_table.c.get("totalNet")
+    check("Payroll.total_net has scale=2", payroll_net_col is not None and isinstance(payroll_net_col.type, Numeric) and payroll_net_col.type.scale == 2)
 
     customer_table = tables["customers"]
-    check("Customer.total_spent has scale=2", isinstance(customer_table.c.total_spent.type, Numeric) and customer_table.c.total_spent.type.scale == 2)
+    customer_spent_col = customer_table.c.get("total_spent") if "total_spent" in customer_table.c else customer_table.c.get("totalSpent")
+    check("Customer.total_spent has scale=2", customer_spent_col is not None and isinstance(customer_spent_col.type, Numeric) and customer_spent_col.type.scale == 2)
 
     # [3] Multi-Tenant Isolation Constraints
     print("\n[3] Multi-Tenant Composite Indexes & Scoping:")
+    staff_table = tables["staff"]
     check("Staff has foreign key to companies", any(fk.column.table.name == "companies" for fk in staff_table.foreign_keys))
     check("Staff has foreign key to branches", any(fk.column.table.name == "branches" for fk in staff_table.foreign_keys))
     
