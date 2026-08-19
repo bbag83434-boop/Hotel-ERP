@@ -4,9 +4,9 @@ import React from 'react';
 import {
   LayoutDashboard,
   Building2,
+  Boxes,
   ShoppingCart,
   CalendarDays,
-  Activity,
 } from 'lucide-react';
 
 interface BottomNavProps {
@@ -16,15 +16,15 @@ interface BottomNavProps {
 
 export const BottomNav: React.FC<BottomNavProps> = ({ activeTab = 'dashboard', setActiveTab }) => {
   const navItems = [
-    { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
-    { id: 'outlets', label: 'Outlets', icon: Building2 },
-    { id: 'purchasing', label: 'Central PO', icon: ShoppingCart },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'organization', label: 'Outlets', icon: Building2 },
+    { id: 'inventory', label: 'Stock', icon: Boxes },
+    { id: 'purchase', label: 'Purchase', icon: ShoppingCart },
     { id: 'closing', label: 'Closing', icon: CalendarDays },
-    { id: 'diagnostics', label: 'Health', icon: Activity },
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-lg border-t border-[rgba(45,45,45,0.08)] pb-safe sm:hidden shadow-[0_-2px_12px_rgba(45,45,45,0.04)]">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-lg border-t border-[rgba(45,45,45,0.08)] pb-safe md:hidden shadow-[0_-2px_12px_rgba(45,45,45,0.04)]">
       <div className="flex items-center justify-around py-2 px-1">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -43,7 +43,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab = 'dashboard', s
                   <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#B8862D]" />
                 )}
               </div>
-              <span className={`text-[10px] mt-1 font-medium ${isActive ? 'font-semibold' : ''}`}>
+              <span className={`text-[10px] mt-1 font-medium ${isActive ? 'font-semibold text-[#B8862D]' : ''}`}>
                 {item.label}
               </span>
             </button>

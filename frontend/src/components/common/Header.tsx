@@ -12,9 +12,14 @@ import {
   ShieldCheck,
   Sparkles,
   RefreshCw,
+  Menu,
 } from 'lucide-react';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  onMenuClick?: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const { outlets, activeOutlet, setActiveOutlet, isHeadOffice } = useOutlet();
   const { isInstallable, installPWA, isOnline, updateAvailable, applyUpdate } = usePWA();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -22,8 +27,18 @@ export const Header: React.FC = () => {
   return (
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-[rgba(45,45,45,0.08)] px-4 py-3 shadow-[0_2px_12px_rgba(45,45,45,0.03)]">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-        {/* Brand & Logo */}
+        {/* Brand & Mobile Menu Button */}
         <div className="flex items-center gap-2.5">
+          {onMenuClick && (
+            <button
+              onClick={onMenuClick}
+              className="md:hidden p-2 rounded-xl text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5] border border-[rgba(45,45,45,0.1)] active:scale-95"
+              aria-label="Open Navigation Menu"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+          )}
+
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#C79A3B] to-[#B8862D] flex items-center justify-center shadow-md shadow-[#C79A3B]/20">
             <Sparkles className="w-5 h-5 text-white" />
           </div>
