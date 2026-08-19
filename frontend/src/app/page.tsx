@@ -22,13 +22,14 @@ import {
   Sparkles,
 } from 'lucide-react';
 import OrganizationManager from '@/components/organization/OrganizationManager';
+import InventoryManager from '@/components/inventory/InventoryManager';
 
 export default function DashboardPage() {
   const { currentOutlet, outlets, closingInfo } = useOutlet();
   const { isOnline } = usePWA();
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [loadingHealth, setLoadingHealth] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<'organization' | 'topology' | 'purchase' | 'closing' | 'telemetry'>('organization');
+  const [activeTab, setActiveTab] = useState<'organization' | 'inventory' | 'topology' | 'purchase' | 'closing' | 'telemetry'>('inventory');
 
   useEffect(() => {
     async function fetchHealth() {
@@ -141,6 +142,16 @@ export default function DashboardPage() {
       {/* Interactive Tabs */}
       <div className="flex border-b border-[rgba(45,45,45,0.08)] space-x-4 overflow-x-auto">
         <button
+          onClick={() => setActiveTab('inventory')}
+          className={`pb-3 text-sm font-semibold transition-all border-b-2 whitespace-nowrap ${
+            activeTab === 'inventory'
+              ? 'border-[#C79A3B] text-[#B8862D]'
+              : 'border-transparent text-[#707070] hover:text-[#1C1C1C]'
+          }`}
+        >
+          Inventory & Commissary
+        </button>
+        <button
           onClick={() => setActiveTab('organization')}
           className={`pb-3 text-sm font-semibold transition-all border-b-2 whitespace-nowrap ${
             activeTab === 'organization'
@@ -191,6 +202,13 @@ export default function DashboardPage() {
           Live Backend Telemetry
         </button>
       </div>
+
+      {/* Tab: Inventory & Commissary */}
+      {activeTab === 'inventory' && (
+        <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+          <InventoryManager />
+        </div>
+      )}
 
       {/* Tab: Organization Management */}
       {activeTab === 'organization' && (
