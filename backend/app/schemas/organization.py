@@ -182,3 +182,38 @@ class UserAssignBranchRequest(BaseModel):
 class UserAssignRoleRequest(BaseModel):
     user_id: str
     role_id: str
+
+# Overview & Multi-Outlet Analytics Schemas
+class OutletSummaryItem(BaseModel):
+    id: str
+    name: str
+    code: str
+    type: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    is_active: bool = True
+    warehouses_count: int = 0
+    departments_count: int = 0
+    staff_count: int = 0
+    active_staff_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+class OrganizationOverviewResponse(BaseModel):
+    company: Optional[CompanyResponse] = None
+    total_branches: int
+    active_branches: int
+    total_warehouses: int
+    central_warehouses: int
+    total_departments: int
+    total_staff: int
+    active_staff: int
+    branch_type_counts: dict
+    outlets: List[OutletSummaryItem]
+
+class BranchDetailResponse(BranchResponse):
+    warehouses: List[WarehouseResponse] = []
+    departments: List[DepartmentResponse] = []
+    staff: List[StaffResponse] = []

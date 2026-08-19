@@ -2,7 +2,15 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { organizationApi } from '@/api/organization';
-import { Branch, Warehouse, Department, Staff } from '@/types/organization.types';
+import {
+  Company,
+  Branch,
+  Warehouse,
+  Department,
+  Staff,
+  OrganizationOverview,
+  BranchDetail,
+} from '@/types/organization.types';
 import { useOutlet } from '@/context/OutletContext';
 import {
   Building2,
@@ -21,17 +29,34 @@ import {
   ShieldCheck,
   ChevronRight,
   Filter,
+  Edit3,
+  Eye,
+  Layers,
+  Compass,
+  Settings,
+  Sparkles,
+  ExternalLink,
 } from 'lucide-react';
 
 export const OrganizationManager: React.FC = () => {
-  const { currentOutlet, refreshOutlets } = useOutlet();
+  const { currentOutlet, activeOutlet, setActiveOutlet, refreshOutlets } = useOutlet();
   const [subTab, setSubTab] = useState<'branches' | 'warehouses' | 'departments' | 'staff'>('branches');
-  
+
   // Entity State
+  const [overview, setOverview] = useState<OrganizationOverview | null>(null);
+  const [company, setCompany] = useState<Company | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
+
+  // Branch Detail Drawer / Inspect State
+  const [selectedBranchDetail, setSelectedBranchDetail] = useState<BranchDetail | null>(null);
+  const [loadingBranchDetail, setLoadingBranchDetail] = useState<boolean>(false);
+
+  // Edit Modals State
+  const [editingCompany, setEditingCompany] = useState<boolean>(false);
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
 
   // Loading & Feedback State
   const [loading, setLoading] = useState<boolean>(true);
@@ -40,7 +65,7 @@ export const OrganizationManager: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
 
-  // Form states
+  // Form states for Creation
   const [branchForm, setBranchForm] = useState({ name: '', code: '', type: 'RESTAURANT', email: '', phone: '', address: '' });
   const [warehouseForm, setWarehouseForm] = useState({ name: '', code: '', branch_id: '', is_central: false });
   const [deptForm, setDeptForm] = useState({ name: '', code: '', branch_id: '' });
@@ -58,16 +83,52 @@ export const OrganizationManager: React.FC = () => {
     status: 'ACTIVE',
   });
 
+  // Company Edit Form State
+  const [companyForm, setCompanyForm] = useState({
+    name: '',
+    code: '',
+    email: '',
+    phone: '',
+    address: '',
+    logo_url: '',
+  });
+
+  // Branch Edit Form State
+  const [branchEditForm, setBranchEditForm] = useState({
+    name: '',
+    code: '',
+    type: 'RESTAURANT',
+    email: '',
+    phone: '',
+    address: '',
+    is_active: true,
+  });
+
   const loadAllData = useCallback(async () => {
     setLoading(true);
     setFeedback(null);
     try {
-      const [brData, whData, deptData, staffData] = await Promise.all([
+      const [overviewData, compData, brData, whData, deptData, staffData] = await Promise.all([
+        organizationApi.getOverview().catch(() => null),
+        organizationApi.getCompany().catch(() => null),
         organizationApi.getBranches().catch(() => []),
         organizationApi.getWarehouses().catch(() => []),
         organizationApi.getDepartments().catch(() => []),
         organizationApi.getStaff().catch(() => []),
       ]);
+
+      if (overviewData) setOverview(overviewData);
+      if (compData) {
+        setCompany(compData);
+        setCompanyForm({
+          name: compData.name || '',
+          code: compData.code || '',
+          email: compData.email || '',
+          phone: compData.phone || '',
+          address: compData.address || '',
+          logo_url: compData.logo_url || '',
+        });
+      }
       setBranches(brData);
       setWarehouses(whData);
       setDepartments(deptData);
@@ -83,7 +144,7 @@ export const OrganizationManager: React.FC = () => {
     loadAllData();
   }, [loadAllData]);
 
-  // Set default branch for forms when branches load
+  // Set default branch for creation forms
   useEffect(() => {
     if (branches.length > 0) {
       const defaultId = currentOutlet?.id || branches[0].id;
@@ -92,6 +153,22 @@ export const OrganizationManager: React.FC = () => {
       setStaffForm((prev) => ({ ...prev, branch_id: prev.branch_id || defaultId }));
     }
   }, [branches, currentOutlet]);
+
+  const handleUpdateCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setActionLoading(true);
+    try {
+      const updated = await organizationApi.updateCompany(companyForm);
+      setCompany(updated);
+      setEditingCompany(false);
+      setFeedback({ type: 'success', message: 'Company master profile updated successfully.' });
+      await loadAllData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Failed to update company' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const handleCreateBranch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,6 +184,35 @@ export const OrganizationManager: React.FC = () => {
       setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Branch creation failed' });
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleEditBranchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBranch) return;
+    setActionLoading(true);
+    try {
+      await organizationApi.updateBranch(editingBranch.id, branchEditForm);
+      setFeedback({ type: 'success', message: `Branch "${branchEditForm.name}" updated successfully.` });
+      setEditingBranch(null);
+      await loadAllData();
+      await refreshOutlets();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Branch update failed' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleInspectBranch = async (branchId: string) => {
+    setLoadingBranchDetail(true);
+    try {
+      const details = await organizationApi.getBranchDetails(branchId);
+      setSelectedBranchDetail(details);
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'Failed to load branch details' });
+    } finally {
+      setLoadingBranchDetail(false);
     }
   };
 
@@ -133,7 +239,7 @@ export const OrganizationManager: React.FC = () => {
       await organizationApi.createDepartment(deptForm);
       setFeedback({ type: 'success', message: `Department "${deptForm.name}" created successfully.` });
       setShowCreateModal(false);
-      setDeptForm({ name: '', code: '', branch_id: branches[0]?.id || '', });
+      setDeptForm({ name: '', code: '', branch_id: branches[0]?.id || '' });
       await loadAllData();
     } catch (err: any) {
       setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Department creation failed' });
@@ -174,6 +280,20 @@ export const OrganizationManager: React.FC = () => {
     }
   };
 
+  const handleScopeToOutlet = (branch: Branch) => {
+    setActiveOutlet({
+      id: branch.id,
+      code: branch.code,
+      name: branch.name,
+      type: branch.type as any,
+      isActive: branch.is_active,
+    });
+    setFeedback({
+      type: 'success',
+      message: `Active operational workspace scoped to: ${branch.name} [${branch.code}]`,
+    });
+  };
+
   // Filtered Lists
   const filteredBranches = branches.filter((b) =>
     b.name.toLowerCase().includes(searchQuery.toLowerCase()) || b.code.toLowerCase().includes(searchQuery.toLowerCase())
@@ -195,23 +315,53 @@ export const OrganizationManager: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header & Sub-Nav */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-[#C79A3B]" />
-            Organization & Enterprise Topology
-          </h2>
-          <p className="text-xs text-[#707070] mt-0.5">
-            Manage branches, storage warehouses, operating departments, and staff allocations.
-          </p>
+      {/* Top Company Master Banner */}
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-white via-[#FAF8F5] to-white border border-[rgba(45,45,45,0.08)] shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-[#F1E4C5] border border-[#B8862D]/30 flex items-center justify-center text-[#B8862D] shadow-sm">
+            <Building2 className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">
+                {company?.name || 'APEX Multi-Outlet Enterprise'}
+              </h2>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
+                {company?.code || 'APEX-CORP'}
+              </span>
+            </div>
+            <p className="text-xs text-[#707070] mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {company?.email && (
+                <span className="flex items-center gap-1">
+                  <Mail className="w-3 h-3 text-[#C79A3B]" /> {company.email}
+                </span>
+              )}
+              {company?.phone && (
+                <span className="flex items-center gap-1">
+                  <Phone className="w-3 h-3 text-[#C79A3B]" /> {company.phone}
+                </span>
+              )}
+              {company?.address && (
+                <span className="flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-[#C79A3B]" /> {company.address}
+                </span>
+              )}
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setEditingCompany(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm active:scale-95"
+          >
+            <Settings className="w-3.5 h-3.5 text-[#C79A3B]" />
+            <span>Edit Company Master</span>
+          </button>
+          <button
             onClick={loadAllData}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm active:scale-95 disabled:opacity-60"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm active:scale-95 disabled:opacity-60"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
             <span>Sync</span>
@@ -249,26 +399,29 @@ export const OrganizationManager: React.FC = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <button
           onClick={() => { setSubTab('branches'); setSearchQuery(''); }}
-          className={`p-4 rounded-xl text-left border transition-all ${
+          className={`p-4 rounded-2xl text-left border transition-all ${
             subTab === 'branches'
               ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-              : 'bg-white/80 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
+              : 'bg-white/85 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
           }`}
         >
           <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Branches</span>
+            <span className="text-xs font-semibold">Total Outlets</span>
             <Building2 className="w-4 h-4 text-[#C79A3B]" />
           </div>
           <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{branches.length}</p>
-          <p className="text-[10px] text-[#2E8B57] mt-1 font-medium">Live PostgreSQL Records</p>
+          <p className="text-[10px] text-[#2E8B57] mt-1 font-medium flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" />
+            {branches.filter((b) => b.is_active).length} Active Outlets
+          </p>
         </button>
 
         <button
           onClick={() => { setSubTab('warehouses'); setSearchQuery(''); }}
-          className={`p-4 rounded-xl text-left border transition-all ${
+          className={`p-4 rounded-2xl text-left border transition-all ${
             subTab === 'warehouses'
               ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-              : 'bg-white/80 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
+              : 'bg-white/85 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
           }`}
         >
           <div className="flex items-center justify-between text-[#707070] mb-1">
@@ -276,15 +429,15 @@ export const OrganizationManager: React.FC = () => {
             <WarehouseIcon className="w-4 h-4 text-[#3978B8]" />
           </div>
           <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{warehouses.length}</p>
-          <p className="text-[10px] text-[#3978B8] mt-1 font-medium">{warehouses.filter((w) => w.is_central).length} Central Hubs</p>
+          <p className="text-[10px] text-[#3978B8] mt-1 font-medium">{warehouses.filter((w) => w.is_central).length} Central Distribution Hubs</p>
         </button>
 
         <button
           onClick={() => { setSubTab('departments'); setSearchQuery(''); }}
-          className={`p-4 rounded-xl text-left border transition-all ${
+          className={`p-4 rounded-2xl text-left border transition-all ${
             subTab === 'departments'
               ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-              : 'bg-white/80 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
+              : 'bg-white/85 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
           }`}
         >
           <div className="flex items-center justify-between text-[#707070] mb-1">
@@ -297,10 +450,10 @@ export const OrganizationManager: React.FC = () => {
 
         <button
           onClick={() => { setSubTab('staff'); setSearchQuery(''); }}
-          className={`p-4 rounded-xl text-left border transition-all ${
+          className={`p-4 rounded-2xl text-left border transition-all ${
             subTab === 'staff'
               ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-              : 'bg-white/80 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
+              : 'bg-white/85 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
           }`}
         >
           <div className="flex items-center justify-between text-[#707070] mb-1">
@@ -312,7 +465,7 @@ export const OrganizationManager: React.FC = () => {
         </button>
       </div>
 
-      {/* Search and Sub-Tabs */}
+      {/* Search and Sub-Tabs Navigation */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
         <div className="flex border-b border-[rgba(45,45,45,0.08)] space-x-3 overflow-x-auto">
           {(['branches', 'warehouses', 'departments', 'staff'] as const).map((tab) => (
@@ -325,7 +478,7 @@ export const OrganizationManager: React.FC = () => {
                   : 'border-transparent text-[#707070] hover:text-[#1C1C1C]'
               }`}
             >
-              {tab}
+              {tab === 'branches' ? '14+ Outlets Matrix' : tab}
             </button>
           ))}
         </div>
@@ -350,53 +503,124 @@ export const OrganizationManager: React.FC = () => {
         </div>
       ) : (
         <div>
-          {/* TAB: Branches */}
+          {/* TAB: Branches Matrix */}
           {subTab === 'branches' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredBranches.map((b) => (
-                <div
-                  key={b.id}
-                  className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#C79A3B]/40 transition-all space-y-3"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{b.name}</h4>
-                      <p className="text-[11px] font-mono text-[#B8862D] mt-0.5">[{b.code}]</p>
+              {filteredBranches.map((b) => {
+                const isCurrent = b.id === activeOutlet.id;
+                const branchWarehouses = warehouses.filter((w) => w.branch_id === b.id);
+                const branchDepts = departments.filter((d) => d.branch_id === b.id);
+                const branchStaff = staffList.filter((s) => s.branch_id === b.id);
+
+                return (
+                  <div
+                    key={b.id}
+                    className={`p-5 rounded-2xl border transition-all space-y-3.5 ${
+                      isCurrent
+                        ? 'bg-[#FAF8F5] border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
+                        : 'bg-white border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#C79A3B]/40'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{b.name}</h4>
+                          {isCurrent && (
+                            <span className="text-[10px] bg-[#F1E4C5] text-[#B8862D] font-extrabold px-1.5 py-0.5 rounded border border-[#B8862D]/30">
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] font-mono text-[#B8862D] mt-0.5">[{b.code}]</p>
+                      </div>
+                      <span
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                          b.type === 'HEAD_OFFICE' || b.type === 'HYBRID'
+                            ? 'bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30'
+                            : b.type === 'CENTRAL_STORE'
+                            ? 'bg-[#3978B8]/10 text-[#3978B8] border border-[#3978B8]/25'
+                            : b.type === 'DESSERT_KITCHEN'
+                            ? 'bg-[#D99625]/10 text-[#D99625] border border-[#D99625]/25'
+                            : 'bg-[#2E8B57]/10 text-[#2E8B57] border border-[#2E8B57]/25'
+                        }`}
+                      >
+                        {b.type.replace('_', ' ')}
+                      </span>
                     </div>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30">
-                      {b.type}
-                    </span>
-                  </div>
 
-                  <div className="space-y-1.5 text-[11px] text-[#707070]">
-                    {b.address && (
-                      <div className="flex items-center gap-1.5">
-                        <MapPin className="w-3 h-3 text-[#C79A3B] shrink-0" />
-                        <span className="truncate">{b.address}</span>
+                    <div className="grid grid-cols-3 gap-2 py-2 px-3 rounded-xl bg-white/80 border border-[rgba(45,45,45,0.06)] text-center text-xs">
+                      <div>
+                        <span className="text-[10px] text-[#707070] block">Stores</span>
+                        <span className="font-bold text-[#1C1C1C]">{branchWarehouses.length}</span>
                       </div>
-                    )}
-                    {b.email && (
-                      <div className="flex items-center gap-1.5">
-                        <Mail className="w-3 h-3 text-[#707070] shrink-0" />
-                        <span className="truncate">{b.email}</span>
+                      <div>
+                        <span className="text-[10px] text-[#707070] block">Depts</span>
+                        <span className="font-bold text-[#1C1C1C]">{branchDepts.length}</span>
                       </div>
-                    )}
-                    {b.phone && (
-                      <div className="flex items-center gap-1.5">
-                        <Phone className="w-3 h-3 text-[#707070] shrink-0" />
-                        <span>{b.phone}</span>
+                      <div>
+                        <span className="text-[10px] text-[#707070] block">Staff</span>
+                        <span className="font-bold text-[#2E8B57]">{branchStaff.length}</span>
                       </div>
-                    )}
-                  </div>
+                    </div>
 
-                  <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] flex items-center justify-between text-[10px] text-[#707070]">
-                    <span className="font-mono truncate max-w-[140px]">UUID: {b.id.slice(0, 8)}...</span>
-                    <span className={`font-semibold ${b.is_active ? 'text-[#2E8B57]' : 'text-[#D9534F]'}`}>
-                      {b.is_active ? 'ACTIVE' : 'INACTIVE'}
-                    </span>
+                    <div className="space-y-1.5 text-[11px] text-[#707070]">
+                      {b.address && (
+                        <div className="flex items-center gap-1.5">
+                          <MapPin className="w-3 h-3 text-[#C79A3B] shrink-0" />
+                          <span className="truncate">{b.address}</span>
+                        </div>
+                      )}
+                      {b.email && (
+                        <div className="flex items-center gap-1.5">
+                          <Mail className="w-3 h-3 text-[#707070] shrink-0" />
+                          <span className="truncate">{b.email}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-[rgba(45,45,45,0.06)] flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleInspectBranch(b.id)}
+                          className="px-2.5 py-1 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-[11px] font-semibold text-[#1C1C1C] flex items-center gap-1"
+                        >
+                          <Eye className="w-3 h-3 text-[#C79A3B]" />
+                          <span>Roster</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingBranch(b);
+                            setBranchEditForm({
+                              name: b.name,
+                              code: b.code,
+                              type: b.type,
+                              email: b.email || '',
+                              phone: b.phone || '',
+                              address: b.address || '',
+                              is_active: b.is_active,
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-[11px] font-semibold text-[#707070] hover:text-[#1C1C1C] flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3 h-3 text-[#707070]" />
+                          <span>Edit</span>
+                        </button>
+                      </div>
+
+                      {!isCurrent ? (
+                        <button
+                          onClick={() => handleScopeToOutlet(b)}
+                          className="px-3 py-1 rounded-lg bg-[#FAF8F5] hover:bg-[#F1E4C5] text-[11px] font-bold text-[#B8862D] border border-[#B8862D]/30 transition-all"
+                        >
+                          Scope Here
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-[#2E8B57] font-semibold">Active Scope</span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -541,6 +765,316 @@ export const OrganizationManager: React.FC = () => {
         </div>
       )}
 
+      {/* Slide-over / Modal for Branch Detail & Roster */}
+      {selectedBranchDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl p-6 max-w-2xl w-full shadow-2xl border border-[rgba(45,45,45,0.12)] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.08)] pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-base text-[#1C1C1C] font-['Outfit']">
+                    {selectedBranchDetail.name}
+                  </h3>
+                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-[#F1E4C5] text-[#B8862D]">
+                    [{selectedBranchDetail.code}]
+                  </span>
+                </div>
+                <p className="text-xs text-[#707070] mt-0.5">
+                  Type: {selectedBranchDetail.type.replace('_', ' ')} · Address: {selectedBranchDetail.address || 'N/A'}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedBranchDetail(null)}
+                className="text-[#707070] hover:text-[#1C1C1C] text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Sub-sections */}
+            <div className="space-y-4 text-xs">
+              {/* Linked Warehouses */}
+              <div>
+                <h4 className="font-bold text-[#1C1C1C] mb-2 flex items-center gap-1.5">
+                  <WarehouseIcon className="w-3.5 h-3.5 text-[#3978B8]" />
+                  <span>Assigned Warehouses ({selectedBranchDetail.warehouses.length})</span>
+                </h4>
+                {selectedBranchDetail.warehouses.length === 0 ? (
+                  <p className="text-[#707070] italic">No independent warehouses assigned.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {selectedBranchDetail.warehouses.map((w) => (
+                      <div key={w.id} className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                        <div className="font-bold text-[#1C1C1C]">{w.name}</div>
+                        <div className="text-[10px] text-[#3978B8] font-mono">[{w.code}] · {w.is_central ? 'Central Hub' : 'Local Store'}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Operating Departments */}
+              <div>
+                <h4 className="font-bold text-[#1C1C1C] mb-2 flex items-center gap-1.5">
+                  <Briefcase className="w-3.5 h-3.5 text-[#B8862D]" />
+                  <span>Departments ({selectedBranchDetail.departments.length})</span>
+                </h4>
+                {selectedBranchDetail.departments.length === 0 ? (
+                  <p className="text-[#707070] italic">No local departments configured.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {selectedBranchDetail.departments.map((d) => (
+                      <div key={d.id} className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                        <div className="font-bold text-[#1C1C1C]">{d.name}</div>
+                        <div className="text-[10px] text-[#707070] font-mono">[{d.code}]</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Assigned Staff Roster */}
+              <div>
+                <h4 className="font-bold text-[#1C1C1C] mb-2 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-[#2E8B57]" />
+                  <span>Assigned Personnel ({selectedBranchDetail.staff.length})</span>
+                </h4>
+                {selectedBranchDetail.staff.length === 0 ? (
+                  <p className="text-[#707070] italic">No staff assigned to this branch.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {selectedBranchDetail.staff.map((s) => (
+                      <div key={s.id} className="p-2 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-[#1C1C1C]">{s.first_name} {s.last_name}</span>
+                          <span className="text-[10px] text-[#707070] ml-2">({s.designation} · {s.department || 'General'})</span>
+                        </div>
+                        <span className="font-mono text-[10px] text-[#2E8B57] font-semibold">${Number(s.base_salary).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-[rgba(45,45,45,0.08)]">
+              <button
+                onClick={() => setSelectedBranchDetail(null)}
+                className="px-4 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-semibold hover:bg-black"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Company Profile Modal */}
+      {editingCompany && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-[rgba(45,45,45,0.12)] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.08)] pb-3">
+              <h3 className="font-bold text-base text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
+                <Settings className="w-4 h-4 text-[#C79A3B]" />
+                Edit Company Master Profile
+              </h3>
+              <button
+                onClick={() => setEditingCompany(false)}
+                className="text-[#707070] hover:text-[#1C1C1C] text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateCompany} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Company Legal Name *</label>
+                <input
+                  required
+                  type="text"
+                  value={companyForm.name}
+                  onChange={(e) => setCompanyForm({ ...companyForm, name: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                />
+              </div>
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Company Code / Tax ID</label>
+                <input
+                  type="text"
+                  value={companyForm.code}
+                  onChange={(e) => setCompanyForm({ ...companyForm, code: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[#707070] font-semibold mb-1">Corporate Email</label>
+                  <input
+                    type="email"
+                    value={companyForm.email}
+                    onChange={(e) => setCompanyForm({ ...companyForm, email: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#707070] font-semibold mb-1">Head Office Phone</label>
+                  <input
+                    type="text"
+                    value={companyForm.phone}
+                    onChange={(e) => setCompanyForm({ ...companyForm, phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">HQ Physical Address</label>
+                <input
+                  type="text"
+                  value={companyForm.address}
+                  onChange={(e) => setCompanyForm({ ...companyForm, address: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingCompany(false)}
+                  className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-[#707070] hover:bg-[#FAF8F5]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-4 py-2 rounded-xl bg-[#C79A3B] hover:bg-[#B8862D] text-white font-semibold disabled:opacity-60"
+                >
+                  {actionLoading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Branch Modal */}
+      {editingBranch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-[rgba(45,45,45,0.12)] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.08)] pb-3">
+              <h3 className="font-bold text-base text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-[#C79A3B]" />
+                Edit Branch: {editingBranch.name}
+              </h3>
+              <button
+                onClick={() => setEditingBranch(null)}
+                className="text-[#707070] hover:text-[#1C1C1C] text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleEditBranchSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Branch Name *</label>
+                <input
+                  required
+                  type="text"
+                  value={branchEditForm.name}
+                  onChange={(e) => setBranchEditForm({ ...branchEditForm, name: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[#707070] font-semibold mb-1">Branch Code *</label>
+                  <input
+                    required
+                    type="text"
+                    value={branchEditForm.code}
+                    onChange={(e) => setBranchEditForm({ ...branchEditForm, code: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#707070] font-semibold mb-1">Branch Type *</label>
+                  <select
+                    value={branchEditForm.type}
+                    onChange={(e) => setBranchEditForm({ ...branchEditForm, type: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                  >
+                    <option value="RESTAURANT">Restaurant Outlet</option>
+                    <option value="HOTEL">Hotel Resort</option>
+                    <option value="HYBRID">Hybrid HQ</option>
+                    <option value="CENTRAL_STORE">Central Store</option>
+                    <option value="DESSERT_KITCHEN">Dessert Kitchen</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Physical Address</label>
+                <input
+                  type="text"
+                  value={branchEditForm.address}
+                  onChange={(e) => setBranchEditForm({ ...branchEditForm, address: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[#707070] font-semibold mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={branchEditForm.email}
+                    onChange={(e) => setBranchEditForm({ ...branchEditForm, email: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#707070] font-semibold mb-1">Phone</label>
+                  <input
+                    type="text"
+                    value={branchEditForm.phone}
+                    onChange={(e) => setBranchEditForm({ ...branchEditForm, phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="branch_active"
+                  checked={branchEditForm.is_active}
+                  onChange={(e) => setBranchEditForm({ ...branchEditForm, is_active: e.target.checked })}
+                  className="w-4 h-4 rounded text-[#C79A3B]"
+                />
+                <label htmlFor="branch_active" className="text-[#1C1C1C] font-semibold">
+                  Branch is Active & Operational
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingBranch(null)}
+                  className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-[#707070] hover:bg-[#FAF8F5]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-4 py-2 rounded-xl bg-[#C79A3B] hover:bg-[#B8862D] text-white font-semibold disabled:opacity-60"
+                >
+                  {actionLoading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Create Entity Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
@@ -593,6 +1127,8 @@ export const OrganizationManager: React.FC = () => {
                       <option value="RESTAURANT">Restaurant Outlet</option>
                       <option value="HOTEL">Hotel Resort</option>
                       <option value="HYBRID">Hybrid HQ</option>
+                      <option value="CENTRAL_STORE">Central Store</option>
+                      <option value="DESSERT_KITCHEN">Dessert Kitchen</option>
                     </select>
                   </div>
                 </div>

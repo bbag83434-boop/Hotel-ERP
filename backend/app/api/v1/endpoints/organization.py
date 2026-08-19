@@ -35,6 +35,9 @@ from app.schemas.organization import (
     StaffResponse,
     UserAssignBranchRequest,
     UserAssignRoleRequest,
+    OutletSummaryItem,
+    OrganizationOverviewResponse,
+    BranchDetailResponse,
 )
 
 router = APIRouter()
@@ -97,6 +100,90 @@ def update_company(
     db.commit()
     db.refresh(company)
     return company
+
+# --- OVERVIEW & ENTERPRISE TOPOLOGY ---
+
+@router.get("/overview", response_model=OrganizationOverviewResponse, status_code=status.HTTP_200_OK)
+def get_organization_overview(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    # Company
+    company = None
+    if current_user.company_id:
+        company = db.query(Company).filter(Company.id == current_user.company_id).first()
+    if not company:
+        company = db.query(Company).first()
+
+    # Branches query with scoping
+    b_query = db.query(Branch)
+    is_hq = current_user.role and current_user.role.name in ["SUPER_ADMIN", "OWNER", "HQ_ADMIN", "CENTRAL_PURCHASE_MANAGER"]
+    if not is_hq:
+        user_branch_ids = [ub.branch_id for ub in current_user.branches]
+        b_query = b_query.filter(Branch.id.in_(user_branch_ids))
+
+    all_branches = b_query.order_by(Branch.code.asc()).all()
+    branch_ids = [b.id for b in all_branches]
+
+    # Warehouses
+    warehouses = db.query(Warehouse).filter(Warehouse.branch_id.in_(branch_ids)).all() if branch_ids else []
+    # Departments
+    departments = db.query(Department).filter(Department.branch_id.in_(branch_ids)).all() if branch_ids else []
+    # Staff
+    staff_members = db.query(Staff).filter(Staff.branch_id.in_(branch_ids)).all() if branch_ids else []
+
+    # Map counts per branch
+    wh_count_map = {}
+    for w in warehouses:
+        if w.branch_id:
+            wh_count_map[w.branch_id] = wh_count_map.get(w.branch_id, 0) + 1
+
+    dept_count_map = {}
+    for d in departments:
+        if d.branch_id:
+            dept_count_map[d.branch_id] = dept_count_map.get(d.branch_id, 0) + 1
+
+    staff_count_map = {}
+    active_staff_count_map = {}
+    for s in staff_members:
+        if s.branch_id:
+            staff_count_map[s.branch_id] = staff_count_map.get(s.branch_id, 0) + 1
+            if s.is_active and s.status == "ACTIVE":
+                active_staff_count_map[s.branch_id] = active_staff_count_map.get(s.branch_id, 0) + 1
+
+    branch_type_counts = {}
+    outlet_summaries = []
+    for b in all_branches:
+        branch_type_counts[b.type] = branch_type_counts.get(b.type, 0) + 1
+        outlet_summaries.append(
+            OutletSummaryItem(
+                id=b.id,
+                name=b.name,
+                code=b.code,
+                type=b.type,
+                email=b.email,
+                phone=b.phone,
+                address=b.address,
+                is_active=b.is_active,
+                warehouses_count=wh_count_map.get(b.id, 0),
+                departments_count=dept_count_map.get(b.id, 0),
+                staff_count=staff_count_map.get(b.id, 0),
+                active_staff_count=active_staff_count_map.get(b.id, 0)
+            )
+        )
+
+    return OrganizationOverviewResponse(
+        company=company,
+        total_branches=len(all_branches),
+        active_branches=len([b for b in all_branches if b.is_active]),
+        total_warehouses=len(warehouses),
+        central_warehouses=len([w for w in warehouses if w.is_central]),
+        total_departments=len(departments),
+        total_staff=len(staff_members),
+        active_staff=len([s for s in staff_members if s.is_active and s.status == "ACTIVE"]),
+        branch_type_counts=branch_type_counts,
+        outlets=outlet_summaries
+    )
 
 # --- BRANCH & OUTLET MANAGEMENT ---
 
@@ -162,6 +249,43 @@ def create_branch(
     db.commit()
     db.refresh(new_branch)
     return new_branch
+
+@router.get("/branches/{branch_id}/details", response_model=BranchDetailResponse, status_code=status.HTTP_200_OK)
+def get_branch_details(
+    branch_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    # Outlet scoping check
+    if current_user.role and current_user.role.name not in ["SUPER_ADMIN", "OWNER", "HQ_ADMIN"]:
+        user_branch_ids = {ub.branch_id for ub in current_user.branches}
+        if branch_id not in user_branch_ids:
+            raise ForbiddenException("Access denied: Not authorized for this outlet")
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise NotFoundException("Branch", branch_id)
+
+    warehouses = db.query(Warehouse).filter(Warehouse.branch_id == branch_id).all()
+    departments = db.query(Department).filter(Department.branch_id == branch_id).all()
+    staff_members = db.query(Staff).filter(Staff.branch_id == branch_id).all()
+
+    return BranchDetailResponse(
+        id=branch.id,
+        name=branch.name,
+        code=branch.code,
+        type=branch.type,
+        email=branch.email,
+        phone=branch.phone,
+        address=branch.address,
+        company_id=branch.company_id,
+        is_active=branch.is_active,
+        created_at=branch.created_at,
+        updated_at=branch.updated_at,
+        warehouses=warehouses,
+        departments=departments,
+        staff=staff_members
+    )
 
 @router.get("/branches/{branch_id}", response_model=BranchResponse, status_code=status.HTTP_200_OK)
 def get_branch(

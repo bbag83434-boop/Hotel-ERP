@@ -9,9 +9,17 @@ import {
   WarehouseCreateInput,
   DepartmentCreateInput,
   StaffCreateInput,
+  OrganizationOverview,
+  BranchDetail,
 } from '../types/organization.types';
 
 export const organizationApi = {
+  // Overview & Analytics
+  getOverview: async (): Promise<OrganizationOverview> => {
+    const res = await apiClient.get<OrganizationOverview>('/organization/overview');
+    return res.data;
+  },
+
   // Company
   getCompany: async (): Promise<Company> => {
     const res = await apiClient.get<Company>('/organization/company');
@@ -29,6 +37,10 @@ export const organizationApi = {
   },
   getBranch: async (branchId: string): Promise<Branch> => {
     const res = await apiClient.get<Branch>(`/organization/branches/${branchId}`);
+    return res.data;
+  },
+  getBranchDetails: async (branchId: string): Promise<BranchDetail> => {
+    const res = await apiClient.get<BranchDetail>(`/organization/branches/${branchId}/details`);
     return res.data;
   },
   createBranch: async (payload: BranchCreateInput): Promise<Branch> => {

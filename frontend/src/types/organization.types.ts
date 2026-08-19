@@ -124,3 +124,37 @@ export interface StaffCreateInput {
   status?: string;
   is_active?: boolean;
 }
+
+export interface OutletSummaryItem {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  is_active: boolean;
+  warehouses_count: number;
+  departments_count: number;
+  staff_count: number;
+  active_staff_count: number;
+}
+
+export interface OrganizationOverview {
+  company?: Company;
+  total_branches: number;
+  active_branches: number;
+  total_warehouses: number;
+  central_warehouses: number;
+  total_departments: number;
+  total_staff: number;
+  active_staff: number;
+  branch_type_counts: Record<string, number>;
+  outlets: OutletSummaryItem[];
+}
+
+export interface BranchDetail extends Branch {
+  warehouses: Warehouse[];
+  departments: Department[];
+  staff: Staff[];
+}
