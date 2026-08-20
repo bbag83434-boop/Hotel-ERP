@@ -3664,7 +3664,30 @@ Purchase & Supplier System [FEATURES IMPLEMENTED / COMPLETED]
 
 PART 8
 
-Production & Recipe System
+Production & Recipe System [COMPLETED]
+- Recipe / Bill of Materials (BOM) Engine: Standardized dish recipes linking raw ingredients to finished goods/semi-finished goods with yield quantities, preparation times, and dynamic recursive costing rollups.
+- Dynamic Sub-Recipe Explosion: Hierarchical multi-level BOM explosion calculating raw ingredient requirements based on target batch quantities.
+- Interactive Production Batch Engine:
+  - Batch preview with sufficiency checking against real-time kitchen warehouse stock.
+  - One-click production batch execution: automatically generates finished goods, deducts raw ingredients via `PRODUCTION_OUT`, logs `PRODUCTION_IN` stock ledger entries, assigns batch numbers/expiry dates, and recalculates unit food cost.
+  - Production status lifecycle (`DRAFT` -> `IN_PROGRESS` -> `COMPLETED` / `CANCELLED`).
+  - Production reversals (`POST /recipes/production/orders/{id}/reverse`) restoring ingredient stock on quality check rejection.
+- Endpoints:
+  - `GET/POST /api/v1/recipes` (Recipe CRUD & directory)
+  - `GET/PUT/DELETE /api/v1/recipes/{id}`
+  - `POST /api/v1/recipes/{id}/clone`
+  - `GET /api/v1/recipes/{id}/costing`
+  - `POST /api/v1/recipes/{id}/explode`
+  - `POST /api/v1/recipes/production/preview`
+  - `POST /api/v1/recipes/production/execute`
+  - `GET/POST /api/v1/recipes/production/orders`
+  - `GET /api/v1/recipes/production/orders/{id}`
+  - `POST /api/v1/recipes/production/orders/{id}/check-sufficiency`
+  - `PUT /api/v1/recipes/production/orders/{id}/status`
+  - `GET /api/v1/recipes/production/orders/{id}/variance`
+  - `POST /api/v1/recipes/production/orders/{id}/reverse`
+- Frontend Integration: `frontend/src/api/production.ts` and `frontend/src/components/workspaces/ProductionWorkspace.tsx` featuring standard recipe registry, batch run log, sufficiency checking tool, and one-click production execution.
+- Verification: 68/68 automated tests in `test_part7_recipe_bom.py` and 100% test pass rate in `test_part9_production_engine.py`.
 
 PART 9
 
