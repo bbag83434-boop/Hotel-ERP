@@ -98,11 +98,13 @@ class Item(BaseModel):
     selling_price = Column("sellingPrice", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     min_stock_level = Column("minStockLevel", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     reorder_qty = Column("reorderQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    supplier_id = Column("supplierId", String(36), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
     is_active = Column("isActive", Boolean, default=True, nullable=False)
 
     companyId = synonym("company_id")
     categoryId = synonym("category_id")
     unitId = synonym("unit_id")
+    supplierId = synonym("supplier_id")
     costPrice = synonym("cost_price")
     sellingPrice = synonym("selling_price")
     minStockLevel = synonym("min_stock_level")
@@ -111,6 +113,7 @@ class Item(BaseModel):
 
     category = relationship("Category", back_populates="items")
     unit = relationship("Unit", back_populates="items")
+    supplier = relationship("Supplier", foreign_keys=[supplier_id])
     stock_balances = relationship("StockBalance", back_populates="item")
 
     __table_args__ = (

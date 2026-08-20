@@ -41,6 +41,14 @@ class ValidationException(AppException):
     def __init__(self, message: str, details: Optional[Any] = None):
         super().__init__(status.HTTP_400_BAD_REQUEST, "VALIDATION_ERROR", message, details)
 
+class BadRequestException(ValidationException):
+    def __init__(self, message: str, details: Optional[Any] = None):
+        super().__init__(message=message, details=details)
+
+class ConflictException(AppException):
+    def __init__(self, message: str, details: Optional[Any] = None):
+        super().__init__(status.HTTP_409_CONFLICT, "CONFLICT", message, details)
+
 class InsufficientStockException(AppException):
     def __init__(self, item: str, required: float, available: float, unit: str = "units"):
         shortage = required - available

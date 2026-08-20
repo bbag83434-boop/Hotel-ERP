@@ -3629,7 +3629,38 @@ Inventory & Stock Intelligence Foundation
 
 PART 7
 
-Purchase & Supplier System
+Purchase & Supplier System [FEATURES IMPLEMENTED / COMPLETED]
+1. Feature: Supplier-Wise Auto Order Consolidation + Multi-Level Approval + WhatsApp Pre-filled Deep-Link Dispatch
+- Auto Consolidation Engine: Identifies supplier per item across multiple outlet requests, aggregates identical item quantities, and preserves exact outlet-wise allocation JSON metadata.
+- Status Lifecycle: DRAFT -> PENDING_APPROVAL -> APPROVED -> WHATSAPP_OPENED -> SENT_MANUALLY (with REJECTED/CANCELLED support). Never auto-marks as sent upon link generation.
+- WhatsApp Integration: Validates supplier numbers (E.164 sanitization), generates formatted pre-filled `https://wa.me/{phone}?text={encoded}` order text with outlet breakdown and PO reference.
+- Endpoints:
+  - `POST /api/v1/procurement/orders/consolidate` (Auto consolidation)
+  - `POST /api/v1/procurement/orders/{id}/submit`
+  - `POST /api/v1/procurement/orders/{id}/approve`
+  - `POST /api/v1/procurement/orders/{id}/reject`
+  - `POST /api/v1/procurement/orders/{id}/whatsapp-link` (Generates pre-filled URL, sets WHATSAPP_OPENED)
+  - `POST /api/v1/procurement/orders/{id}/confirm-sent` (User confirms manual send -> SENT_MANUALLY)
+  - `GET/POST/PUT /api/v1/procurement/suppliers`
+  - `GET/POST /api/v1/procurement/requests`
+- Security & Audit: RBAC permission enforcement, outlet scope isolation, and immutable structured `AuditLog` logging.
+- Verification: 12 comprehensive automated test cases (56 assertions) in `test_supplier_auto_consolidation_whatsapp.py` passing 100%.
+
+2. Feature: Outlet Smart AI Requirement [FEATURE IMPLEMENTED / COMPLETED]
+- Deterministic Requirement Engine: Backend logic calculating outlet requirements using real data: actual stock (`StockBalance`) + 14-day consumption run-rate (`StockLedger`) + target/min safety levels + in-flight pending purchase orders / inbound transfers + supplier catalog mapping.
+- Structured Columns: `Item | Current Qty | Required Qty | Short Qty | Suggested Order Qty | Supplier | Priority` (e.g. Rice — 18 KG — Required 40 KG — Short 22 KG — Order 22 KG).
+- Interactive Smart Assistant Q&A:
+  - Supports queries: *"What stock is low today?"*, *"What do I need to order?"*, *"What is critical?"*, *"What is already pending?"*, *"What do I need for tomorrow?"*.
+- Outlet Draft Workflow:
+  - Auto Requirement Generation (`POST /api/v1/procurement/smart-requirements/generate`)
+  - Outlet Review (`GET /api/v1/procurement/smart-requirements/draft/{branch_id}`)
+  - User Edit/Add/Remove (`PUT /api/v1/procurement/smart-requirements/draft/{draft_id}/items`) with full audit history tracking user modifications vs system calculation
+  - Confirm Requirement (`POST /api/v1/procurement/smart-requirements/draft/{draft_id}/confirm`) -> converts draft directly into `PurchaseRequest` (`PENDING_APPROVAL`) which seamlessly enters the Supplier Consolidation & WhatsApp pipeline.
+- Scheduled Preparation Time & Duplicate Prevention:
+  - Outlet schedule configuration (`GET/PUT /api/v1/procurement/smart-requirements/config/{branch_id}`).
+  - Auto-scheduled runner (`POST /api/v1/procurement/smart-requirements/process-schedules`) preparing drafts at configured time while preventing duplicate generation for the same calendar date.
+- Multi-Tenant Scoping & Security: Strict outlet isolation with 403 Forbidden enforcement on unauthorized branch access.
+- Verification: Comprehensive test suite `test_outlet_smart_requirement.py` passing 100%.
 
 PART 8
 
