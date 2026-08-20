@@ -28,6 +28,7 @@ class StockMovementType(str, enum.Enum):
     ADJUSTMENT = "ADJUSTMENT"
     RETURN = "RETURN"
     POS_SALE = "POS_SALE"
+    WASTAGE = "WASTAGE"
 
 class StockCountStatus(str, enum.Enum):
     DRAFT = "DRAFT"
@@ -185,7 +186,7 @@ class StockLedger(Base):
     item_id = Column("itemId", String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
     batch_number = Column("batchNumber", String(100), nullable=True)
     expiry_date = Column("expiryDate", DateTime, nullable=True)
-    movement_type = Column("movementType", SQLEnum('GRN', 'PRODUCTION_IN', 'PRODUCTION_OUT', 'TRANSFER_IN', 'TRANSFER_OUT', 'ADJUSTMENT', 'RETURN', 'POS_SALE', name='StockMovementType'), nullable=False)
+    movement_type = Column("movementType", SQLEnum('GRN', 'PRODUCTION_IN', 'PRODUCTION_OUT', 'TRANSFER_IN', 'TRANSFER_OUT', 'ADJUSTMENT', 'RETURN', 'POS_SALE', 'WASTAGE', name='StockMovementType'), nullable=False)
     change_qty = Column("changeQty", Numeric(14, 4), nullable=False)
     balance_qty = Column("balanceQty", Numeric(14, 4), nullable=False)
     unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=True)

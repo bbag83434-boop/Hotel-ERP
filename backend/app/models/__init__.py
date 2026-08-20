@@ -49,6 +49,7 @@ from app.models.closing import (
     ClosingStatus,
 )
 from app.models.recipe import Recipe, RecipeItem, ProductionOrder, ProductionConsumption, ProductionStatus
+from app.models.wastage import WastageEntry, WastageItem, WastageReasonCode, WastageStatus
 from app.models.restaurant import DiningTable, Floor, RestaurantOrder, OrderItem, OrderStatus
 from app.models.customer import Customer, CustomerAddress, LoyaltyTransaction, QRSession, CustomerType, LoyaltyTransactionType
 from app.models.finance import ChartOfAccount, JournalEntry, JournalEntryLine, AccountsPayable, AccountType, JournalStatus
@@ -111,6 +112,10 @@ __all__ = [
     "ProductionOrder",
     "ProductionConsumption",
     "ProductionStatus",
+    "WastageEntry",
+    "WastageItem",
+    "WastageReasonCode",
+    "WastageStatus",
     "DiningTable",
     "Floor",
     "RestaurantOrder",

@@ -3691,7 +3691,33 @@ Production & Recipe System [COMPLETED]
 
 PART 9
 
-Wastage Management
+Wastage Management [COMPLETED]
+- Core Schema & ORM: `WastageEntry` and `WastageItem` models in `backend/app/models/wastage.py` with full Neon PostgreSQL migration.
+- Standard Reason Codes: `EXPIRED`, `PREPARATION_LOSS`, `BURNT_DROPPED`, `QUALITY_ISSUE`, `STORAGE_FAILURE`, `CUSTOMER_RETURN`, `OTHER`.
+- Lifecycle & Approval Workflow:
+  - `DRAFT` $\rightarrow$ `PENDING_APPROVAL` $\rightarrow$ `APPROVED` / `REJECTED`.
+  - Automatic threshold checking (entries $\ge$ ₹1,000 auto-trigger `PENDING_APPROVAL` and require manager sign-off).
+  - On Approval: Deducts item quantity from warehouse `StockBalance`, writes structured `StockLedger` audit record with `movementType = 'WASTAGE'`, `referenceType = 'WASTAGE_ENTRY'`, and logs audit trail.
+  - On Rejection: Mandatory rejection reason without inventory deduction.
+- Analytics & Outlier Detection:
+  - Aggregate loss valuation by date range and outlet.
+  - Reason code breakdown with cost and percentage contributions.
+  - Top high-loss items ranking.
+  - Abnormal spoilage detection alerting on high-cost spikes (+50% surge over baseline).
+- API Endpoints:
+  - `GET /api/v1/wastage/reasons`
+  - `GET /api/v1/wastage/entries`
+  - `POST /api/v1/wastage/entries`
+  - `GET /api/v1/wastage/entries/{id}`
+  - `POST /api/v1/wastage/entries/{id}/submit`
+  - `POST /api/v1/wastage/entries/{id}/approve`
+  - `POST /api/v1/wastage/entries/{id}/reject`
+  - `GET /api/v1/wastage/analytics`
+- Frontend Integration:
+  - TypeScript types in `frontend/src/types/wastage.types.ts`.
+  - API client in `frontend/src/api/wastage.ts`.
+  - Interactive `frontend/src/components/workspaces/WastageWorkspace.tsx` with KPI summary cards, filterable audit log table, inline/drawer multi-item log form with live valuation calculations, approval/rejection actions, and analytics charts.
+- Verification: 100% test pass rate in `test_part9_wastage_management.py`.
 
 PART 10
 
