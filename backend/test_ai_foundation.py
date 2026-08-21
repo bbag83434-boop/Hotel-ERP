@@ -35,6 +35,15 @@ def run_ai_tests():
         data = res.json()
         if data["outlet_id"] == branch.id:
             print(f"  [PASS] AI endpoint scoped to requested outlet: {branch.id}")
+            
+            # Verify structure if recommendations exist
+            recs = data.get("data", [])
+            if recs:
+                rec = recs[0]
+                print(f"  [INFO] Verifying recommendation structure for item: {rec.get('item_name')}")
+                assert "suggested_order_quantity" in rec
+                assert "priority" in rec
+                print(f"  [PASS] Recommendation fields verified: priority={rec.get('priority')}")
         else:
             print(f"  [FAIL] AI endpoint scope mismatch: Expected {branch.id}, got {data['outlet_id']}")
     else:
