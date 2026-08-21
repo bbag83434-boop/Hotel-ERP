@@ -19,6 +19,7 @@ export const AIAssistantWorkspace = () => {
   const { activeOutlet } = useOutlet();
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchRecommendations = async () => {
@@ -31,6 +32,29 @@ export const AIAssistantWorkspace = () => {
       setError(err?.response?.data?.detail || 'Failed to fetch recommendations');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSendPurchaseRequest = async (rec: Recommendation) => {
+    try {
+      setSubmitting(true);
+      await apiClient.post('/procurement/requests', {
+        branch_id: activeOutlet.id,
+        items: [
+          {
+            item_id: rec.item_id,
+            requested_qty: rec.suggested_order_quantity,
+          },
+        ],
+        priority: rec.priority,
+        notes: `AI Assistant recommendation: ${rec.recommendation}`,
+      });
+      // Refresh to remove requested items
+      fetchRecommendations();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Failed to send purchase request');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -116,9 +140,13 @@ export const AIAssistantWorkspace = () => {
                 </div>
               </div>
 
-              <button className="w-full py-2 flex items-center justify-center gap-2 bg-[#1C1C1C] text-white rounded-xl text-xs font-bold hover:bg-[#2D2D2D] transition-colors">
-                <ShoppingCart className="w-3.5 h-3.5" />
-                Send Purchase Request
+              <button 
+                onClick={() => handleSendPurchaseRequest(rec)}
+                disabled={submitting}
+                className="w-full py-2 flex items-center justify-center gap-2 bg-[#1C1C1C] text-white rounded-xl text-xs font-bold hover:bg-[#2D2D2D] transition-colors disabled:opacity-50"
+              >
+                {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShoppingCart className="w-3.5 h-3.5" />}
+                {submitting ? 'Sending...' : 'Send Purchase Request'}
               </button>
             </div>
           ))}
