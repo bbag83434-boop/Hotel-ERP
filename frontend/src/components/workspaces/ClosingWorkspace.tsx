@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   X,
 } from 'lucide-react';
+import { Badge, Button, StatCard, AlertBanner, Modal } from '@/components/ui';
 
 export const ClosingWorkspace: React.FC = () => {
   const { activeOutlet, closingInfo, isHeadOffice } = useOutlet();
@@ -162,48 +163,31 @@ export const ClosingWorkspace: React.FC = () => {
               <CalendarDays className="w-5 h-5 text-[#C79A3B]" />
               Bi-Monthly Closing Engine (1st–15th & 16th–MonthEnd)
             </h2>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
-              [{activeOutlet.code}]
-            </span>
+            <Badge variant="outlet">[{activeOutlet.code}]</Badge>
           </div>
           <p className="text-xs text-[#707070] mt-0.5">
             Strict physical stock reconciliation calculating actual vs. theoretical consumption and food cost variances.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={fetchClosingData}
-            disabled={loading}
-            className="p-2 rounded-xl border border-[rgba(45,45,45,0.12)] text-[#707070] hover:bg-[#FAF8F5] transition-all"
-            title="Refresh Closing Data"
+            loading={loading}
+            icon={<RefreshCw className="w-3.5 h-3.5 text-[#C79A3B]" />}
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#C79A3B]' : ''}`} />
-          </button>
-          <div className="px-3 py-1.5 rounded-xl bg-[#F1E4C5] text-xs font-bold text-[#B8862D] border border-[#B8862D]/30">
+            Sync Data
+          </Button>
+          <Badge variant="warning">
             Active Cycle: {closingInfo.periodType === 'FIRST_HALF' ? '1st–15th' : '16th–End'}
-          </div>
+          </Badge>
         </div>
       </div>
 
       {/* Feedback Banner */}
-      {feedback && (
-        <div
-          className={`p-4 rounded-xl flex items-center justify-between gap-3 text-xs font-semibold ${
-            feedback.type === 'success'
-              ? 'bg-[#2E8B57]/10 text-[#2E8B57] border border-[#2E8B57]/20'
-              : 'bg-red-500/10 text-red-600 border border-red-500/20'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {feedback.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-            <span>{feedback.message}</span>
-          </div>
-          <button onClick={() => setFeedback(null)} className="text-gray-400 hover:text-gray-600">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      <AlertBanner feedback={feedback} onClose={() => setFeedback(null)} />
 
       {/* Cycle Period Info Banner */}
       <div className="p-5 rounded-2xl bg-gradient-to-r from-white via-[#FAF8F5] to-white border border-[rgba(45,45,45,0.08)] shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -228,44 +212,51 @@ export const ClosingWorkspace: React.FC = () => {
       </div>
 
       {/* Real-time Math Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 shadow-sm">
-          <span className="text-[10px] text-[#707070] uppercase font-semibold">1. Opening Stock Value</span>
-          <p className="text-lg font-bold text-[#1C1C1C] font-mono">
-            ${totalOpening.toFixed(2)}
-          </p>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <StatCard
+          title="1. Opening Stock"
+          value={`$${totalOpening.toFixed(2)}`}
+          subtitle="Valuation at start of cycle"
+          icon={<DollarSign className="w-4 h-4 text-[#1C1C1C]" />}
+          iconBgColor="bg-[#FAF8F5] text-[#1C1C1C]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 shadow-sm">
-          <span className="text-[10px] text-[#707070] uppercase font-semibold">2. Period Purchases (GRN)</span>
-          <p className="text-lg font-bold text-[#2E8B57] font-mono">
-            +${totalPurchases.toFixed(2)}
-          </p>
-        </div>
+        <StatCard
+          title="2. Period Purchases"
+          value={`+$${totalPurchases.toFixed(2)}`}
+          subtitle="Total GRN stock received"
+          icon={<DollarSign className="w-4 h-4 text-[#2E8B57]" />}
+          iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 shadow-sm">
-          <span className="text-[10px] text-[#707070] uppercase font-semibold">3. Closing Count Valuation</span>
-          <p className="text-lg font-bold text-[#B8862D] font-mono">
-            -${totalPhysicalValuation.toFixed(2)}
-          </p>
-        </div>
+        <StatCard
+          title="3. Closing Count"
+          value={`-$${totalPhysicalValuation.toFixed(2)}`}
+          subtitle="Physical count valuation"
+          icon={<DollarSign className="w-4 h-4 text-[#B8862D]" />}
+          iconBgColor="bg-[#F1E4C5]/40 text-[#B8862D]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 shadow-sm">
-          <span className="text-[10px] text-[#707070] uppercase font-semibold">4. Actual Food Cost</span>
-          <p className="text-lg font-bold text-[#1C1C1C] font-mono">
-            =${calculatedFoodCost.toFixed(2)}
-          </p>
-        </div>
+        <StatCard
+          title="4. Actual Food Cost"
+          value={`=$${calculatedFoodCost.toFixed(2)}`}
+          subtitle="Formula: 1 + 2 - 3"
+          icon={<Calculator className="w-4 h-4 text-[#1C1C1C]" />}
+          iconBgColor="bg-gray-100 text-[#1C1C1C]"
+        />
       </div>
 
       {/* Live Physical Stock Reconciliation Entry */}
       {closingDraft && (
         <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
-            <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider">
-              Physical Stock Count & Automated Valuation Ledger ({activeOutlet.name})
-            </h3>
-            <span className="text-xs text-[#707070]">Formula: Opening + Purchases - Closing = Actual Consumption</span>
+          <div className="p-4 border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider font-['Outfit']">
+                Physical Stock Count & Automated Valuation Ledger ({activeOutlet.name})
+              </h3>
+              <p className="text-[11px] text-[#707070]">Formula: Opening + Purchases - Closing = Actual Consumption</p>
+            </div>
+            <Badge variant="purple">Active Cycle Reconciliation</Badge>
           </div>
 
           <div className="overflow-x-auto">
@@ -273,12 +264,12 @@ export const ClosingWorkspace: React.FC = () => {
               <thead>
                 <tr className="bg-white border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
                   <th className="p-3.5">Item Name</th>
-                  <th className="p-3.5">Unit Cost</th>
-                  <th className="p-3.5">Opening Qty</th>
-                  <th className="p-3.5">Received Qty</th>
-                  <th className="p-3.5">Theoretical Closing</th>
-                  <th className="p-3.5">Physical Count</th>
-                  <th className="p-3.5">Calculated Valuation</th>
+                  <th className="p-3.5 text-right">Unit Cost</th>
+                  <th className="p-3.5 text-right">Opening Qty</th>
+                  <th className="p-3.5 text-right">Received Qty</th>
+                  <th className="p-3.5 text-right">Theoretical Closing</th>
+                  <th className="p-3.5 text-right">Physical Count</th>
+                  <th className="p-3.5 text-right">Calculated Valuation</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[rgba(45,45,45,0.05)] font-mono">
@@ -292,11 +283,11 @@ export const ClosingWorkspace: React.FC = () => {
                         {ci.item_name}
                         <span className="block text-[10px] font-mono text-gray-400">{ci.item_code}</span>
                       </td>
-                      <td className="p-3.5 font-mono">${Number(ci.unit_cost).toFixed(2)}</td>
-                      <td className="p-3.5 font-mono text-gray-600">{ci.opening_qty} {ci.unit_symbol}</td>
-                      <td className="p-3.5 font-mono text-[#2E8B57] font-bold">+{ci.received_qty} {ci.unit_symbol}</td>
-                      <td className="p-3.5 font-mono text-gray-600">{ci.theoretical_closing_qty} {ci.unit_symbol}</td>
-                      <td className="p-3.5">
+                      <td className="p-3.5 text-right font-mono">${Number(ci.unit_cost).toFixed(2)}</td>
+                      <td className="p-3.5 text-right font-mono text-gray-600">{ci.opening_qty} {ci.unit_symbol}</td>
+                      <td className="p-3.5 text-right font-mono text-[#2E8B57] font-bold">+{ci.received_qty} {ci.unit_symbol}</td>
+                      <td className="p-3.5 text-right font-mono text-gray-600">{ci.theoretical_closing_qty} {ci.unit_symbol}</td>
+                      <td className="p-3.5 text-right">
                         <input
                           type="number"
                           min="0"
@@ -308,10 +299,10 @@ export const ClosingWorkspace: React.FC = () => {
                               [ci.item_id]: parseFloat(e.target.value) || 0,
                             })
                           }
-                          className="w-24 p-1.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-lg text-xs font-mono font-bold text-[#1C1C1C]"
+                          className="w-24 p-1.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl text-xs font-mono font-bold text-[#1C1C1C] text-right focus:outline-none focus:border-[#C79A3B]"
                         />
                       </td>
-                      <td className="p-3.5 font-mono font-bold text-[#B8862D]">${lineVal.toFixed(2)}</td>
+                      <td className="p-3.5 text-right font-mono font-bold text-[#B8862D]">${lineVal.toFixed(2)}</td>
                     </tr>
                   );
                 })}
@@ -325,16 +316,18 @@ export const ClosingWorkspace: React.FC = () => {
               placeholder="Closing Remarks / Auditor Notes..."
               value={closingNotes}
               onChange={(e) => setClosingNotes(e.target.value)}
-              className="flex-1 p-2 bg-white border border-[rgba(45,45,45,0.15)] rounded-xl text-xs"
+              className="flex-1 px-3.5 py-2.5 bg-white border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:outline-none focus:border-[#C79A3B]"
             />
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleSubmitReconciliation}
               disabled={submitting}
-              className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all"
+              loading={submitting}
+              icon={<CheckCircle2 className="w-4 h-4 text-[#C79A3B]" />}
             >
-              <CheckCircle2 className="w-4 h-4 text-[#C79A3B]" />
               {submitting ? 'Reconciling...' : 'Submit Physical Closing Count'}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -342,7 +335,7 @@ export const ClosingWorkspace: React.FC = () => {
       {/* Historical Closing Periods */}
       <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden space-y-2">
         <div className="p-4 border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
-          <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider">
+          <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider font-['Outfit']">
             Bi-Monthly Closing History & Food Cost Ledger
           </h3>
           <span className="text-xs text-[#707070]">{closingHistory.length} Period Records</span>
@@ -354,11 +347,11 @@ export const ClosingWorkspace: React.FC = () => {
               <tr className="bg-white border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
                 <th className="p-3.5">Period</th>
                 <th className="p-3.5">Branch</th>
-                <th className="p-3.5">Opening Value</th>
-                <th className="p-3.5">Purchases (GRN)</th>
-                <th className="p-3.5">Closing Value</th>
-                <th className="p-3.5">Actual Food Cost</th>
-                <th className="p-3.5">Variance %</th>
+                <th className="p-3.5 text-right">Opening Value</th>
+                <th className="p-3.5 text-right">Purchases (GRN)</th>
+                <th className="p-3.5 text-right">Closing Value</th>
+                <th className="p-3.5 text-right">Actual Food Cost</th>
+                <th className="p-3.5 text-right">Variance %</th>
                 <th className="p-3.5">Status</th>
                 <th className="p-3.5 text-right">Actions</th>
               </tr>
@@ -377,44 +370,46 @@ export const ClosingWorkspace: React.FC = () => {
                       {h.period_type === 'FIRST_HALF' ? '1st–15th' : '16th–End'} {h.year}-{h.month}
                     </td>
                     <td className="p-3.5 font-semibold text-[#1C1C1C]">{h.branch_name}</td>
-                    <td className="p-3.5 font-mono">${Number(h.opening_valuation).toFixed(2)}</td>
-                    <td className="p-3.5 font-mono text-[#2E8B57] font-bold">+${Number(h.total_purchases).toFixed(2)}</td>
-                    <td className="p-3.5 font-mono">${Number(h.closing_physical_valuation).toFixed(2)}</td>
-                    <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">${Number(h.actual_food_cost).toFixed(2)}</td>
-                    <td className={`p-3.5 font-mono font-bold ${Math.abs(Number(h.variance_percentage || 0)) > 5 ? 'text-red-600' : 'text-[#2E8B57]'}`}>
+                    <td className="p-3.5 text-right font-mono">${Number(h.opening_valuation).toFixed(2)}</td>
+                    <td className="p-3.5 text-right font-mono text-[#2E8B57] font-bold">+${Number(h.total_purchases).toFixed(2)}</td>
+                    <td className="p-3.5 text-right font-mono">${Number(h.closing_physical_valuation).toFixed(2)}</td>
+                    <td className="p-3.5 text-right font-mono font-bold text-[#1C1C1C]">${Number(h.actual_food_cost).toFixed(2)}</td>
+                    <td className={`p-3.5 text-right font-mono font-bold ${Math.abs(Number(h.variance_percentage || 0)) > 5 ? 'text-red-600' : 'text-[#2E8B57]'}`}>
                       {Number(h.variance_percentage || 0).toFixed(1)}%
                     </td>
                     <td className="p-3.5">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      <Badge
+                        variant={
                           h.status === 'LOCKED'
-                            ? 'bg-purple-100 text-purple-700'
+                            ? 'purple'
                             : h.status === 'SUBMITTED'
-                            ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
-                            : 'bg-gray-100 text-gray-700'
-                        }`}
+                            ? 'success'
+                            : 'neutral'
+                        }
                       >
                         {h.status}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="p-3.5 text-right space-x-1">
                       {h.status !== 'LOCKED' && (
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           onClick={() => handleLockClosing(h.id)}
-                          className="px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-[#1C1C1C] text-[11px] font-semibold"
-                          title="Lock Closing Snapshot"
+                          icon={<Lock className="w-3 h-3 text-gray-500" />}
                         >
-                          <Lock className="w-3 h-3 inline mr-1" /> Lock
-                        </button>
+                          Lock
+                        </Button>
                       )}
                       {h.status === 'LOCKED' && isHeadOffice && (
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           onClick={() => setReopenModalId(h.id)}
-                          className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-semibold"
-                          title="Reopen Closing Snapshot"
+                          icon={<Unlock className="w-3 h-3 text-amber-600" />}
                         >
-                          <Unlock className="w-3 h-3 inline mr-1" /> Reopen
-                        </button>
+                          Reopen
+                        </Button>
                       )}
                     </td>
                   </tr>
@@ -425,7 +420,7 @@ export const ClosingWorkspace: React.FC = () => {
         </div>
       </div>
 
-      {/* Core Mathematical Formulas (Deterministic Engine) */}
+      {/* Core Mathematical Formulas */}
       <div className="p-6 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-4 font-mono text-xs shadow-inner">
         <div className="flex items-center gap-2 font-sans font-bold text-sm text-[#1C1C1C]">
           <Calculator className="w-4 h-4 text-[#C79A3B]" />
@@ -460,41 +455,47 @@ export const ClosingWorkspace: React.FC = () => {
       </div>
 
       {/* Reopen Modal */}
-      {reopenModalId && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-xl border border-[rgba(45,45,45,0.1)]">
-            <h3 className="text-sm font-bold text-[#1C1C1C] flex items-center gap-2">
-              <Unlock className="w-4 h-4 text-amber-600" />
-              Reopen Locked Closing Cycle
-            </h3>
-            <p className="text-xs text-[#707070]">
-              Reopening an approved period allows stock reconciliation corrections but will generate a permanent compliance audit flag.
-            </p>
+      <Modal
+        isOpen={!!reopenModalId}
+        onClose={() => setReopenModalId(null)}
+        title="Reopen Locked Closing Cycle"
+        icon={<Unlock className="w-5 h-5 text-amber-600" />}
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-[#707070]">
+            Reopening an approved period allows stock reconciliation corrections but will generate a permanent compliance audit flag in the system log.
+          </p>
+          <div>
+            <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+              Justification / Reason *
+            </label>
             <textarea
               placeholder="Enter mandatory GM/Finance justification..."
               value={reopenReason}
               onChange={(e) => setReopenReason(e.target.value)}
               rows={3}
-              className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:outline-none"
+              className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:outline-none focus:border-[#C79A3B]"
             />
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => setReopenModalId(null)}
-                className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070]"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleReopenClosing}
-                disabled={!reopenReason.trim() || loading}
-                className="px-5 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700"
-              >
-                Reopen Period
-              </button>
-            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(45,45,45,0.06)]">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setReopenModalId(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleReopenClosing}
+              disabled={!reopenReason.trim() || loading}
+            >
+              Reopen Period
+            </Button>
           </div>
         </div>
-      )}
+      </Modal>
     </div>
   );
 };

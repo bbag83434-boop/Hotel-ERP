@@ -33,6 +33,7 @@ import {
   WastageItemInput,
 } from '@/types/wastage.types';
 import { Item, Warehouse } from '@/types/inventory.types';
+import { Badge, Button, StatCard, SearchInput, AlertBanner, EmptyState, Modal } from '@/components/ui';
 
 export const WastageWorkspace: React.FC = () => {
   const { activeOutlet } = useOutlet();
@@ -45,6 +46,7 @@ export const WastageWorkspace: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Log New Form State
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('');
@@ -53,8 +55,6 @@ export const WastageWorkspace: React.FC = () => {
     { item_id: '', quantity: 1, reason_code: 'EXPIRED', notes: '' },
   ]);
   const [submitting, setSubmitting] = useState<boolean>(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Selected Entry for Detail / Rejection Modal
   const [selectedEntry, setSelectedEntry] = useState<WastageEntry | null>(null);
@@ -63,7 +63,7 @@ export const WastageWorkspace: React.FC = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    setErrorMessage(null);
+    setFeedback(null);
     try {
       const [entriesRes, analyticsRes, reasonsRes, whRes, itemsRes] = await Promise.all([
         wastageApi.getEntries({ branch_id: activeOutlet.id }).catch(() => []),
@@ -83,7 +83,10 @@ export const WastageWorkspace: React.FC = () => {
         setSelectedWarehouseId(whRes[0].id);
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to load wastage records');
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.message || err?.message || 'Failed to load wastage records',
+      });
     } finally {
       setLoading(false);
     }
@@ -112,7 +115,6 @@ export const WastageWorkspace: React.FC = () => {
     const updated = [...formItems];
     updated[idx] = { ...updated[idx], [field]: value };
 
-    // Auto populate unit_cost if item_id changed
     if (field === 'item_id') {
       const selectedItem = items.find((itm) => itm.id === value);
       if (selectedItem) {
@@ -132,18 +134,16 @@ export const WastageWorkspace: React.FC = () => {
   // Submit new wastage entry
   const handleCreateEntry = async (autoSubmit: boolean) => {
     if (!selectedWarehouseId) {
-      setErrorMessage('Please select a storage warehouse.');
+      setFeedback({ type: 'error', message: 'Please select a storage warehouse.' });
       return;
     }
     const validItems = formItems.filter((fi) => fi.item_id && fi.quantity > 0);
     if (validItems.length === 0) {
-      setErrorMessage('Please add at least one valid item with quantity > 0.');
+      setFeedback({ type: 'error', message: 'Please add at least one valid item with quantity > 0.' });
       return;
     }
 
     setSubmitting(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
     try {
       const created = await wastageApi.createEntry({
         branch_id: activeOutlet.id,
@@ -152,13 +152,19 @@ export const WastageWorkspace: React.FC = () => {
         items: validItems,
         auto_submit: autoSubmit,
       });
-      setSuccessMessage(`Wastage Entry #${created.entry_number} logged successfully!`);
+      setFeedback({
+        type: 'success',
+        message: `Wastage Entry #${created.entry_number} logged successfully!`,
+      });
       setFormItems([{ item_id: '', quantity: 1, reason_code: 'EXPIRED', notes: '' }]);
       setEntryNotes('');
       setActiveTab('entries');
       fetchData();
     } catch (err: any) {
-      setErrorMessage(err.response?.data?.detail || err.message || 'Failed to log wastage entry');
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.detail || err.message || 'Failed to log wastage entry',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -166,31 +172,42 @@ export const WastageWorkspace: React.FC = () => {
 
   // Approve Entry
   const handleApprove = async (id: string) => {
-    setErrorMessage(null);
     try {
       await wastageApi.approveEntry(id);
-      setSuccessMessage('Wastage record approved and inventory balances updated!');
+      setFeedback({
+        type: 'success',
+        message: 'Wastage record approved and inventory balances updated!',
+      });
       fetchData();
     } catch (err: any) {
-      setErrorMessage(err.response?.data?.detail || err.message || 'Failed to approve wastage');
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.detail || err.message || 'Failed to approve wastage',
+      });
     }
   };
 
   // Reject Entry
   const handleRejectConfirm = async () => {
     if (!selectedEntry || !rejectionReason.trim()) {
-      setErrorMessage('Rejection reason is required.');
+      setFeedback({ type: 'error', message: 'Rejection reason is required.' });
       return;
     }
     try {
       await wastageApi.rejectEntry(selectedEntry.id, { rejection_reason: rejectionReason });
-      setSuccessMessage(`Wastage #${selectedEntry.entry_number} rejected.`);
+      setFeedback({
+        type: 'success',
+        message: `Wastage #${selectedEntry.entry_number} rejected.`,
+      });
       setRejectionModalOpen(false);
       setSelectedEntry(null);
       setRejectionReason('');
       fetchData();
     } catch (err: any) {
-      setErrorMessage(err.response?.data?.detail || err.message || 'Failed to reject wastage');
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.detail || err.message || 'Failed to reject wastage',
+      });
     }
   };
 
@@ -218,76 +235,74 @@ export const WastageWorkspace: React.FC = () => {
               <AlertTriangle className="w-5 h-5 text-[#D9534F]" />
               Wastage & Food Loss Management
             </h2>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
-              [{activeOutlet.code}]
-            </span>
+            <Badge variant="outlet">[{activeOutlet.code}]</Badge>
           </div>
           <p className="text-xs text-[#707070] mt-0.5">
             Log, authorize, and audit kitchen spoilage, prep loss, and inventory write-offs with reason codes and FIFO deduction.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="danger"
+            size="sm"
             onClick={() => setActiveTab('log_new')}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#D9534F] hover:bg-[#c9302c] text-white text-xs font-bold transition-all shadow-sm active:scale-95"
+            icon={<Plus className="w-3.5 h-3.5" />}
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Log Wastage</span>
-          </button>
-          <button
+            Log Wastage
+          </Button>
+
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={fetchData}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm active:scale-95 disabled:opacity-60"
+            loading={loading}
+            icon={<RefreshCw className="w-3.5 h-3.5 text-[#C79A3B]" />}
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
-            <span>Sync</span>
-          </button>
+            Sync Data
+          </Button>
         </div>
       </div>
+
+      {/* Feedback Banner */}
+      <AlertBanner feedback={feedback} onClose={() => setFeedback(null)} />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Approved Loss</span>
-            <DollarSign className="w-4 h-4 text-[#D9534F]" />
-          </div>
-          <p className="text-2xl font-bold text-[#D9534F] font-['Outfit']">
-            ₹{approvedTotalCost.toFixed(2)}
-          </p>
-          <p className="text-[10px] text-[#707070] mt-1">Total written-off valuation</p>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard
+          title="Approved Loss"
+          value={`$${approvedTotalCost.toFixed(2)}`}
+          subtitle="Total written-off valuation"
+          icon={<DollarSign className="w-4 h-4 text-[#D9534F]" />}
+          iconBgColor="bg-red-50 text-[#D9534F]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Pending Authorizations</span>
-            <Clock className="w-4 h-4 text-[#D99625]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{pendingCount}</p>
-          <p className="text-[10px] text-[#D99625] mt-1 font-medium">Requiring Manager Approval</p>
-        </div>
+        <StatCard
+          title="Pending Approval"
+          value={pendingCount}
+          subtitle="Requiring Manager Review"
+          icon={<Clock className="w-4 h-4 text-[#D99625]" />}
+          iconBgColor="bg-amber-50 text-[#D99625]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Total Entries Logged</span>
-            <FileText className="w-4 h-4 text-[#C79A3B]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{entries.length}</p>
-          <p className="text-[10px] text-[#707070] mt-1 font-medium">Audit records recorded</p>
-        </div>
+        <StatCard
+          title="Total Logged"
+          value={entries.length}
+          subtitle="Audit records logged"
+          icon={<FileText className="w-4 h-4 text-[#C79A3B]" />}
+          iconBgColor="bg-[#FAF8F5] text-[#C79A3B]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Approval Threshold</span>
-            <ShieldCheck className="w-4 h-4 text-[#2E8B57]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">₹1,000.00</p>
-          <p className="text-[10px] text-[#2E8B57] mt-1 font-medium">Auto-triggers HO approval</p>
-        </div>
+        <StatCard
+          title="HO Threshold"
+          value="$1,000.00"
+          subtitle="Auto-triggers HO approval"
+          icon={<ShieldCheck className="w-4 h-4 text-[#2E8B57]" />}
+          iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
+        />
       </div>
 
-      {/* Abnormal Spoilage Alert Banner if any */}
+      {/* Abnormal Spoilage Alert Banner */}
       {analytics && analytics.abnormal_alerts && analytics.abnormal_alerts.length > 0 && (
         <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
           <div className="flex items-center gap-2 font-bold text-amber-800">
@@ -297,7 +312,7 @@ export const WastageWorkspace: React.FC = () => {
           {analytics.abnormal_alerts.map((al, idx) => (
             <div key={idx} className="text-[11px] flex items-center justify-between">
               <span>
-                <strong>{al.branch_name}:</strong> Recorded ₹{al.current_cost.toFixed(2)} (+{al.surge_percentage}% above baseline)
+                <strong>{al.branch_name}:</strong> Recorded ${al.current_cost.toFixed(2)} (+{al.surge_percentage}% above baseline)
               </span>
               <span className="text-amber-700 italic">{al.reason}</span>
             </div>
@@ -305,60 +320,45 @@ export const WastageWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* Messages */}
-      {errorMessage && (
-        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span>{errorMessage}</span>
-        </div>
-      )}
-      {successMessage && (
-        <div className="p-4 rounded-xl bg-green-50 border border-green-200 text-xs text-green-700 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-          <span>{successMessage}</span>
-        </div>
-      )}
-
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-[rgba(45,45,45,0.08)] pb-2">
+      {/* Sub-Navigation Tabs */}
+      <div className="flex items-center gap-1.5 p-1.5 bg-white border border-[rgba(45,45,45,0.08)] rounded-2xl shadow-xs overflow-x-auto">
         <button
           onClick={() => setActiveTab('entries')}
-          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'entries'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'text-[#707070] hover:bg-[#FAF8F5] hover:text-[#1C1C1C]'
+              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
           }`}
         >
-          <div className="flex items-center gap-2">
-            <Trash2 className="w-4 h-4" />
-            <span>Wastage Audit Log ({entries.length})</span>
-          </div>
+          <Trash2 className="w-4 h-4" />
+          <span>Wastage Audit Log</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-[rgba(45,45,45,0.08)] text-[#1C1C1C]">
+            {entries.length}
+          </span>
         </button>
+
         <button
           onClick={() => setActiveTab('log_new')}
-          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'log_new'
-              ? 'bg-[#D9534F] text-white shadow-sm'
-              : 'text-[#707070] hover:bg-[#FAF8F5] hover:text-[#1C1C1C]'
+              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
           }`}
         >
-          <div className="flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            <span>Log New Wastage</span>
-          </div>
+          <Plus className="w-4 h-4" />
+          <span>Log New Wastage</span>
         </button>
+
         <button
           onClick={() => setActiveTab('analytics')}
-          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'analytics'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'text-[#707070] hover:bg-[#FAF8F5] hover:text-[#1C1C1C]'
+              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
           }`}
         >
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-4 h-4" />
-            <span>Loss Analytics & Outlet Comparison</span>
-          </div>
+          <BarChart3 className="w-4 h-4" />
+          <span>Loss Analytics & Insights</span>
         </button>
       </div>
 
@@ -372,9 +372,9 @@ export const WastageWorkspace: React.FC = () => {
                 <button
                   key={st}
                   onClick={() => setStatusFilter(st)}
-                  className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${
                     statusFilter === st
-                      ? 'bg-[#1C1C1C] text-white'
+                      ? 'bg-[#1C1C1C] text-white shadow-xs'
                       : 'bg-white border border-[rgba(45,45,45,0.1)] text-[#707070] hover:bg-[#FAF8F5]'
                   }`}
                 >
@@ -384,16 +384,12 @@ export const WastageWorkspace: React.FC = () => {
             </div>
 
             {/* Search */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
-              <input
-                type="text"
-                placeholder="Search wastage # or notes..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-56 sm:w-64 pl-8 pr-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
-              />
-            </div>
+            <SearchInput
+              value={searchQuery}
+              onChangeValue={setSearchQuery}
+              placeholder="Search wastage # or notes..."
+              className="w-full sm:w-72"
+            />
           </div>
 
           {loading ? (
@@ -402,15 +398,23 @@ export const WastageWorkspace: React.FC = () => {
               <span>Loading wastage ledger...</span>
             </div>
           ) : filteredEntries.length === 0 ? (
-            <div className="p-8 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] text-xs text-[#707070] space-y-2">
-              <Trash2 className="w-8 h-8 mx-auto text-[#D9534F]/40" />
-              <p className="font-semibold text-[#1C1C1C]">No wastage records match filter</p>
-              <p className="max-w-md mx-auto">
-                Log spoilage, prep discard, or QC defect items to track loss and deduct stock.
-              </p>
-            </div>
+            <EmptyState
+              title="No Wastage Records Found"
+              description="Log spoilage, prep discard, or QC defect items to track loss and deduct stock."
+              icon={<Trash2 className="w-6 h-6 text-[#D9534F]" />}
+              action={
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setActiveTab('log_new')}
+                  icon={<Plus className="w-3.5 h-3.5" />}
+                >
+                  Log First Record
+                </Button>
+              }
+            />
           ) : (
-            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden shadow-sm">
+            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden shadow-xs">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-[#FAF8F5] text-[#707070] font-bold border-b border-[rgba(45,45,45,0.08)]">
@@ -419,7 +423,7 @@ export const WastageWorkspace: React.FC = () => {
                       <th className="p-3.5">Date</th>
                       <th className="p-3.5">Storage Warehouse</th>
                       <th className="p-3.5">Items</th>
-                      <th className="p-3.5">Total Valuation</th>
+                      <th className="p-3.5 text-right">Total Valuation</th>
                       <th className="p-3.5">Status</th>
                       <th className="p-3.5">Reported By</th>
                       <th className="p-3.5 text-right">Actions</th>
@@ -441,23 +445,23 @@ export const WastageWorkspace: React.FC = () => {
                           <td className="p-3.5 font-semibold text-[#1C1C1C]">
                             {e.total_items_count} items
                           </td>
-                          <td className="p-3.5 font-bold text-[#D9534F]">
-                            ₹{Number(e.total_cost).toFixed(2)}
+                          <td className="p-3.5 text-right font-mono font-bold text-[#D9534F]">
+                            ${Number(e.total_cost).toFixed(2)}
                           </td>
                           <td className="p-3.5">
-                            <span
-                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            <Badge
+                              variant={
                                 e.status === 'APPROVED'
-                                  ? 'bg-green-50 text-green-700 border border-green-200'
+                                  ? 'success'
                                   : e.status === 'PENDING_APPROVAL'
-                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  ? 'warning'
                                   : e.status === 'REJECTED'
-                                  ? 'bg-red-50 text-red-700 border border-red-200'
-                                  : 'bg-gray-50 text-gray-700 border border-gray-200'
-                              }`}
+                                  ? 'danger'
+                                  : 'neutral'
+                              }
                             >
                               {e.status.replace('_', ' ')}
-                            </span>
+                            </Badge>
                           </td>
                           <td className="p-3.5 text-[#707070]">
                             {e.reported_by_name || 'Staff'}
@@ -486,15 +490,16 @@ export const WastageWorkspace: React.FC = () => {
                                 </>
                               )}
                               {e.status === 'DRAFT' && (
-                                <button
+                                <Button
+                                  variant="primary"
+                                  size="sm"
                                   onClick={async () => {
                                     await wastageApi.submitEntry(e.id);
                                     fetchData();
                                   }}
-                                  className="px-2.5 py-1 rounded-lg bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white text-[11px] font-semibold transition-all active:scale-95"
                                 >
                                   Submit
-                                </button>
+                                </Button>
                               )}
                             </div>
                           </td>
@@ -512,7 +517,7 @@ export const WastageWorkspace: React.FC = () => {
                                   {e.items.map((itm) => (
                                     <div
                                       key={itm.id}
-                                      className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)] text-[11px] flex items-center justify-between"
+                                      className="p-2.5 rounded-xl bg-white border border-[rgba(45,45,45,0.06)] text-[11px] flex items-center justify-between"
                                     >
                                       <div>
                                         <span className="font-bold text-[#1C1C1C] block">
@@ -526,8 +531,8 @@ export const WastageWorkspace: React.FC = () => {
                                         <span className="font-bold text-[#1C1C1C] block">
                                           {Number(itm.quantity).toFixed(2)} {itm.unit_symbol}
                                         </span>
-                                        <span className="text-[10px] text-[#D9534F]">
-                                          ₹{Number(itm.total_cost).toFixed(2)}
+                                        <span className="text-[10px] text-[#D9534F] font-semibold">
+                                          ${Number(itm.total_cost).toFixed(2)}
                                         </span>
                                       </div>
                                     </div>
@@ -556,19 +561,19 @@ export const WastageWorkspace: React.FC = () => {
               Record Kitchen / Storage Wastage
             </h3>
             <p className="text-xs text-[#707070] mt-0.5">
-              Specify wasted ingredients or finished items with mandatory reason codes. Entries over ₹1,000 require manager approval.
+              Specify wasted ingredients or finished items with mandatory reason codes. Entries over $1,000 require manager approval.
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-semibold text-[#1C1C1C] block mb-1">
-                Storage / Kitchen Warehouse
+              <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                Storage / Kitchen Warehouse *
               </label>
               <select
                 value={selectedWarehouseId}
                 onChange={(e) => setSelectedWarehouseId(e.target.value)}
-                className="w-full p-2.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
+                className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
               >
                 {warehouses.map((w) => (
                   <option key={w.id} value={w.id}>
@@ -579,7 +584,7 @@ export const WastageWorkspace: React.FC = () => {
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-[#1C1C1C] block mb-1">
+              <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
                 General Audit Notes
               </label>
               <input
@@ -587,7 +592,7 @@ export const WastageWorkspace: React.FC = () => {
                 placeholder="e.g. End of shift inspection / cooler breakdown..."
                 value={entryNotes}
                 onChange={(e) => setEntryNotes(e.target.value)}
-                className="w-full p-2.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
+                className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
               />
             </div>
           </div>
@@ -598,13 +603,14 @@ export const WastageWorkspace: React.FC = () => {
               <span className="text-xs font-bold text-[#1C1C1C] font-['Outfit']">
                 Wasted Items List ({formItems.length})
               </span>
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={handleAddItemRow}
-                className="flex items-center gap-1 text-xs font-bold text-[#C79A3B] hover:text-[#b8862d]"
+                icon={<Plus className="w-3.5 h-3.5 text-[#C79A3B]" />}
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Item</span>
-              </button>
+                Add Item
+              </Button>
             </div>
 
             <div className="space-y-2.5">
@@ -615,7 +621,7 @@ export const WastageWorkspace: React.FC = () => {
                 >
                   <div className="sm:col-span-4">
                     <label className="text-[11px] font-semibold text-[#707070] block mb-1">
-                      Select Item
+                      Select Item *
                     </label>
                     <select
                       value={fi.item_id}
@@ -625,7 +631,7 @@ export const WastageWorkspace: React.FC = () => {
                       <option value="">-- Choose Item --</option>
                       {items.map((itm) => (
                         <option key={itm.id} value={itm.id}>
-                          {itm.name} ({itm.code}) - ₹{Number((itm as any).cost_price || (itm as any).costPrice || 0).toFixed(2)}
+                          {itm.name} ({itm.code}) - ${Number((itm as any).cost_price || (itm as any).costPrice || 0).toFixed(2)}
                         </option>
                       ))}
                     </select>
@@ -633,7 +639,7 @@ export const WastageWorkspace: React.FC = () => {
 
                   <div className="sm:col-span-2">
                     <label className="text-[11px] font-semibold text-[#707070] block mb-1">
-                      Wasted Qty
+                      Wasted Qty *
                     </label>
                     <input
                       type="number"
@@ -706,31 +712,34 @@ export const WastageWorkspace: React.FC = () => {
             <div>
               <span className="text-xs text-[#707070] block">Estimated Total Loss Valuation</span>
               <span className="text-xl font-bold text-[#D9534F] font-['Outfit']">
-                ₹{calculatedTotalCost.toFixed(2)}
+                ${calculatedTotalCost.toFixed(2)}
               </span>
               {calculatedTotalCost >= 1000 && (
                 <span className="text-[10px] text-amber-700 font-semibold block mt-0.5">
-                  ⚠ Exceeds ₹1,000 threshold — will require Manager Approval
+                  ⚠ Exceeds $1,000 threshold — will require Manager Approval
                 </span>
               )}
             </div>
 
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                variant="secondary"
+                size="md"
                 onClick={() => handleCreateEntry(false)}
                 disabled={submitting}
-                className="px-4 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all active:scale-95 disabled:opacity-50"
               >
                 Save as Draft
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="danger"
+                size="md"
                 onClick={() => handleCreateEntry(true)}
                 disabled={submitting}
-                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#D9534F] hover:bg-[#c9302c] text-white text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-50"
+                loading={submitting}
+                icon={<Check className="w-3.5 h-3.5" />}
               >
-                <Check className="w-3.5 h-3.5" />
-                <span>{submitting ? 'Logging...' : 'Submit Wastage'}</span>
-              </button>
+                {submitting ? 'Logging...' : 'Submit Wastage'}
+              </Button>
             </div>
           </div>
         </div>
@@ -764,14 +773,14 @@ export const WastageWorkspace: React.FC = () => {
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-[#707070] pt-1">
                     <span>{val.count} incidents</span>
-                    <span className="font-bold text-[#1C1C1C]">₹{val.total_cost.toFixed(2)}</span>
+                    <span className="font-bold text-[#1C1C1C]">${val.total_cost.toFixed(2)}</span>
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Top 10 Wasted Items */}
+          {/* Top High Loss Items */}
           <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-3">
             <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">
               Top High-Loss Ingredients & Items
@@ -782,7 +791,7 @@ export const WastageWorkspace: React.FC = () => {
                   <tr>
                     <th className="p-3">Item Name</th>
                     <th className="p-3">Code</th>
-                    <th className="p-3">Total Qty Lost</th>
+                    <th className="p-3 text-right">Total Qty Lost</th>
                     <th className="p-3">Primary Reason</th>
                     <th className="p-3 text-right">Total Cost</th>
                   </tr>
@@ -792,16 +801,14 @@ export const WastageWorkspace: React.FC = () => {
                     <tr key={itm.item_id} className="hover:bg-[#FAF8F5]/50">
                       <td className="p-3 font-semibold text-[#1C1C1C]">{itm.item_name}</td>
                       <td className="p-3 font-mono text-[#707070]">{itm.item_code}</td>
-                      <td className="p-3 font-mono font-bold text-[#1C1C1C]">
+                      <td className="p-3 text-right font-mono font-bold text-[#1C1C1C]">
                         {Number(itm.quantity).toFixed(2)}
                       </td>
                       <td className="p-3">
-                        <span className="px-2 py-0.5 rounded bg-gray-100 text-[10px] font-semibold text-[#707070]">
-                          {itm.primary_reason}
-                        </span>
+                        <Badge variant="neutral">{itm.primary_reason}</Badge>
                       </td>
-                      <td className="p-3 text-right font-bold text-[#D9534F]">
-                        ₹{Number(itm.total_cost).toFixed(2)}
+                      <td className="p-3 text-right font-mono font-bold text-[#D9534F]">
+                        ${Number(itm.total_cost).toFixed(2)}
                       </td>
                     </tr>
                   ))}
@@ -812,57 +819,50 @@ export const WastageWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* Rejection Modal */}
-      {rejectionModalOpen && selectedEntry && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4 shadow-xl border border-[rgba(45,45,45,0.1)] animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between">
-              <h4 className="font-bold text-sm text-[#1C1C1C]">
-                Reject Wastage #{selectedEntry.entry_number}
-              </h4>
-              <button
-                onClick={() => setRejectionModalOpen(false)}
-                className="text-[#707070] hover:text-[#1C1C1C]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Rejection Reason Modal */}
+      <Modal
+        isOpen={rejectionModalOpen && !!selectedEntry}
+        onClose={() => setRejectionModalOpen(false)}
+        title={`Reject Wastage Record #${selectedEntry?.entry_number}`}
+        icon={<AlertTriangle className="w-5 h-5 text-red-600" />}
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-[#707070]">
+            Rejecting this record will NOT deduct stock from the warehouse. Please provide a mandatory reason for the audit trail.
+          </p>
 
-            <p className="text-xs text-[#707070]">
-              Rejecting this record will NOT deduct stock from the warehouse. Please provide a mandatory reason for audit.
-            </p>
+          <div>
+            <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+              Reason for Rejection *
+            </label>
+            <textarea
+              rows={3}
+              placeholder="e.g. Unverified spoilage / items were repurposed / count discrepancy..."
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              className="w-full p-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
+            />
+          </div>
 
-            <div>
-              <label className="text-xs font-semibold text-[#1C1C1C] block mb-1">
-                Reason for Rejection *
-              </label>
-              <textarea
-                rows={3}
-                placeholder="e.g. Unverified spoilage / items were repurposed / count discrepancy..."
-                value={rejectionReason}
-                onChange={(e) => setRejectionReason(e.target.value)}
-                className="w-full p-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                onClick={() => setRejectionModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] text-xs font-semibold text-[#1C1C1C]"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRejectConfirm}
-                disabled={!rejectionReason.trim()}
-                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold disabled:opacity-50"
-              >
-                Confirm Rejection
-              </button>
-            </div>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(45,45,45,0.06)]">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setRejectionModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleRejectConfirm}
+              disabled={!rejectionReason.trim()}
+            >
+              Confirm Rejection
+            </Button>
           </div>
         </div>
-      )}
+      </Modal>
     </div>
   );
 };

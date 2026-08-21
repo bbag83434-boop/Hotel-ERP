@@ -241,6 +241,18 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 export function useOutlet(): OutletContextType {
   const context = useContext(OutletContext);
   if (!context) {
+    if (typeof window === 'undefined') {
+      return {
+        outlets: [],
+        currentOutlet: { id: 'dummy', code: 'DUMMY', name: 'Dummy', type: 'RESTAURANT_OUTLET', isActive: true },
+        activeOutlet: { id: 'dummy', code: 'DUMMY', name: 'Dummy', type: 'RESTAURANT_OUTLET', isActive: true },
+        setActiveOutlet: () => {},
+        isLoading: false,
+        isHeadOffice: false,
+        closingInfo: { periodType: 'FIRST_HALF', year: 2026, month: 1, startDate: '', endDate: '', daysRemaining: 0, label: '' },
+        refreshOutlets: async () => {},
+      };
+    }
     throw new Error('useOutlet must be used within an OutletProvider');
   }
   return context;

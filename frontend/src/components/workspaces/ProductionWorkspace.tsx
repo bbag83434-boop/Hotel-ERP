@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { Recipe, ProductionOrder, ProductionPreview } from '@/types/production.types';
 import { Warehouse } from '@/types/inventory.types';
+import { Badge, Button, StatCard, SearchInput, AlertBanner, EmptyState } from '@/components/ui';
 
 export const ProductionWorkspace: React.FC = () => {
   const { activeOutlet } = useOutlet();
@@ -33,6 +34,7 @@ export const ProductionWorkspace: React.FC = () => {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Batch Prep State
   const [selectedRecipeId, setSelectedRecipeId] = useState<string>('');
@@ -41,12 +43,10 @@ export const ProductionWorkspace: React.FC = () => {
   const [previewData, setPreviewData] = useState<ProductionPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState<boolean>(false);
   const [executing, setExecuting] = useState<boolean>(false);
-  const [executionSuccess, setExecutionSuccess] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
-    setErrorMessage(null);
+    setFeedback(null);
     try {
       const [recipesRes, ordersRes, whRes] = await Promise.all([
         productionApi.getRecipes().catch(() => []),
@@ -64,7 +64,10 @@ export const ProductionWorkspace: React.FC = () => {
         setSelectedRecipeId(recipesRes[0].id);
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to load production data');
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.message || err?.message || 'Failed to load production data',
+      });
     } finally {
       setLoading(false);
     }
@@ -78,8 +81,7 @@ export const ProductionWorkspace: React.FC = () => {
   const handlePreview = async () => {
     if (!selectedRecipeId || !selectedWarehouseId || plannedQty <= 0) return;
     setPreviewLoading(true);
-    setErrorMessage(null);
-    setExecutionSuccess(null);
+    setFeedback(null);
     try {
       const preview = await productionApi.previewProduction({
         recipe_id: selectedRecipeId,
@@ -88,7 +90,10 @@ export const ProductionWorkspace: React.FC = () => {
       });
       setPreviewData(preview);
     } catch (err: any) {
-      setErrorMessage(err.response?.data?.detail || err.message || 'Failed to preview production');
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.detail || err.message || 'Failed to preview production',
+      });
     } finally {
       setPreviewLoading(false);
     }
@@ -98,8 +103,7 @@ export const ProductionWorkspace: React.FC = () => {
   const handleExecuteBatch = async () => {
     if (!selectedRecipeId || !selectedWarehouseId || plannedQty <= 0) return;
     setExecuting(true);
-    setErrorMessage(null);
-    setExecutionSuccess(null);
+    setFeedback(null);
     try {
       const order = await productionApi.executeProduction({
         recipe_id: selectedRecipeId,
@@ -107,11 +111,17 @@ export const ProductionWorkspace: React.FC = () => {
         kitchen_warehouse_id: selectedWarehouseId,
         actual_yield_qty: plannedQty,
       });
-      setExecutionSuccess(`Production Batch #${order.orderNumber} successfully executed and stock updated!`);
+      setFeedback({
+        type: 'success',
+        message: `Production Batch #${order.orderNumber} successfully executed and stock updated!`,
+      });
       setPreviewData(null);
       fetchData();
     } catch (err: any) {
-      setErrorMessage(err.response?.data?.detail || err.message || 'Failed to execute production run');
+      setFeedback({
+        type: 'error',
+        message: err.response?.data?.detail || err.message || 'Failed to execute production run',
+      });
     } finally {
       setExecuting(false);
     }
@@ -139,9 +149,7 @@ export const ProductionWorkspace: React.FC = () => {
               <ChefHat className="w-5 h-5 text-[#C79A3B]" />
               Production & Recipe System
             </h2>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
-              [{activeOutlet.code}]
-            </span>
+            <Badge variant="outlet">[{activeOutlet.code}]</Badge>
           </div>
           <p className="text-xs text-[#707070] mt-0.5">
             Standard recipes (BOM), ingredient costing, yield control, and automated kitchen batch production runs.
@@ -149,128 +157,114 @@ export const ProductionWorkspace: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={fetchData}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm active:scale-95 disabled:opacity-60"
+            loading={loading}
+            icon={<RefreshCw className="w-3.5 h-3.5 text-[#C79A3B]" />}
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
-            <span>Sync</span>
-          </button>
+            Sync Production
+          </Button>
         </div>
       </div>
+
+      {/* Feedback Banner */}
+      <AlertBanner feedback={feedback} onClose={() => setFeedback(null)} />
 
       {/* Overview Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Active Recipes / BOM</span>
-            <ChefHat className="w-4 h-4 text-[#C79A3B]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{recipes.length}</p>
-          <p className="text-[10px] text-[#2E8B57] mt-1 font-medium">Standardized Multi-Outlet Menu</p>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <StatCard
+          title="Active Recipes"
+          value={recipes.length}
+          subtitle="Standard Multi-Outlet BOM"
+          icon={<ChefHat className="w-4 h-4 text-[#C79A3B]" />}
+          iconBgColor="bg-[#FAF8F5] text-[#C79A3B]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Batch Orders</span>
-            <Boxes className="w-4 h-4 text-[#C79A3B]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{orders.length}</p>
-          <p className="text-[10px] text-[#707070] mt-1 font-medium">Production runs logged</p>
-        </div>
+        <StatCard
+          title="Batch Orders"
+          value={orders.length}
+          subtitle="Production runs logged"
+          icon={<Boxes className="w-4 h-4 text-[#3978B8]" />}
+          iconBgColor="bg-blue-50 text-[#3978B8]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Production Kitchens</span>
-            <Flame className="w-4 h-4 text-[#D99625]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{warehouses.length}</p>
-          <p className="text-[10px] text-[#D99625] mt-1 font-medium">Kitchen Warehouses Ready</p>
-        </div>
+        <StatCard
+          title="Kitchen Units"
+          value={warehouses.length}
+          subtitle="Production Kitchens Ready"
+          icon={<Flame className="w-4 h-4 text-[#D99625]" />}
+          iconBgColor="bg-amber-50 text-[#D99625]"
+        />
 
-        <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Real-Time Yield</span>
-            <Percent className="w-4 h-4 text-[#2E8B57]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">FIFO Auto</p>
-          <p className="text-[10px] text-[#2E8B57] mt-1 font-medium">Automatic stock deduction & conversion</p>
-        </div>
+        <StatCard
+          title="Real-Time Yield"
+          value="FIFO Auto"
+          subtitle="Direct stock conversion"
+          icon={<Percent className="w-4 h-4 text-[#2E8B57]" />}
+          iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
+        />
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-[rgba(45,45,45,0.08)] pb-2">
+      {/* Sub-Navigation Tabs */}
+      <div className="flex items-center gap-1.5 p-1.5 bg-white border border-[rgba(45,45,45,0.08)] rounded-2xl shadow-xs overflow-x-auto">
         <button
           onClick={() => setActiveTab('recipes')}
-          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'recipes'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'text-[#707070] hover:bg-[#FAF8F5] hover:text-[#1C1C1C]'
+              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
           }`}
         >
-          <div className="flex items-center gap-2">
-            <ChefHat className="w-4 h-4" />
-            <span>Recipe & BOM Directory ({recipes.length})</span>
-          </div>
+          <ChefHat className="w-4 h-4" />
+          <span>Recipe & BOM Directory</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-[rgba(45,45,45,0.08)] text-[#1C1C1C]">
+            {recipes.length}
+          </span>
         </button>
+
         <button
           onClick={() => setActiveTab('orders')}
-          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'orders'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'text-[#707070] hover:bg-[#FAF8F5] hover:text-[#1C1C1C]'
+              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
           }`}
         >
-          <div className="flex items-center gap-2">
-            <Boxes className="w-4 h-4" />
-            <span>Batch Runs & History ({orders.length})</span>
-          </div>
+          <Boxes className="w-4 h-4" />
+          <span>Batch Runs & History</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-[rgba(45,45,45,0.08)] text-[#1C1C1C]">
+            {orders.length}
+          </span>
         </button>
+
         <button
           onClick={() => setActiveTab('batch_prep')}
-          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'batch_prep'
-              ? 'bg-[#C79A3B] text-white shadow-sm'
-              : 'text-[#707070] hover:bg-[#FAF8F5] hover:text-[#1C1C1C]'
+              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
           }`}
         >
-          <div className="flex items-center gap-2">
-            <Flame className="w-4 h-4" />
-            <span>Batch Prep Execution Tool</span>
-          </div>
+          <Flame className="w-4 h-4" />
+          <span>Batch Prep Execution Tool</span>
         </button>
       </div>
-
-      {/* Messages */}
-      {errorMessage && (
-        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span>{errorMessage}</span>
-        </div>
-      )}
-      {executionSuccess && (
-        <div className="p-4 rounded-xl bg-green-50 border border-green-200 text-xs text-green-700 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-          <span>{executionSuccess}</span>
-        </div>
-      )}
 
       {/* Tab 1: Recipe & BOM Directory */}
       {activeTab === 'recipes' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Standard Recipe Registry</h3>
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
-              <input
-                type="text"
-                placeholder="Search recipes by name or code..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-56 sm:w-72 pl-8 pr-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
-              />
-            </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">
+              Standard Recipe Registry ({filteredRecipes.length})
+            </h3>
+            <SearchInput
+              value={searchQuery}
+              onChangeValue={setSearchQuery}
+              placeholder="Search recipes by name or code..."
+              className="w-full sm:w-72"
+            />
           </div>
 
           {loading ? (
@@ -279,88 +273,85 @@ export const ProductionWorkspace: React.FC = () => {
               <span>Loading recipe registry...</span>
             </div>
           ) : filteredRecipes.length === 0 ? (
-            <div className="p-8 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] text-xs text-[#707070] space-y-2">
-              <ChefHat className="w-8 h-8 mx-auto text-[#C79A3B]/50" />
-              <p className="font-semibold text-[#1C1C1C]">No recipes match your criteria</p>
-              <p className="max-w-md mx-auto">
-                BOM recipes establish theoretical raw ingredient usage per finished dish.
-              </p>
-            </div>
+            <EmptyState
+              title="No Recipes Found"
+              description="BOM recipes establish theoretical raw ingredient usage per finished dish."
+              icon={<ChefHat className="w-6 h-6" />}
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredRecipes.map((r) => (
                 <div
                   key={r.id}
-                  className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-3 hover:border-[#C79A3B]/40 transition-all"
+                  className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-3 hover:border-[#C79A3B]/40 transition-all flex flex-col justify-between"
                 >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-sm text-[#1C1C1C]">{r.name}</h4>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.08)]">
-                          {r.code}
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{r.name}</h4>
+                          <Badge variant="outlet">{r.code}</Badge>
+                        </div>
+                        <p className="text-xs text-[#707070] mt-0.5">
+                          {r.description || 'Standard multi-outlet recipe BOM'}
+                        </p>
+                      </div>
+                      <Badge variant="success">Active</Badge>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.05)] text-center text-xs">
+                      <div>
+                        <span className="text-[10px] text-[#707070] block">Yield Qty</span>
+                        <span className="font-bold text-[#1C1C1C]">{r.yieldQty || 1} Servings</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-[#707070] block">Prep Time</span>
+                        <span className="font-bold text-[#1C1C1C]">{r.preparationMinutes || 15} mins</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-[#707070] block">Est. Unit Cost</span>
+                        <span className="font-bold text-[#2E8B57]">
+                          ${Number(r.estimatedUnitCost || 0).toFixed(2)}
                         </span>
                       </div>
-                      <p className="text-xs text-[#707070] mt-0.5">
-                        {r.description || 'Standard multi-outlet recipe BOM'}
-                      </p>
                     </div>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
-                      Active
-                    </span>
-                  </div>
 
-                  <div className="grid grid-cols-3 gap-2 p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.05)] text-center text-xs">
-                    <div>
-                      <span className="text-[10px] text-[#707070] block">Yield Qty</span>
-                      <span className="font-bold text-[#1C1C1C]">{r.yieldQty || 1} Servings</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-[#707070] block">Prep Time</span>
-                      <span className="font-bold text-[#1C1C1C]">{r.preparationMinutes || 15} mins</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-[#707070] block">Est. Unit Cost</span>
-                      <span className="font-bold text-[#2E8B57]">
-                        ₹{Number(r.estimatedUnitCost || 0).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {r.ingredients && r.ingredients.length > 0 && (
-                    <div className="space-y-1.5 pt-2 border-t border-[rgba(45,45,45,0.06)]">
-                      <span className="text-[11px] font-bold text-[#707070] block">
-                        Ingredients ({r.ingredients.length}):
-                      </span>
-                      <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
-                        {r.ingredients.map((ing) => (
-                          <div
-                            key={ing.id}
-                            className="flex items-center justify-between text-xs py-0.5 px-2 rounded bg-white border border-[rgba(45,45,45,0.04)]"
-                          >
-                            <span className="text-[#1C1C1C] font-medium">
-                              {ing.rawItem?.name || 'Raw Ingredient'}
-                            </span>
-                            <span className="font-mono text-[11px] text-[#707070]">
-                              {Number(ing.quantity).toFixed(2)} {ing.unit?.symbol || ing.rawItem?.unit?.symbol || ''}
-                            </span>
-                          </div>
-                        ))}
+                    {r.ingredients && r.ingredients.length > 0 && (
+                      <div className="space-y-1.5 pt-2 border-t border-[rgba(45,45,45,0.06)]">
+                        <span className="text-[11px] font-bold text-[#707070] block">
+                          Ingredients ({r.ingredients.length}):
+                        </span>
+                        <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                          {r.ingredients.map((ing) => (
+                            <div
+                              key={ing.id}
+                              className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-white border border-[rgba(45,45,45,0.04)]"
+                            >
+                              <span className="text-[#1C1C1C] font-medium">
+                                {ing.rawItem?.name || 'Raw Ingredient'}
+                              </span>
+                              <span className="font-mono text-[11px] text-[#707070]">
+                                {Number(ing.quantity).toFixed(2)} {ing.unit?.symbol || ing.rawItem?.unit?.symbol || ''}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   <div className="pt-2 flex items-center justify-end gap-2 border-t border-[rgba(45,45,45,0.06)]">
-                    <button
+                    <Button
+                      variant="primary"
+                      size="sm"
                       onClick={() => {
                         setSelectedRecipeId(r.id);
                         setActiveTab('batch_prep');
                       }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white text-xs font-semibold transition-all active:scale-95 shadow-sm"
+                      icon={<Flame className="w-3.5 h-3.5 text-[#C79A3B]" />}
                     >
-                      <Flame className="w-3.5 h-3.5 text-[#C79A3B]" />
-                      <span>Run Batch</span>
-                    </button>
+                      Run Batch
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -372,18 +363,16 @@ export const ProductionWorkspace: React.FC = () => {
       {/* Tab 2: Batch Runs & History */}
       {activeTab === 'orders' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Production Run Log</h3>
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
-              <input
-                type="text"
-                placeholder="Search orders..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-56 sm:w-72 pl-8 pr-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
-              />
-            </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">
+              Production Run Log ({filteredOrders.length})
+            </h3>
+            <SearchInput
+              value={searchQuery}
+              onChangeValue={setSearchQuery}
+              placeholder="Search orders..."
+              className="w-full sm:w-72"
+            />
           </div>
 
           {loading ? (
@@ -392,25 +381,23 @@ export const ProductionWorkspace: React.FC = () => {
               <span>Loading production runs...</span>
             </div>
           ) : filteredOrders.length === 0 ? (
-            <div className="p-8 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] text-xs text-[#707070] space-y-2">
-              <Boxes className="w-8 h-8 mx-auto text-[#C79A3B]/50" />
-              <p className="font-semibold text-[#1C1C1C]">No production orders found</p>
-              <p className="max-w-md mx-auto">
-                Execute batch production runs to generate semi-finished/finished goods and log ingredient consumption.
-              </p>
-            </div>
+            <EmptyState
+              title="No Production Orders Found"
+              description="Execute batch production runs to generate finished goods and automatically deduct ingredient stock."
+              icon={<Boxes className="w-6 h-6" />}
+            />
           ) : (
-            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden shadow-sm">
+            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden shadow-xs">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-[#FAF8F5] text-[#707070] font-bold border-b border-[rgba(45,45,45,0.08)]">
                     <tr>
                       <th className="p-3.5">Order #</th>
                       <th className="p-3.5">Recipe / Dish</th>
-                      <th className="p-3.5">Planned Qty</th>
-                      <th className="p-3.5">Actual Yield</th>
-                      <th className="p-3.5">Total Raw Cost</th>
-                      <th className="p-3.5">Unit Food Cost</th>
+                      <th className="p-3.5 text-right">Planned Qty</th>
+                      <th className="p-3.5 text-right">Actual Yield</th>
+                      <th className="p-3.5 text-right">Total Raw Cost</th>
+                      <th className="p-3.5 text-right">Unit Food Cost</th>
                       <th className="p-3.5">Status</th>
                     </tr>
                   </thead>
@@ -428,30 +415,30 @@ export const ProductionWorkspace: React.FC = () => {
                             {ord.kitchenWarehouse?.name || 'Kitchen'}
                           </span>
                         </td>
-                        <td className="p-3.5 font-semibold text-[#1C1C1C]">
+                        <td className="p-3.5 text-right font-semibold text-[#1C1C1C]">
                           {Number(ord.plannedQty).toFixed(2)}
                         </td>
-                        <td className="p-3.5 font-semibold text-[#2E8B57]">
+                        <td className="p-3.5 text-right font-semibold text-[#2E8B57]">
                           {Number(ord.actualYieldQty || 0).toFixed(2)}
                         </td>
-                        <td className="p-3.5 font-semibold text-[#1C1C1C]">
-                          ₹{Number(ord.totalRawCost || 0).toFixed(2)}
+                        <td className="p-3.5 text-right font-mono font-semibold text-[#1C1C1C]">
+                          ${Number(ord.totalRawCost || 0).toFixed(2)}
                         </td>
-                        <td className="p-3.5 font-semibold text-[#2E8B57]">
-                          ₹{Number(ord.unitFoodCost || 0).toFixed(2)}
+                        <td className="p-3.5 text-right font-mono font-semibold text-[#2E8B57]">
+                          ${Number(ord.unitFoodCost || 0).toFixed(2)}
                         </td>
                         <td className="p-3.5">
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          <Badge
+                            variant={
                               ord.status === 'COMPLETED'
-                                ? 'bg-green-50 text-green-700 border border-green-200'
+                                ? 'success'
                                 : ord.status === 'IN_PROGRESS'
-                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                : 'bg-gray-50 text-gray-700 border border-gray-200'
-                            }`}
+                                ? 'warning'
+                                : 'neutral'
+                            }
                           >
                             {ord.status}
-                          </span>
+                          </Badge>
                         </td>
                       </tr>
                     ))}
@@ -488,7 +475,7 @@ export const ProductionWorkspace: React.FC = () => {
                     setSelectedRecipeId(e.target.value);
                     setPreviewData(null);
                   }}
-                  className="w-full p-2.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
                 >
                   {recipes.map((r) => (
                     <option key={r.id} value={r.id}>
@@ -508,7 +495,7 @@ export const ProductionWorkspace: React.FC = () => {
                     setSelectedWarehouseId(e.target.value);
                     setPreviewData(null);
                   }}
-                  className="w-full p-2.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
                 >
                   {warehouses.map((w) => (
                     <option key={w.id} value={w.id}>
@@ -531,16 +518,19 @@ export const ProductionWorkspace: React.FC = () => {
                       setPlannedQty(Number(e.target.value));
                       setPreviewData(null);
                     }}
-                    className="w-full p-2.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
+                    className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
                   />
-                  <button
+                  <Button
+                    variant="primary"
+                    size="md"
                     onClick={handlePreview}
                     disabled={previewLoading || !selectedRecipeId || !selectedWarehouseId}
-                    className="px-4 py-2.5 rounded-xl bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white text-xs font-semibold transition-all active:scale-95 disabled:opacity-60 shadow-sm flex items-center gap-1.5 whitespace-nowrap"
+                    loading={previewLoading}
+                    icon={<Search className="w-3.5 h-3.5 text-[#C79A3B]" />}
+                    className="whitespace-nowrap"
                   >
-                    <Search className="w-3.5 h-3.5 text-[#C79A3B]" />
-                    <span>Check Sufficiency</span>
-                  </button>
+                    Check
+                  </Button>
                 </div>
               </div>
             </div>
@@ -548,28 +538,31 @@ export const ProductionWorkspace: React.FC = () => {
             {/* Preview Breakdown Table */}
             {previewData && (
               <div className="space-y-4 pt-4 border-t border-[rgba(45,45,45,0.08)]">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
                   <div>
                     <span className="text-xs font-bold text-[#1C1C1C] block">
-                      Sufficiency Status: {previewData.allIngredientsAvailable ? (
-                        <span className="text-green-600">✓ All Ingredients Available in Stock</span>
+                      Sufficiency Status:{' '}
+                      {previewData.allIngredientsAvailable ? (
+                        <span className="text-[#2E8B57]">✓ All Ingredients Available in Stock</span>
                       ) : (
                         <span className="text-red-600">⚠ Ingredient Shortage Detected</span>
                       )}
                     </span>
                     <span className="text-[11px] text-[#707070]">
-                      Batch Size: {previewData.plannedQty} Units | Est. Total Cost: ₹{Number(previewData.totalEstimatedRawCost).toFixed(2)} | Unit Food Cost: ₹{Number(previewData.estimatedUnitFoodCost).toFixed(2)}
+                      Batch Size: {previewData.plannedQty} Units | Est. Total Cost: ${Number(previewData.totalEstimatedRawCost).toFixed(2)} | Unit Food Cost: ${Number(previewData.estimatedUnitFoodCost).toFixed(2)}
                     </span>
                   </div>
 
-                  <button
+                  <Button
+                    variant="success"
+                    size="md"
                     onClick={handleExecuteBatch}
                     disabled={executing || !previewData.allIngredientsAvailable}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2E8B57] hover:bg-[#246e45] text-white text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    loading={executing}
+                    icon={<Play className="w-3.5 h-3.5" />}
                   >
-                    <Play className="w-3.5 h-3.5" />
-                    <span>{executing ? 'Executing Batch...' : 'Execute Production Batch'}</span>
-                  </button>
+                    {executing ? 'Executing Batch...' : 'Execute Production Batch'}
+                  </Button>
                 </div>
 
                 <div className="bg-white rounded-xl border border-[rgba(45,45,45,0.08)] overflow-hidden">
@@ -577,10 +570,10 @@ export const ProductionWorkspace: React.FC = () => {
                     <thead className="bg-[#FAF8F5] text-[#707070] font-bold border-b border-[rgba(45,45,45,0.08)]">
                       <tr>
                         <th className="p-3">Raw Ingredient</th>
-                        <th className="p-3">Required Qty</th>
-                        <th className="p-3">Current Kitchen Stock</th>
-                        <th className="p-3">Unit Cost</th>
-                        <th className="p-3">Total Cost</th>
+                        <th className="p-3 text-right">Required Qty</th>
+                        <th className="p-3 text-right">Current Stock</th>
+                        <th className="p-3 text-right">Unit Cost</th>
+                        <th className="p-3 text-right">Total Cost</th>
                         <th className="p-3">Status</th>
                       </tr>
                     </thead>
@@ -590,29 +583,25 @@ export const ProductionWorkspace: React.FC = () => {
                           <td className="p-3 font-semibold text-[#1C1C1C]">
                             {ing.rawItemName} ({ing.rawItemCode})
                           </td>
-                          <td className="p-3 font-mono font-bold text-[#1C1C1C]">
+                          <td className="p-3 text-right font-mono font-bold text-[#1C1C1C]">
                             {Number(ing.standardRequiredQty).toFixed(2)} {ing.unitSymbol}
                           </td>
-                          <td className="p-3 font-mono text-[#707070]">
+                          <td className="p-3 text-right font-mono text-[#707070]">
                             {Number(ing.currentStockInKitchen).toFixed(2)} {ing.unitSymbol}
                           </td>
-                          <td className="p-3 font-semibold text-[#1C1C1C]">
-                            ₹{Number(ing.unitCost).toFixed(2)}
+                          <td className="p-3 text-right font-mono font-semibold text-[#1C1C1C]">
+                            ${Number(ing.unitCost).toFixed(2)}
                           </td>
-                          <td className="p-3 font-semibold text-[#2E8B57]">
-                            ₹{Number(ing.totalCost).toFixed(2)}
+                          <td className="p-3 text-right font-mono font-semibold text-[#2E8B57]">
+                            ${Number(ing.totalCost).toFixed(2)}
                           </td>
                           <td className="p-3">
                             {ing.isAvailable ? (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
-                                <CheckCircle2 className="w-3 h-3" />
-                                Available
-                              </span>
+                              <Badge variant="success">Available</Badge>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
-                                <AlertTriangle className="w-3 h-3" />
+                              <Badge variant="danger">
                                 Short: {Number(ing.shortageQty).toFixed(2)} {ing.unitSymbol}
-                              </span>
+                              </Badge>
                             )}
                           </td>
                         </tr>

@@ -27,7 +27,9 @@ import {
   BarChart3,
   CalendarDays,
   ExternalLink,
+  Bot,
 } from 'lucide-react';
+import { Badge, Button, StatCard } from '@/components/ui';
 
 interface DashboardOverviewProps {
   health: SystemHealth | null;
@@ -35,10 +37,17 @@ interface DashboardOverviewProps {
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, setActiveWorkspace }) => {
-  const { currentOutlet, activeOutlet, outlets, closingInfo, isHeadOffice } = useOutlet();
+  const { activeOutlet, outlets, closingInfo, isHeadOffice } = useOutlet();
   const { isOnline } = usePWA();
 
   const quickActions = [
+    {
+      id: 'assistant' as WorkspaceId,
+      title: 'Smart AI Assistant',
+      desc: 'Stock intelligence & conversational queries',
+      icon: Sparkles,
+      color: 'from-[#C79A3B]/20 to-[#B8862D]/15 text-[#B8862D]',
+    },
     {
       id: 'organization' as WorkspaceId,
       title: '14+ Outlets Matrix',
@@ -81,12 +90,26 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, se
       icon: CalendarDays,
       color: 'from-[#C79A3B]/20 to-[#FAF8F5] text-[#B8862D]',
     },
+    {
+      id: 'reports' as WorkspaceId,
+      title: 'Executive Analytics',
+      desc: 'Food cost variance, sales & spend',
+      icon: BarChart3,
+      color: 'from-[#2E8B57]/20 to-[#FAF8F5] text-[#2E8B57]',
+    },
+    {
+      id: 'hr' as WorkspaceId,
+      title: 'HR & Personnel Roster',
+      desc: 'Staff profiles, shifts & payroll math',
+      icon: Users,
+      color: 'from-[#3978B8]/20 to-[#FAF8F5] text-[#3978B8]',
+    },
   ];
 
   return (
     <div className="space-y-6">
       {/* Top Banner / Executive Hero */}
-      <div className="relative overflow-hidden luxury-card p-6 md:p-8 bg-gradient-to-br from-white via-white/90 to-[#FAF8F5] border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.04)]">
+      <div className="relative overflow-hidden luxury-card p-6 md:p-8 bg-gradient-to-br from-white via-white/95 to-[#FAF8F5] border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.04)]">
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-[#C79A3B]/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
@@ -101,25 +124,23 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, se
             <p className="text-sm text-[#707070] max-w-xl">
               Active Operational Scope:{' '}
               <span className="text-[#1C1C1C] font-bold">{activeOutlet.name}</span>{' '}
-              <span className="text-xs px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-mono border border-[rgba(45,45,45,0.08)] font-bold">
-                [{activeOutlet.code}]
-              </span>
+              <Badge variant="outlet">[{activeOutlet.code}]</Badge>
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/90 border border-[rgba(45,45,45,0.08)] shadow-sm">
+            <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white/90 border border-[rgba(45,45,45,0.08)] shadow-sm">
               <Server className="w-4 h-4 text-[#C79A3B]" />
               <div className="text-xs text-left">
-                <p className="text-[#707070]">Backend Engine</p>
+                <p className="text-[#707070] font-medium">Backend Engine</p>
                 <p className="font-semibold text-[#1C1C1C]">Python 3.14 · FastAPI</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/90 border border-[rgba(45,45,45,0.08)] shadow-sm">
+            <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white/90 border border-[rgba(45,45,45,0.08)] shadow-sm">
               <Activity className="w-4 h-4 text-[#2E8B57]" />
               <div className="text-xs text-left">
-                <p className="text-[#707070]">Database</p>
+                <p className="text-[#707070] font-medium">Database Cluster</p>
                 <p className="font-semibold text-[#1C1C1C]">Neon PostgreSQL</p>
               </div>
             </div>
@@ -129,61 +150,41 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, se
 
       {/* Key Metric Overview Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div
+        <StatCard
+          title="Total Outlets"
+          value={outlets.length}
+          subtitle="14 Outlets + 2 Central Hubs"
+          icon={<Building2 className="w-4 h-4 text-[#C79A3B]" />}
+          iconBgColor="bg-[#FAF8F5] text-[#C79A3B]"
           onClick={() => setActiveWorkspace('organization')}
-          className="luxury-card p-4 bg-white/85 border border-[rgba(45,45,45,0.08)] cursor-pointer hover:border-[#C79A3B]/40 hover:shadow-md transition-all active:scale-[0.99]"
-        >
-          <div className="flex items-center justify-between text-[#707070] mb-2">
-            <span className="text-xs font-semibold">Total Outlets</span>
-            <Building2 className="w-4 h-4 text-[#C79A3B]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{outlets.length}</p>
-          <p className="text-xs text-[#2E8B57] mt-1 flex items-center gap-1 font-medium">
-            <CheckCircle2 className="w-3 h-3" /> 14 Outlets + 2 Central Hubs
-          </p>
-        </div>
+        />
 
-        <div
+        <StatCard
+          title="Purchase Pipeline"
+          value="Direct PO"
+          subtitle="Outlet PR ➔ Direct Vendor GRN"
+          icon={<Truck className="w-4 h-4 text-[#3978B8]" />}
+          iconBgColor="bg-blue-50 text-[#3978B8]"
           onClick={() => setActiveWorkspace('purchase')}
-          className="luxury-card p-4 bg-white/85 border border-[rgba(45,45,45,0.08)] cursor-pointer hover:border-[#3978B8]/40 hover:shadow-md transition-all active:scale-[0.99]"
-        >
-          <div className="flex items-center justify-between text-[#707070] mb-2">
-            <span className="text-xs font-semibold">Purchase Pipeline</span>
-            <Truck className="w-4 h-4 text-[#3978B8]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">Central</p>
-          <p className="text-xs text-[#707070] mt-1">Outlet PR → Direct Supplier PO</p>
-        </div>
+        />
 
-        <div
+        <StatCard
+          title="Closing Cycle"
+          value={closingInfo.periodType === 'FIRST_HALF' ? '1st–15th' : '16th–End'}
+          subtitle={`${closingInfo.daysRemaining} days remaining in cycle`}
+          icon={<CalendarCheck className="w-4 h-4 text-[#B8862D]" />}
+          iconBgColor="bg-[#F1E4C5]/40 text-[#B8862D]"
           onClick={() => setActiveWorkspace('closing')}
-          className="luxury-card p-4 bg-white/85 border border-[rgba(45,45,45,0.08)] cursor-pointer hover:border-[#C79A3B]/40 hover:shadow-md transition-all active:scale-[0.99]"
-        >
-          <div className="flex items-center justify-between text-[#707070] mb-2">
-            <span className="text-xs font-semibold">Closing Period</span>
-            <CalendarCheck className="w-4 h-4 text-[#C79A3B]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">
-            {closingInfo.periodType === 'FIRST_HALF' ? '1st–15th' : '16th–End'}
-          </p>
-          <p className="text-xs text-[#B8862D] mt-1 font-semibold">{closingInfo.daysRemaining} days remaining in cycle</p>
-        </div>
+        />
 
-        <div
+        <StatCard
+          title="System Health"
+          value={health?.database?.status === 'connected' ? 'Healthy' : 'Active'}
+          subtitle={health?.database?.latencyMs ? `${health.database.latencyMs}ms DB latency` : 'Strict multi-tenant security'}
+          icon={<Cpu className="w-4 h-4 text-[#2E8B57]" />}
+          iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
           onClick={() => setActiveWorkspace('telemetry')}
-          className="luxury-card p-4 bg-white/85 border border-[rgba(45,45,45,0.08)] cursor-pointer hover:border-[#2E8B57]/40 hover:shadow-md transition-all active:scale-[0.99]"
-        >
-          <div className="flex items-center justify-between text-[#707070] mb-2">
-            <span className="text-xs font-semibold">System Health</span>
-            <Cpu className="w-4 h-4 text-[#2E8B57]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">
-            {health?.database?.status === 'connected' ? 'Healthy' : 'Active'}
-          </p>
-          <p className="text-xs text-[#707070] mt-1">
-            {health?.database?.latencyMs ? `${health.database.latencyMs}ms DB latency` : 'Strict multi-tenant security'}
-          </p>
-        </div>
+        />
       </div>
 
       {/* Quick Launch Workspaces Grid */}
@@ -227,7 +228,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, se
       <div className="p-5 rounded-2xl bg-white/85 border border-[rgba(45,45,45,0.08)] space-y-3 shadow-sm">
         <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-[#2E8B57]" />
-          Multi-Outlet Scoping & Food Cost Control Policy
+          Multi-Outlet Scoping & Food Cost Control Architecture
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-[#707070]">
           <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] space-y-1">

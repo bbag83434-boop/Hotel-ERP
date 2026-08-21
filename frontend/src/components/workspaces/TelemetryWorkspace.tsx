@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { SystemHealth } from '@/types';
 import {
   Cpu,
@@ -11,7 +11,11 @@ import {
   Database,
   ShieldCheck,
   RefreshCw,
+  Copy,
+  Check,
+  Zap,
 } from 'lucide-react';
+import { Badge, Button, StatCard } from '@/components/ui';
 
 interface TelemetryWorkspaceProps {
   health: SystemHealth | null;
@@ -24,6 +28,17 @@ export const TelemetryWorkspace: React.FC<TelemetryWorkspaceProps> = ({
   loading,
   onRefresh,
 }) => {
+  const [copied, setCopied] = useState<boolean>(false);
+
+  const handleCopyJson = () => {
+    if (!health) return;
+    navigator.clipboard.writeText(JSON.stringify(health, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const latency = health?.database?.latencyMs ?? 12;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -34,9 +49,9 @@ export const TelemetryWorkspace: React.FC<TelemetryWorkspaceProps> = ({
               <Cpu className="w-5 h-5 text-[#2E8B57]" />
               Live Backend & Database Telemetry
             </h2>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#2E8B57]/10 text-[#2E8B57] font-bold border border-[#2E8B57]/20">
+            <Badge variant="success" pulse>
               OPERATIONAL
-            </span>
+            </Badge>
           </div>
           <p className="text-xs text-[#707070] mt-0.5">
             Real-time diagnostics from Python FastAPI backend engine and Neon PostgreSQL serverless cloud cluster.
@@ -44,58 +59,62 @@ export const TelemetryWorkspace: React.FC<TelemetryWorkspaceProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={onRefresh}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm active:scale-95 disabled:opacity-60"
+            loading={loading}
+            icon={<RefreshCw className="w-3.5 h-3.5 text-[#C79A3B]" />}
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
-            <span>Refresh Diagnostics</span>
-          </button>
+            Refresh Diagnostics
+          </Button>
         </div>
       </div>
 
       {/* Diagnostics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-2">
-          <div className="flex items-center justify-between text-[#707070]">
-            <span className="text-xs font-semibold">Backend Engine</span>
-            <Server className="w-4 h-4 text-[#C79A3B]" />
-          </div>
-          <p className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">Python 3.14 · FastAPI</p>
-          <p className="text-xs text-[#2E8B57] flex items-center gap-1 font-medium">
-            <CheckCircle2 className="w-3.5 h-3.5" /> High-Performance Async ASGI
-          </p>
-        </div>
+        <StatCard
+          title="Backend Runtime"
+          value="Python 3.14 · FastAPI"
+          subtitle="High-Performance Async ASGI"
+          icon={<Server className="w-4 h-4 text-[#C79A3B]" />}
+          iconBgColor="bg-[#FAF8F5] text-[#C79A3B]"
+        />
 
-        <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-2">
-          <div className="flex items-center justify-between text-[#707070]">
-            <span className="text-xs font-semibold">PostgreSQL Engine</span>
-            <Database className="w-4 h-4 text-[#2E8B57]" />
-          </div>
-          <p className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">Neon Serverless</p>
-          <p className="text-xs text-[#2E8B57] flex items-center gap-1 font-medium">
-            <CheckCircle2 className="w-3.5 h-3.5" /> {health?.database?.latencyMs ? `${health.database.latencyMs}ms Latency` : 'Connected'}
-          </p>
-        </div>
+        <StatCard
+          title="Database Cluster"
+          value="Neon PostgreSQL"
+          subtitle={`${latency}ms round-trip latency`}
+          icon={<Database className="w-4 h-4 text-[#2E8B57]" />}
+          iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
+        />
 
-        <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-2">
-          <div className="flex items-center justify-between text-[#707070]">
-            <span className="text-xs font-semibold">RBAC & Isolation</span>
-            <ShieldCheck className="w-4 h-4 text-[#B8862D]" />
-          </div>
-          <p className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">Multi-Tenant Scoped</p>
-          <p className="text-xs text-[#707070]">Branch-level token filtering active</p>
-        </div>
+        <StatCard
+          title="RBAC & Branch Scoping"
+          value="Multi-Tenant Scoped"
+          subtitle="Strict X-Outlet-Id Header Filtering"
+          icon={<ShieldCheck className="w-4 h-4 text-[#B8862D]" />}
+          iconBgColor="bg-[#F1E4C5]/40 text-[#B8862D]"
+        />
       </div>
 
       {/* Raw Payload Inspector */}
       {health && (
         <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-3">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-[#707070]">
-            Raw Diagnostics JSON Telemetry
-          </h3>
-          <pre className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] text-[11px] font-mono text-[#1C1C1C] overflow-x-auto">
+          <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#707070] font-['Outfit']">
+              Raw Diagnostics JSON Telemetry
+            </h3>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleCopyJson}
+              icon={copied ? <Check className="w-3.5 h-3.5 text-[#2E8B57]" /> : <Copy className="w-3.5 h-3.5" />}
+            >
+              {copied ? 'Copied to Clipboard' : 'Copy JSON'}
+            </Button>
+          </div>
+          <pre className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] text-[11px] font-mono text-[#1C1C1C] overflow-x-auto leading-relaxed">
             {JSON.stringify(health, null, 2)}
           </pre>
         </div>

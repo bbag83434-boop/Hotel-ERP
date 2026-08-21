@@ -10,7 +10,6 @@ import {
   FoodCostVarianceResponse,
   WastageSummaryReportResponse,
   ProcurementSummaryResponse,
-  ReportExportRequest,
 } from '@/types/reports.types';
 import {
   BarChart3,
@@ -23,8 +22,6 @@ import {
   AlertTriangle,
   FileSpreadsheet,
   Layers,
-  ArrowUpRight,
-  ArrowDownRight,
   Percent,
   ShoppingCart,
   Trash2,
@@ -34,6 +31,7 @@ import {
   Search,
   Filter,
 } from 'lucide-react';
+import { Badge, Button, StatCard, SearchInput, AlertBanner, EmptyState } from '@/components/ui';
 
 type ReportTab =
   | 'EXECUTIVE'
@@ -53,7 +51,7 @@ export const ReportsWorkspace: React.FC = () => {
   const [isPending, startTransition] = useTransition();
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Report States
   const [executiveData, setExecutiveData] = useState<ExecutiveDashboardResponse | null>(null);
@@ -100,8 +98,11 @@ export const ReportsWorkspace: React.FC = () => {
         const data = await reportsApi.getProcurementSummary({ startDate, endDate });
         setProcurementData(data);
       }
-    } catch (err) {
-      console.error('Failed to load report data:', err);
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.message || err?.message || 'Failed to load report analytics',
+      });
     } finally {
       setLoading(false);
     }
@@ -115,7 +116,7 @@ export const ReportsWorkspace: React.FC = () => {
 
   const handleExport = async (type: 'EXECUTIVE_SUMMARY' | 'SALES_SUMMARY' | 'INVENTORY_VALUATION', format: 'CSV' | 'JSON') => {
     setExporting(true);
-    setExportMessage(null);
+    setFeedback(null);
     const { startDate, endDate } = getDateRange();
     const branchParam = selectedBranchId || (isHeadOffice ? undefined : activeOutlet.id);
 
@@ -139,15 +140,29 @@ export const ReportsWorkspace: React.FC = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      setExportMessage(`Successfully generated and downloaded ${resp.filename}`);
-      setTimeout(() => setExportMessage(null), 4000);
-    } catch (err) {
-      console.error('Export error:', err);
-      setExportMessage('Failed to generate export file. Please try again.');
+      setFeedback({
+        type: 'success',
+        message: `Successfully generated and downloaded ${resp.filename}`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.message || 'Failed to generate export file. Please try again.',
+      });
     } finally {
       setExporting(false);
     }
   };
+
+  const tabs = [
+    { id: 'EXECUTIVE', label: 'Executive Overview', icon: Layers },
+    { id: 'SALES', label: 'Sales & Revenue', icon: TrendingUp },
+    { id: 'INVENTORY', label: 'Inventory Valuation', icon: DollarSign },
+    { id: 'FOOD_COST', label: 'Food Cost & Margins', icon: Percent },
+    { id: 'WASTAGE', label: 'Wastage & Loss Audit', icon: Trash2 },
+    { id: 'PROCUREMENT', label: 'Procurement & Spend', icon: ShoppingCart },
+    { id: 'EXPORT', label: 'Export Center', icon: Download },
+  ];
 
   return (
     <div className="space-y-6">
@@ -159,12 +174,10 @@ export const ReportsWorkspace: React.FC = () => {
               <BarChart3 className="w-5 h-5 text-[#C79A3B]" />
               Enterprise Reporting & Business Intelligence
             </h2>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
-              [{activeOutlet.code}]
-            </span>
+            <Badge variant="outlet">[{activeOutlet.code}]</Badge>
           </div>
           <p className="text-xs text-[#707070] mt-0.5">
-            Consolidated 14-outlet multi-dimensional analytics, theoretical vs actual food costs, stock valuation, and loss audits.
+            Consolidated multi-dimensional analytics, theoretical vs actual food costs, stock valuation, and loss audits.
           </p>
         </div>
 
@@ -178,7 +191,7 @@ export const ReportsWorkspace: React.FC = () => {
                 onClick={() => setDatePreset(p)}
                 className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
                   datePreset === p
-                    ? 'bg-white text-[#1C1C1C] shadow-sm'
+                    ? 'bg-white text-[#1C1C1C] shadow-xs'
                     : 'text-[#707070] hover:text-[#1C1C1C]'
                 }`}
               >
@@ -192,9 +205,9 @@ export const ReportsWorkspace: React.FC = () => {
             <select
               value={selectedBranchId}
               onChange={(e) => setSelectedBranchId(e.target.value)}
-              className="text-xs border border-[rgba(45,45,45,0.12)] rounded-xl px-3 py-1.5 bg-white text-[#1C1C1C] focus:outline-none focus:ring-1 focus:ring-[#C79A3B]"
+              className="text-xs border border-[rgba(45,45,45,0.12)] rounded-xl px-3 py-1.5 bg-white text-[#1C1C1C] focus:outline-none focus:border-[#C79A3B]"
             >
-              <option value="">All 14 Outlets (Consolidated HQ)</option>
+              <option value="">All Outlets (Consolidated HQ)</option>
               {outlets.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name} [{o.code}]
@@ -203,41 +216,38 @@ export const ReportsWorkspace: React.FC = () => {
             </select>
           )}
 
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={fetchReports}
-            className="p-2 text-[#707070] hover:text-[#1C1C1C] rounded-xl hover:bg-[#FAF8F5] transition-colors border border-[rgba(45,45,45,0.08)]"
-            title="Refresh Report Data"
+            loading={loading}
+            icon={<RefreshCw className="w-3.5 h-3.5 text-[#C79A3B]" />}
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
+            Refresh
+          </Button>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-1 border-b border-[rgba(45,45,45,0.08)] pb-1">
-        {[
-          { id: 'EXECUTIVE', label: 'Executive Overview', icon: Layers },
-          { id: 'SALES', label: 'Sales & Revenue', icon: TrendingUp },
-          { id: 'INVENTORY', label: 'Inventory Valuation', icon: DollarSign },
-          { id: 'FOOD_COST', label: 'Food Cost & Margins', icon: Percent },
-          { id: 'WASTAGE', label: 'Wastage & Loss Audit', icon: Trash2 },
-          { id: 'PROCUREMENT', label: 'Procurement & Spend', icon: ShoppingCart },
-          { id: 'EXPORT', label: 'Export Center', icon: Download },
-        ].map((tab) => {
+      {/* Feedback Banner */}
+      <AlertBanner feedback={feedback} onClose={() => setFeedback(null)} />
+
+      {/* Sub-Navigation Tabs */}
+      <div className="flex items-center gap-1.5 p-1.5 bg-white border border-[rgba(45,45,45,0.08)] rounded-2xl shadow-xs overflow-x-auto">
+        {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as ReportTab)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                 isActive
-                  ? 'bg-[#1C1C1C] text-white shadow-sm'
-                  : 'text-[#707070] hover:bg-[#FAF8F5] hover:text-[#1C1C1C]'
+                  ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+                  : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
               }`}
             >
               <Icon className="w-4 h-4" />
-              {tab.label}
+              <span>{tab.label}</span>
             </button>
           );
         })}
@@ -247,7 +257,7 @@ export const ReportsWorkspace: React.FC = () => {
       {loading && (
         <div className="p-12 text-center rounded-2xl bg-white border border-[rgba(45,45,45,0.08)]">
           <RefreshCw className="w-8 h-8 text-[#C79A3B] animate-spin mx-auto mb-3" />
-          <p className="text-sm font-medium text-[#1C1C1C]">Compiling Real-Time Multi-Outlet Data...</p>
+          <p className="text-sm font-medium text-[#1C1C1C] font-['Outfit']">Compiling Real-Time Multi-Outlet Data...</p>
           <p className="text-xs text-[#707070] mt-1">Aggregating sales, stock ledger movements, and variance matrix</p>
         </div>
       )}
@@ -256,116 +266,100 @@ export const ReportsWorkspace: React.FC = () => {
       {!loading && activeTab === 'EXECUTIVE' && executiveData && (
         <div className="space-y-6">
           {/* Top KPI Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <div className="flex items-center justify-between text-xs text-[#707070]">
-                <span>Total Gross Sales</span>
-                <TrendingUp className="w-4 h-4 text-[#2E8B57]" />
-              </div>
-              <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">
-                ₹{executiveData.kpis.totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-              <p className="text-[10px] text-[#707070]">
-                {executiveData.kpis.totalOrders} orders (AOV: ₹{executiveData.kpis.averageOrderValue.toFixed(2)})
-              </p>
-            </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="Total Gross Sales"
+              value={`$${executiveData.kpis.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              subtitle={`${executiveData.kpis.totalOrders} orders (AOV: $${executiveData.kpis.averageOrderValue.toFixed(2)})`}
+              icon={<TrendingUp className="w-4 h-4 text-[#2E8B57]" />}
+              iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
+            />
 
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <div className="flex items-center justify-between text-xs text-[#707070]">
-                <span>Gross Profit Margin</span>
-                <Percent className="w-4 h-4 text-[#C79A3B]" />
-              </div>
-              <p className="text-2xl font-bold text-[#2E8B57] font-['Outfit']">
-                {executiveData.kpis.grossProfitMargin.toFixed(1)}%
-              </p>
-              <p className="text-[10px] text-[#707070]">
-                Gross Profit: ₹{executiveData.kpis.grossProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-            </div>
+            <StatCard
+              title="Gross Profit Margin"
+              value={`${executiveData.kpis.grossProfitMargin.toFixed(1)}%`}
+              subtitle={`Gross Profit: $${executiveData.kpis.grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              icon={<Percent className="w-4 h-4 text-[#C79A3B]" />}
+              iconBgColor="bg-[#FAF8F5] text-[#C79A3B]"
+            />
 
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <div className="flex items-center justify-between text-xs text-[#707070]">
-                <span>Consolidated COGS</span>
-                <DollarSign className="w-4 h-4 text-[#3978B8]" />
-              </div>
-              <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">
-                {executiveData.kpis.foodCostPercentage.toFixed(1)}%
-              </p>
-              <p className="text-[10px] text-[#707070]">
-                Food Cost: ₹{executiveData.kpis.totalCogs.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-            </div>
+            <StatCard
+              title="Consolidated COGS"
+              value={`${executiveData.kpis.foodCostPercentage.toFixed(1)}%`}
+              subtitle={`Food Cost: $${executiveData.kpis.totalCogs.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              icon={<DollarSign className="w-4 h-4 text-[#3978B8]" />}
+              iconBgColor="bg-blue-50 text-[#3978B8]"
+            />
 
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <div className="flex items-center justify-between text-xs text-[#707070]">
-                <span>Wastage & Loss Rate</span>
-                <AlertTriangle className="w-4 h-4 text-[#D9534F]" />
-              </div>
-              <p className="text-2xl font-bold text-[#D9534F] font-['Outfit']">
-                {executiveData.kpis.wastagePercentage.toFixed(2)}%
-              </p>
-              <p className="text-[10px] text-[#707070]">
-                Loss: ₹{executiveData.kpis.totalWastageLoss.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-            </div>
+            <StatCard
+              title="Wastage & Loss Rate"
+              value={`${executiveData.kpis.wastagePercentage.toFixed(2)}%`}
+              subtitle={`Loss: $${executiveData.kpis.totalWastageLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              icon={<AlertTriangle className="w-4 h-4 text-[#D9534F]" />}
+              iconBgColor="bg-red-50 text-[#D9534F]"
+            />
           </div>
 
           {/* 14-Outlet Performance Leaderboard */}
           <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-[#C79A3B]" />
-                  14-Outlet Performance Matrix & Revenue Leaderboard
-                </h3>
-                <p className="text-xs text-[#707070]">
-                  Comparative ranking by gross revenue, food cost percentage, and wastage loss
-                </p>
-              </div>
+            <div>
+              <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-[#C79A3B]" />
+                14-Outlet Performance Matrix & Revenue Leaderboard
+              </h3>
+              <p className="text-xs text-[#707070]">
+                Comparative ranking by gross revenue, food cost percentage, and wastage loss
+              </p>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)]">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-[rgba(45,45,45,0.08)] text-[#707070] bg-[#FAF8F5]">
-                    <th className="py-2.5 px-3 font-semibold">Rank</th>
-                    <th className="py-2.5 px-3 font-semibold">Outlet Name</th>
-                    <th className="py-2.5 px-3 font-semibold text-right">Revenue (INR)</th>
-                    <th className="py-2.5 px-3 font-semibold text-center">Orders</th>
-                    <th className="py-2.5 px-3 font-semibold text-right">Food Cost %</th>
-                    <th className="py-2.5 px-3 font-semibold text-right">Wastage (INR)</th>
-                    <th className="py-2.5 px-3 font-semibold text-right">Gross Margin</th>
+                    <th className="p-3 font-semibold">Rank</th>
+                    <th className="p-3 font-semibold">Outlet Name</th>
+                    <th className="p-3 font-semibold text-right">Revenue ($)</th>
+                    <th className="p-3 font-semibold text-center">Orders</th>
+                    <th className="p-3 font-semibold text-right">Food Cost %</th>
+                    <th className="p-3 font-semibold text-right">Wastage ($)</th>
+                    <th className="p-3 font-semibold text-right">Gross Margin</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[rgba(45,45,45,0.06)] text-[#1C1C1C]">
                   {executiveData.outletRankings.map((r) => (
                     <tr key={r.branchId} className="hover:bg-[#FAF8F5] transition-colors">
-                      <td className="py-3 px-3 font-mono font-bold">
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] ${
-                          r.rank === 1 ? 'bg-[#C79A3B] text-white' : r.rank === 2 ? 'bg-[#999] text-white' : r.rank === 3 ? 'bg-[#B8862D] text-white' : 'bg-[#FAF8F5] text-[#707070]'
-                        }`}>
+                      <td className="p-3 font-mono font-bold">
+                        <span
+                          className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] ${
+                            r.rank === 1
+                              ? 'bg-[#C79A3B] text-white'
+                              : r.rank === 2
+                              ? 'bg-gray-400 text-white'
+                              : r.rank === 3
+                              ? 'bg-[#B8862D] text-white'
+                              : 'bg-[#FAF8F5] text-[#707070]'
+                          }`}
+                        >
                           {r.rank}
                         </span>
                       </td>
-                      <td className="py-3 px-3 font-medium">
-                        <div>{r.branchName}</div>
-                        <span className="text-[10px] font-mono text-[#707070]">[{r.branchCode}]</span>
+                      <td className="p-3 font-medium">
+                        <div className="font-bold">{r.branchName}</div>
+                        <Badge variant="outlet">[{r.branchCode}]</Badge>
                       </td>
-                      <td className="py-3 px-3 text-right font-semibold">
-                        ₹{r.revenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      <td className="p-3 text-right font-mono font-semibold">
+                        ${r.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="py-3 px-3 text-center">{r.ordersCount}</td>
-                      <td className="py-3 px-3 text-right">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          r.foodCostPercentage > 33 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
-                        }`}>
+                      <td className="p-3 text-center font-mono">{r.ordersCount}</td>
+                      <td className="p-3 text-right">
+                        <Badge variant={r.foodCostPercentage > 33 ? 'danger' : 'success'}>
                           {r.foodCostPercentage.toFixed(1)}%
-                        </span>
+                        </Badge>
                       </td>
-                      <td className="py-3 px-3 text-right text-[#D9534F]">
-                        ₹{r.wastageCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      <td className="p-3 text-right text-[#D9534F] font-mono font-semibold">
+                        ${r.wastageCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="py-3 px-3 text-right font-semibold text-[#2E8B57]">
+                      <td className="p-3 text-right font-semibold text-[#2E8B57] font-mono">
                         {r.grossMarginPercentage.toFixed(1)}%
                       </td>
                     </tr>
@@ -380,33 +374,41 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 2: SALES & REVENUE REPORT */}
       {!loading && activeTab === 'SALES' && salesData && (
         <div className="space-y-6">
-          {/* Sales Summary Metric Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Gross Sales</span>
-              <p className="text-xl font-bold text-[#1C1C1C]">₹{salesData.grossSales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-              <p className="text-[10px] text-[#707070]">Net Sales: ₹{salesData.netSales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Total Guest Covers</span>
-              <p className="text-xl font-bold text-[#1C1C1C]">{salesData.totalGuests}</p>
-              <p className="text-[10px] text-[#707070]">{salesData.totalOrders} total completed orders</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Average Order Value (AOV)</span>
-              <p className="text-xl font-bold text-[#2E8B57]">₹{salesData.averageOrderValue.toFixed(2)}</p>
-              <p className="text-[10px] text-[#707070]">Per order average ticket</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Taxes & Discounts</span>
-              <p className="text-xl font-bold text-[#3978B8]">₹{salesData.totalTax.toFixed(2)}</p>
-              <p className="text-[10px] text-[#707070]">Discounts Given: ₹{salesData.totalDiscount.toFixed(2)}</p>
-            </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard
+              title="Gross Sales"
+              value={`$${salesData.grossSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              subtitle={`Net Sales: $${salesData.netSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              icon={<TrendingUp className="w-4 h-4 text-[#2E8B57]" />}
+              iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
+            />
+
+            <StatCard
+              title="Guest Covers"
+              value={salesData.totalGuests}
+              subtitle={`${salesData.totalOrders} total completed orders`}
+              icon={<Layers className="w-4 h-4 text-[#C79A3B]" />}
+              iconBgColor="bg-[#FAF8F5] text-[#C79A3B]"
+            />
+
+            <StatCard
+              title="Avg Order Value"
+              value={`$${salesData.averageOrderValue.toFixed(2)}`}
+              subtitle="Per order ticket average"
+              icon={<DollarSign className="w-4 h-4 text-[#3978B8]" />}
+              iconBgColor="bg-blue-50 text-[#3978B8]"
+            />
+
+            <StatCard
+              title="Taxes & Discounts"
+              value={`$${salesData.totalTax.toFixed(2)}`}
+              subtitle={`Discounts: $${salesData.totalDiscount.toFixed(2)}`}
+              icon={<Percent className="w-4 h-4 text-[#B8862D]" />}
+              iconBgColor="bg-[#F1E4C5]/40 text-[#B8862D]"
+            />
           </div>
 
-          {/* Category Sales & Top Selling Dishes */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Category Breakdown */}
             <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
               <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
                 <PieChart className="w-4 h-4 text-[#C79A3B]" />
@@ -417,7 +419,7 @@ export const ReportsWorkspace: React.FC = () => {
                   <div key={c.categoryName} className="space-y-1">
                     <div className="flex justify-between text-xs font-semibold text-[#1C1C1C]">
                       <span>{c.categoryName} ({c.itemCountSold} sold)</span>
-                      <span>₹{c.grossSales.toLocaleString('en-IN', { minimumFractionDigits: 2 })} ({c.percentageOfTotal.toFixed(1)}%)</span>
+                      <span>${c.grossSales.toLocaleString(undefined, { minimumFractionDigits: 2 })} ({c.percentageOfTotal.toFixed(1)}%)</span>
                     </div>
                     <div className="w-full bg-[#FAF8F5] h-2 rounded-full overflow-hidden">
                       <div
@@ -430,7 +432,6 @@ export const ReportsWorkspace: React.FC = () => {
               </div>
             </div>
 
-            {/* Top 10 Best Sellers */}
             <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
               <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-[#2E8B57]" />
@@ -450,9 +451,9 @@ export const ReportsWorkspace: React.FC = () => {
                     {salesData.topSellingItems.map((it) => (
                       <tr key={it.itemId}>
                         <td className="py-2 font-medium">{it.itemName}</td>
-                        <td className="py-2 text-center">{it.quantitySold}</td>
-                        <td className="py-2 text-right">₹{it.unitPrice.toFixed(2)}</td>
-                        <td className="py-2 text-right font-semibold">₹{it.totalSales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                        <td className="py-2 text-center font-mono">{it.quantitySold}</td>
+                        <td className="py-2 text-right font-mono">${it.unitPrice.toFixed(2)}</td>
+                        <td className="py-2 text-right font-semibold font-mono">${it.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -466,60 +467,56 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 3: INVENTORY VALUATION */}
       {!loading && activeTab === 'INVENTORY' && inventoryData && (
         <div className="space-y-6">
-          {/* Inventory Valuation Header Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Total Stock Valuation</span>
-              <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">
-                ₹{inventoryData.totalValuation.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-              <p className="text-[10px] text-[#707070]">Calculated at current purchase cost</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Total Monitored SKUs</span>
-              <p className="text-2xl font-bold text-[#3978B8] font-['Outfit']">
-                {inventoryData.totalItemsCount}
-              </p>
-              <p className="text-[10px] text-[#707070]">Across commissary & kitchen store locations</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Critical Low Stock Alerts</span>
-              <p className="text-2xl font-bold text-[#D9534F] font-['Outfit']">
-                {inventoryData.lowStockItemsCount}
-              </p>
-              <p className="text-[10px] text-[#707070]">Items below minimum threshold</p>
-            </div>
+            <StatCard
+              title="Total Stock Valuation"
+              value={`$${inventoryData.totalValuation.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              subtitle="Calculated at purchase cost"
+              icon={<DollarSign className="w-4 h-4 text-[#1C1C1C]" />}
+              iconBgColor="bg-[#FAF8F5] text-[#1C1C1C]"
+            />
+
+            <StatCard
+              title="Monitored SKUs"
+              value={inventoryData.totalItemsCount}
+              subtitle="Across commissary & kitchens"
+              icon={<Layers className="w-4 h-4 text-[#3978B8]" />}
+              iconBgColor="bg-blue-50 text-[#3978B8]"
+            />
+
+            <StatCard
+              title="Low Stock Alerts"
+              value={inventoryData.lowStockItemsCount}
+              subtitle="Below minimum threshold"
+              icon={<AlertTriangle className="w-4 h-4 text-[#D9534F]" />}
+              iconBgColor="bg-red-50 text-[#D9534F]"
+            />
           </div>
 
-          {/* Itemized Inventory Valuation Table */}
           <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">
                 Warehouse Stock Valuation Ledger
               </h3>
-              <div className="relative w-64">
-                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-[#707070]" />
-                <input
-                  type="text"
-                  placeholder="Filter inventory..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-[#FAF8F5] border border-[rgba(45,45,45,0.1)] rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C79A3B]"
-                />
-              </div>
+              <SearchInput
+                value={searchTerm}
+                onChangeValue={setSearchTerm}
+                placeholder="Filter inventory..."
+                className="w-full sm:w-72"
+              />
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)]">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-[rgba(45,45,45,0.08)] text-[#707070] bg-[#FAF8F5]">
-                    <th className="py-2.5 px-3">Item Name</th>
-                    <th className="py-2.5 px-3">Category</th>
-                    <th className="py-2.5 px-3">Warehouse</th>
-                    <th className="py-2.5 px-3 text-right">On-Hand Qty</th>
-                    <th className="py-2.5 px-3 text-right">Cost Price</th>
-                    <th className="py-2.5 px-3 text-right">Total Valuation</th>
-                    <th className="py-2.5 px-3 text-center">Status</th>
+                    <th className="p-3">Item Name</th>
+                    <th className="p-3">Category</th>
+                    <th className="p-3">Warehouse</th>
+                    <th className="p-3 text-right">On-Hand Qty</th>
+                    <th className="p-3 text-right">Cost Price</th>
+                    <th className="p-3 text-right">Total Valuation</th>
+                    <th className="p-3 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
@@ -527,29 +524,23 @@ export const ReportsWorkspace: React.FC = () => {
                     .filter((it) => it.itemName.toLowerCase().includes(searchTerm.toLowerCase()) || it.itemCode.toLowerCase().includes(searchTerm.toLowerCase()))
                     .map((it) => (
                       <tr key={it.itemId + it.warehouseName} className="hover:bg-[#FAF8F5]">
-                        <td className="py-2.5 px-3 font-medium">
+                        <td className="p-3 font-medium">
                           <div>{it.itemName}</div>
-                          <span className="text-[10px] font-mono text-[#707070]">[{it.itemCode}]</span>
+                          <Badge variant="outlet">[{it.itemCode}]</Badge>
                         </td>
-                        <td className="py-2.5 px-3 text-[#707070]">{it.categoryName}</td>
-                        <td className="py-2.5 px-3 text-[#707070]">{it.warehouseName}</td>
-                        <td className="py-2.5 px-3 text-right font-semibold">
+                        <td className="p-3 text-[#707070]">{it.categoryName}</td>
+                        <td className="p-3 text-[#707070]">{it.warehouseName}</td>
+                        <td className="p-3 text-right font-mono font-semibold">
                           {it.currentStock} {it.unitSymbol}
                         </td>
-                        <td className="py-2.5 px-3 text-right">₹{it.costPrice.toFixed(2)}</td>
-                        <td className="py-2.5 px-3 text-right font-semibold text-[#1C1C1C]">
-                          ₹{it.totalValuation.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        <td className="p-3 text-right font-mono">${it.costPrice.toFixed(2)}</td>
+                        <td className="p-3 text-right font-mono font-semibold text-[#1C1C1C]">
+                          ${it.totalValuation.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="py-2.5 px-3 text-center">
-                          {it.isLowStock ? (
-                            <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-red-50 text-red-600">
-                              Low Stock
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-50 text-emerald-600">
-                              Healthy
-                            </span>
-                          )}
+                        <td className="p-3 text-center">
+                          <Badge variant={it.isLowStock ? 'danger' : 'success'}>
+                            {it.isLowStock ? 'Low Stock' : 'Healthy'}
+                          </Badge>
                         </td>
                       </tr>
                     ))}
@@ -563,35 +554,38 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 4: FOOD COST & MARGIN VARIANCE */}
       {!loading && activeTab === 'FOOD_COST' && foodCostData && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Theoretical COGS</span>
-              <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">
-                ₹{foodCostData.consolidatedTheoreticalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-              <p className="text-[10px] text-[#707070]">Recipe BOM standard usage</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Actual Consumption</span>
-              <p className="text-2xl font-bold text-[#3978B8] font-['Outfit']">
-                ₹{foodCostData.consolidatedActualCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-              <p className="text-[10px] text-[#707070]">Recorded physical stock usage</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Variance Loss Amount</span>
-              <p className="text-2xl font-bold text-[#D9534F] font-['Outfit']">
-                ₹{foodCostData.consolidatedVariance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-              <p className="text-[10px] text-[#707070]">Portion & spoilage variance</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Overall Food Cost %</span>
-              <p className="text-2xl font-bold text-[#2E8B57] font-['Outfit']">
-                {foodCostData.consolidatedFoodCostPercentage.toFixed(1)}%
-              </p>
-              <p className="text-[10px] text-[#707070]">Benchmark target: 28.5%</p>
-            </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard
+              title="Theoretical COGS"
+              value={`$${foodCostData.consolidatedTheoreticalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              subtitle="Recipe BOM standard usage"
+              icon={<Percent className="w-4 h-4 text-[#1C1C1C]" />}
+              iconBgColor="bg-[#FAF8F5] text-[#1C1C1C]"
+            />
+
+            <StatCard
+              title="Actual Consumption"
+              value={`$${foodCostData.consolidatedActualCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              subtitle="Physical stock ledger usage"
+              icon={<DollarSign className="w-4 h-4 text-[#3978B8]" />}
+              iconBgColor="bg-blue-50 text-[#3978B8]"
+            />
+
+            <StatCard
+              title="Variance Loss"
+              value={`$${foodCostData.consolidatedVariance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              subtitle="Portion & spoilage variance"
+              icon={<AlertTriangle className="w-4 h-4 text-[#D9534F]" />}
+              iconBgColor="bg-red-50 text-[#D9534F]"
+            />
+
+            <StatCard
+              title="Overall Food Cost %"
+              value={`${foodCostData.consolidatedFoodCostPercentage.toFixed(1)}%`}
+              subtitle="Target benchmark: 28.5%"
+              icon={<CheckCircle2 className="w-4 h-4 text-[#2E8B57]" />}
+              iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
+            />
           </div>
 
           {/* Outlet Variance Table */}
@@ -599,38 +593,40 @@ export const ReportsWorkspace: React.FC = () => {
             <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">
               14-Outlet Food Cost Variance Audit
             </h3>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)]">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-[rgba(45,45,45,0.08)] text-[#707070] bg-[#FAF8F5]">
-                    <th className="py-2.5 px-3">Outlet Name</th>
-                    <th className="py-2.5 px-3 text-right">Total Sales</th>
-                    <th className="py-2.5 px-3 text-right">Theoretical %</th>
-                    <th className="py-2.5 px-3 text-right">Actual %</th>
-                    <th className="py-2.5 px-3 text-right">Variance (INR)</th>
-                    <th className="py-2.5 px-3 text-center">Status</th>
+                    <th className="p-3">Outlet Name</th>
+                    <th className="p-3 text-right">Total Sales</th>
+                    <th className="p-3 text-right">Theoretical %</th>
+                    <th className="p-3 text-right">Actual %</th>
+                    <th className="p-3 text-right">Variance ($)</th>
+                    <th className="p-3 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
                   {foodCostData.outlets.map((o) => (
                     <tr key={o.branchId} className="hover:bg-[#FAF8F5]">
-                      <td className="py-3 px-3 font-medium">{o.branchName}</td>
-                      <td className="py-3 px-3 text-right">₹{o.totalSales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                      <td className="py-3 px-3 text-right">{o.theoreticalPercentage.toFixed(1)}%</td>
-                      <td className="py-3 px-3 text-right font-semibold">{o.actualPercentage.toFixed(1)}%</td>
-                      <td className="py-3 px-3 text-right text-[#D9534F] font-semibold">
-                        ₹{o.varianceAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      <td className="p-3 font-medium">{o.branchName}</td>
+                      <td className="p-3 text-right font-mono">${o.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                      <td className="p-3 text-right font-mono">{o.theoreticalPercentage.toFixed(1)}%</td>
+                      <td className="p-3 text-right font-mono font-semibold">{o.actualPercentage.toFixed(1)}%</td>
+                      <td className="p-3 text-right text-[#D9534F] font-mono font-semibold">
+                        ${o.varianceAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="py-3 px-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold ${
-                          o.status === 'CRITICAL'
-                            ? 'bg-red-50 text-red-600'
-                            : o.status === 'ALERT'
-                            ? 'bg-amber-50 text-amber-600'
-                            : 'bg-emerald-50 text-emerald-600'
-                        }`}>
+                      <td className="p-3 text-center">
+                        <Badge
+                          variant={
+                            o.status === 'CRITICAL'
+                              ? 'danger'
+                              : o.status === 'ALERT'
+                              ? 'warning'
+                              : 'success'
+                          }
+                        >
                           {o.status}
-                        </span>
+                        </Badge>
                       </td>
                     </tr>
                   ))}
@@ -645,23 +641,23 @@ export const ReportsWorkspace: React.FC = () => {
       {!loading && activeTab === 'WASTAGE' && wastageData && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Total Wastage Loss</span>
-              <p className="text-2xl font-bold text-[#D9534F] font-['Outfit']">
-                ₹{wastageData.totalLossCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-              <p className="text-[10px] text-[#707070]">{wastageData.totalEntriesCount} approved wastage incidents</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Primary Cause of Loss</span>
-              <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">
-                {Object.keys(wastageData.byReason)[0] || 'NONE'}
-              </p>
-              <p className="text-[10px] text-[#707070]">Highest contributing reason code</p>
-            </div>
+            <StatCard
+              title="Total Wastage Loss"
+              value={`$${wastageData.totalLossCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              subtitle={`${wastageData.totalEntriesCount} approved loss incidents`}
+              icon={<Trash2 className="w-4 h-4 text-[#D9534F]" />}
+              iconBgColor="bg-red-50 text-[#D9534F]"
+            />
+
+            <StatCard
+              title="Primary Cause of Loss"
+              value={Object.keys(wastageData.byReason)[0] || 'NONE'}
+              subtitle="Highest contributing reason code"
+              icon={<AlertTriangle className="w-4 h-4 text-[#D99625]" />}
+              iconBgColor="bg-amber-50 text-[#D99625]"
+            />
           </div>
 
-          {/* Top Wasted SKUs & Outlet Breakdown */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
               <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">
@@ -672,16 +668,16 @@ export const ReportsWorkspace: React.FC = () => {
                   <tr className="border-b border-[rgba(45,45,45,0.08)] text-[#707070]">
                     <th className="py-2">Item</th>
                     <th className="py-2 text-center">Wasted Qty</th>
-                    <th className="py-2 text-right">Loss Cost (INR)</th>
+                    <th className="py-2 text-right">Loss Cost ($)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
                   {wastageData.topWastedSkus.map((sku) => (
                     <tr key={sku.item_id}>
                       <td className="py-2 font-medium">{sku.item_name}</td>
-                      <td className="py-2 text-center">{sku.quantity}</td>
-                      <td className="py-2 text-right font-semibold text-[#D9534F]">
-                        ₹{sku.loss_cost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      <td className="py-2 text-center font-mono">{sku.quantity}</td>
+                      <td className="py-2 text-right font-semibold text-[#D9534F] font-mono">
+                        ${sku.loss_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
                     </tr>
                   ))}
@@ -698,7 +694,7 @@ export const ReportsWorkspace: React.FC = () => {
                   <div key={reason} className="space-y-1">
                     <div className="flex justify-between text-xs font-semibold">
                       <span>{reason.replace('_', ' ')}</span>
-                      <span className="text-[#D9534F]">₹{cost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      <span className="text-[#D9534F] font-mono">${cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </div>
                     <div className="w-full bg-[#FAF8F5] h-2 rounded-full overflow-hidden">
                       <div
@@ -717,66 +713,70 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 6: PROCUREMENT & SUPPLIER SUMMARY */}
       {!loading && activeTab === 'PROCUREMENT' && procurementData && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Total Purchase Spend</span>
-              <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">
-                ₹{procurementData.totalPoSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </p>
-              <p className="text-[10px] text-[#707070]">{procurementData.totalPoCount} purchase orders issued</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Fulfilled Deliveries</span>
-              <p className="text-2xl font-bold text-[#2E8B57] font-['Outfit']">
-                {procurementData.fulfilledPoCount}
-              </p>
-              <p className="text-[10px] text-[#707070]">GRN verified & received</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">Pending In-Transit POs</span>
-              <p className="text-2xl font-bold text-[#B8862D] font-['Outfit']">
-                {procurementData.pendingPoCount}
-              </p>
-              <p className="text-[10px] text-[#707070]">Awaiting supplier delivery</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-1">
-              <span className="text-xs text-[#707070]">PO Fulfillment Rate</span>
-              <p className="text-2xl font-bold text-[#3978B8] font-['Outfit']">
-                {procurementData.fulfillmentRatePercentage.toFixed(1)}%
-              </p>
-              <p className="text-[10px] text-[#707070]">On-time supplier delivery rate</p>
-            </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard
+              title="Total Purchase Spend"
+              value={`$${procurementData.totalPoSpend.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              subtitle={`${procurementData.totalPoCount} purchase orders issued`}
+              icon={<ShoppingCart className="w-4 h-4 text-[#1C1C1C]" />}
+              iconBgColor="bg-[#FAF8F5] text-[#1C1C1C]"
+            />
+
+            <StatCard
+              title="Fulfilled Deliveries"
+              value={procurementData.fulfilledPoCount}
+              subtitle="GRN verified & received"
+              icon={<CheckCircle2 className="w-4 h-4 text-[#2E8B57]" />}
+              iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
+            />
+
+            <StatCard
+              title="Pending In-Transit"
+              value={procurementData.pendingPoCount}
+              subtitle="Awaiting supplier dispatch"
+              icon={<Clock className="w-4 h-4 text-[#B8862D]" />}
+              iconBgColor="bg-[#F1E4C5]/40 text-[#B8862D]"
+            />
+
+            <StatCard
+              title="PO Fulfillment Rate"
+              value={`${procurementData.fulfillmentRatePercentage.toFixed(1)}%`}
+              subtitle="On-time supplier delivery"
+              icon={<Percent className="w-4 h-4 text-[#3978B8]" />}
+              iconBgColor="bg-blue-50 text-[#3978B8]"
+            />
           </div>
 
-          {/* Top Suppliers List */}
           <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
             <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">
               Top Suppliers by Procurement Volume
             </h3>
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-[rgba(45,45,45,0.08)] text-[#707070] bg-[#FAF8F5]">
-                  <th className="py-2.5 px-3">Supplier Name</th>
-                  <th className="py-2.5 px-3 text-center">Orders Count</th>
-                  <th className="py-2.5 px-3 text-right">Total Spend (INR)</th>
-                  <th className="py-2.5 px-3 text-right">% of Total Spend</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
-                {procurementData.topSuppliers.map((s) => (
-                  <tr key={s.supplierId} className="hover:bg-[#FAF8F5]">
-                    <td className="py-3 px-3 font-medium">{s.supplierName}</td>
-                    <td className="py-3 px-3 text-center">{s.totalOrdersCount}</td>
-                    <td className="py-3 px-3 text-right font-semibold">
-                      ₹{s.totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-3 px-3 text-right text-[#C79A3B] font-semibold">
-                      {s.percentageOfTotalSpend.toFixed(1)}%
-                    </td>
+            <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)]">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[rgba(45,45,45,0.08)] text-[#707070] bg-[#FAF8F5]">
+                    <th className="p-3">Supplier Name</th>
+                    <th className="p-3 text-center">Orders Count</th>
+                    <th className="p-3 text-right">Total Spend ($)</th>
+                    <th className="p-3 text-right">% of Total Spend</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                  {procurementData.topSuppliers.map((s) => (
+                    <tr key={s.supplierId} className="hover:bg-[#FAF8F5]">
+                      <td className="p-3 font-medium">{s.supplierName}</td>
+                      <td className="p-3 text-center font-mono">{s.totalOrdersCount}</td>
+                      <td className="p-3 text-right font-semibold font-mono">
+                        ${s.totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="p-3 text-right text-[#C79A3B] font-semibold font-mono">
+                        {s.percentageOfTotalSpend.toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -794,80 +794,82 @@ export const ReportsWorkspace: React.FC = () => {
             </p>
           </div>
 
-          {exportMessage && (
-            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              {exportMessage}
-            </div>
-          )}
-
           <div className="space-y-4">
             <div className="p-4 rounded-xl border border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-[#1C1C1C]">Executive Summary & 14-Outlet Matrix</p>
+                <p className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Executive Summary & 14-Outlet Matrix</p>
                 <p className="text-xs text-[#707070]">Consolidated group P&L snapshot, revenue rankings, and margin KPIs</p>
               </div>
               <div className="flex gap-2">
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={exporting}
                   onClick={() => handleExport('EXECUTIVE_SUMMARY', 'CSV')}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] text-xs font-semibold hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+                  icon={<FileSpreadsheet className="w-3.5 h-3.5 text-[#2E8B57]" />}
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> CSV
-                </button>
-                <button
+                  CSV
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={exporting}
                   onClick={() => handleExport('EXECUTIVE_SUMMARY', 'JSON')}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] text-xs font-semibold hover:bg-gray-50 transition-colors"
                 >
                   JSON
-                </button>
+                </Button>
               </div>
             </div>
 
             <div className="p-4 rounded-xl border border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-[#1C1C1C]">Sales & Daily Revenue Breakdown</p>
+                <p className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Sales & Daily Revenue Breakdown</p>
                 <p className="text-xs text-[#707070]">Daily ticket covers, average order value, category splits, and tax summary</p>
               </div>
               <div className="flex gap-2">
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={exporting}
                   onClick={() => handleExport('SALES_SUMMARY', 'CSV')}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] text-xs font-semibold hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+                  icon={<FileSpreadsheet className="w-3.5 h-3.5 text-[#2E8B57]" />}
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> CSV
-                </button>
-                <button
+                  CSV
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={exporting}
                   onClick={() => handleExport('SALES_SUMMARY', 'JSON')}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] text-xs font-semibold hover:bg-gray-50 transition-colors"
                 >
                   JSON
-                </button>
+                </Button>
               </div>
             </div>
 
             <div className="p-4 rounded-xl border border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-[#1C1C1C]">Inventory Valuation & Asset Health</p>
+                <p className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Inventory Valuation & Asset Health</p>
                 <p className="text-xs text-[#707070]">On-hand physical stock valuation, SKU cost basis, and reorder levels</p>
               </div>
               <div className="flex gap-2">
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={exporting}
                   onClick={() => handleExport('INVENTORY_VALUATION', 'CSV')}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] text-xs font-semibold hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+                  icon={<FileSpreadsheet className="w-3.5 h-3.5 text-[#2E8B57]" />}
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> CSV
-                </button>
-                <button
+                  CSV
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={exporting}
                   onClick={() => handleExport('INVENTORY_VALUATION', 'JSON')}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] text-xs font-semibold hover:bg-gray-50 transition-colors"
                 >
                   JSON
-                </button>
+                </Button>
               </div>
             </div>
           </div>
