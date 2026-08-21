@@ -266,7 +266,7 @@ export const ReportsWorkspace: React.FC = () => {
       {!loading && activeTab === 'EXECUTIVE' && executiveData && (
         <div className="space-y-6">
           {/* Top KPI Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
             <StatCard
               title="Total Gross Sales"
               value={`$${executiveData.kpis.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
@@ -374,7 +374,7 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 2: SALES & REVENUE REPORT */}
       {!loading && activeTab === 'SALES' && salesData && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
             <StatCard
               title="Gross Sales"
               value={`$${salesData.grossSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
@@ -467,7 +467,7 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 3: INVENTORY VALUATION */}
       {!loading && activeTab === 'INVENTORY' && inventoryData && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-4">
             <StatCard
               title="Total Stock Valuation"
               value={`$${inventoryData.totalValuation.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
@@ -554,7 +554,7 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 4: FOOD COST & MARGIN VARIANCE */}
       {!loading && activeTab === 'FOOD_COST' && foodCostData && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
             <StatCard
               title="Theoretical COGS"
               value={`$${foodCostData.consolidatedTheoreticalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
@@ -640,7 +640,7 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 5: WASTAGE & LOSS AUDIT */}
       {!loading && activeTab === 'WASTAGE' && wastageData && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
             <StatCard
               title="Total Wastage Loss"
               value={`$${wastageData.totalLossCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
@@ -713,7 +713,7 @@ export const ReportsWorkspace: React.FC = () => {
       {/* TAB 6: PROCUREMENT & SUPPLIER SUMMARY */}
       {!loading && activeTab === 'PROCUREMENT' && procurementData && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
             <StatCard
               title="Total Purchase Spend"
               value={`$${procurementData.totalPoSpend.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}

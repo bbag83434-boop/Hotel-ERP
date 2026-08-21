@@ -135,12 +135,12 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
   const criticalCount = recommendations.filter((r) => r.priority === 'HIGH').length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6 w-full min-w-0">
       {/* Workspace Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-4 sm:p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
         <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg sm:text-xl font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-[#C79A3B]" />
               Smart Inventory AI Assistant
             </h2>
@@ -151,7 +151,7 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-start sm:self-auto">
           <Button
             variant="secondary"
             size="sm"
@@ -159,7 +159,7 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
             loading={loading}
             icon={<RefreshCw className="w-3.5 h-3.5 text-[#C79A3B]" />}
           >
-            Refresh Intel
+            Sync Intel
           </Button>
         </div>
       </div>
@@ -168,7 +168,7 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
       <AlertBanner feedback={feedback} onClose={() => setFeedback(null)} />
 
       {/* KPI Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-4">
         <StatCard
           title="Active Scope"
           value={activeOutlet.name}
@@ -186,52 +186,54 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
         <StatCard
           title="AI Monitored Items"
           value={recommendations.length}
-          subtitle="Real-time min-max balance tracking"
+          subtitle="Real-time min-max tracking"
           icon={<Boxes className="w-4 h-4 text-[#3978B8]" />}
           iconBgColor="bg-blue-50 text-[#3978B8]"
         />
       </div>
 
       {/* Interactive Natural Language AI Q&A Panel */}
-      <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-[#F1E4C5] flex items-center justify-center text-[#B8862D]">
+      <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs space-y-3 sm:space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[rgba(45,45,45,0.06)] pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#F1E4C5] flex items-center justify-center text-[#B8862D] shrink-0">
               <Bot className="w-4 h-4" />
             </div>
             <div>
-              <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">Interactive Inventory Q&A</h4>
-              <p className="text-[11px] text-[#707070]">Ask instant stock, deficit, incoming PR, and run-rate questions</p>
+              <h4 className="font-bold text-xs sm:text-sm text-[#1C1C1C] font-['Outfit']">Interactive Inventory Q&A</h4>
+              <p className="text-[10px] sm:text-[11px] text-[#707070]">Ask instant stock, deficit, incoming PR, and run-rate questions</p>
             </div>
           </div>
-          <Badge variant="success">Online AI Scoped: {activeOutlet.code}</Badge>
+          <Badge variant="success" className="self-start sm:self-auto">Scoped: {activeOutlet.code}</Badge>
         </div>
 
-        {/* Quick Question Chips */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-[#707070] font-semibold flex items-center gap-1">
+        {/* Quick Question Chips (Horizontal Scrollable on Mobile) */}
+        <div className="space-y-1.5">
+          <span className="text-[10px] sm:text-[11px] text-[#707070] font-semibold flex items-center gap-1">
             <HelpCircle className="w-3.5 h-3.5 text-[#C79A3B]" /> Quick Queries:
           </span>
-          {[
-            { label: '🔥 What is critical today?', q: 'What is critical today?' },
-            { label: '⚠️ What stock is low today?', q: 'What stock is low today?' },
-            { label: '📦 What do I need to order?', q: 'What do I need to order?' },
-            { label: '⏳ What is already pending?', q: 'What is already pending?' },
-            { label: '🔮 What do I need for tomorrow?', q: 'What do I need for tomorrow?' },
-          ].map((chip, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleAskAI(chip.q)}
-              disabled={aiAsking}
-              className="px-2.5 py-1 rounded-lg bg-[#FAF8F5] hover:bg-[#F1E4C5] text-[#1C1C1C] hover:text-[#B8862D] border border-[rgba(45,45,45,0.08)] text-[11px] font-semibold transition-all active:scale-95"
-            >
-              {chip.label}
-            </button>
-          ))}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
+            {[
+              { label: '🔥 What is critical today?', q: 'What is critical today?' },
+              { label: '⚠️ What stock is low today?', q: 'What stock is low today?' },
+              { label: '📦 What do I need to order?', q: 'What do I need to order?' },
+              { label: '⏳ What is already pending?', q: 'What is already pending?' },
+              { label: '🔮 What do I need for tomorrow?', q: 'What do I need for tomorrow?' },
+            ].map((chip, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleAskAI(chip.q)}
+                disabled={aiAsking}
+                className="px-2.5 py-1 rounded-lg bg-[#FAF8F5] hover:bg-[#F1E4C5] text-[#1C1C1C] hover:text-[#B8862D] border border-[rgba(45,45,45,0.08)] text-[11px] font-semibold transition-all active:scale-95 whitespace-nowrap shrink-0"
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Custom Input */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           <input
             type="text"
             value={aiQuestion}
@@ -240,7 +242,7 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
               if (e.key === 'Enter') handleAskAI();
             }}
             placeholder={`Ask AI Assistant about stock levels, consumption or orders for ${activeOutlet.name}...`}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] focus:outline-none focus:border-[#C79A3B] focus:ring-1 focus:ring-[#C79A3B]/30"
+            className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] focus:outline-none focus:border-[#C79A3B] focus:ring-1 focus:ring-[#C79A3B]/30"
           />
           <Button
             variant="gold"
@@ -249,6 +251,7 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
             disabled={aiAsking || !aiQuestion.trim()}
             loading={aiAsking}
             icon={<Send className="w-3.5 h-3.5" />}
+            className="w-full sm:w-auto"
           >
             {aiAsking ? 'Analyzing...' : 'Ask AI'}
           </Button>
@@ -256,18 +259,18 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
 
         {/* AI Answer Card */}
         {aiAnswer && (
-          <div className="p-4 rounded-xl bg-gradient-to-br from-[#FAF8F5] to-white border border-[#C79A3B]/30 space-y-3 animate-in fade-in duration-200">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+          <div className="p-3.5 sm:p-4 rounded-xl bg-gradient-to-br from-[#FAF8F5] to-white border border-[#C79A3B]/30 space-y-3 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <Badge variant="purple">Intent: {aiAnswer.intent}</Badge>
-                <span className="text-xs font-semibold text-[#1C1C1C]">
+                <span className="text-xs font-semibold text-[#1C1C1C] truncate">
                   &ldquo;{aiAnswer.question}&rdquo;
                 </span>
               </div>
               <button
                 onClick={() => setAiAnswer(null)}
                 aria-label="Close answer"
-                className="p-1 rounded-lg text-gray-400 hover:text-gray-600"
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -282,23 +285,23 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
             {aiAnswer.metrics && (
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
                 <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                  <span className="text-[10px] text-[#707070] block">Monitored Items</span>
+                  <span className="text-[10px] text-[#707070] block truncate">Monitored</span>
                   <span className="font-bold text-[#1C1C1C]">{aiAnswer.metrics.total_monitored_items ?? 0}</span>
                 </div>
                 <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                  <span className="text-[10px] text-red-600 font-bold block">Critical</span>
+                  <span className="text-[10px] text-red-600 font-bold block truncate">Critical</span>
                   <span className="font-bold text-red-600">{aiAnswer.metrics.critical_count ?? 0}</span>
                 </div>
                 <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                  <span className="text-[10px] text-amber-700 block">Below Min</span>
+                  <span className="text-[10px] text-amber-700 block truncate">Below Min</span>
                   <span className="font-bold text-amber-700">{aiAnswer.metrics.low_stock_count ?? 0}</span>
                 </div>
                 <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                  <span className="text-[10px] text-blue-700 block">Need Order</span>
+                  <span className="text-[10px] text-blue-700 block truncate">Need Order</span>
                   <span className="font-bold text-blue-700">{aiAnswer.metrics.need_order_count ?? 0}</span>
                 </div>
-                <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                  <span className="text-[10px] text-[#2E8B57] block">Pending Orders</span>
+                <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)] col-span-2 sm:col-span-1">
+                  <span className="text-[10px] text-[#2E8B57] block truncate">Pending Orders</span>
                   <span className="font-bold text-[#2E8B57]">{aiAnswer.metrics.pending_items_count ?? 0}</span>
                 </div>
               </div>
@@ -308,13 +311,13 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
       </div>
 
       {/* Stock Reorder Recommendations List */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-sm text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
+          <h3 className="font-bold text-xs sm:text-sm text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
             <Boxes className="w-4 h-4 text-[#C79A3B]" />
             Deterministic Reorder Recommendations ({recommendations.length})
           </h3>
-          <span className="text-xs text-[#707070]">Calculated against outlet min stock buffers</span>
+          <span className="text-[11px] text-[#707070] hidden sm:inline">Calculated against outlet min stock buffers</span>
         </div>
 
         {recommendations.length === 0 ? (
@@ -324,7 +327,7 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
             icon={<CheckCircle2 className="w-6 h-6 text-[#2E8B57]" />}
           />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             {recommendations.map((rec) => {
               const isSubmittingThis = submittingId === rec.item_id;
               const isCritical = rec.priority === 'HIGH';
@@ -332,12 +335,12 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
               return (
                 <div
                   key={rec.item_id}
-                  className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-3 hover:border-[#C79A3B]/30 transition-all flex flex-col justify-between"
+                  className="p-4 sm:p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs space-y-3 hover:border-[#C79A3B]/30 transition-all flex flex-col justify-between"
                 >
                   <div className="space-y-2">
                     <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{rec.item_name}</h4>
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-xs sm:text-sm text-[#1C1C1C] font-['Outfit'] truncate">{rec.item_name}</h4>
                         <p className="text-xs text-[#707070] mt-0.5 leading-relaxed">{rec.recommendation}</p>
                       </div>
                       <Badge variant={isCritical ? 'danger' : 'warning'}>
@@ -345,7 +348,7 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
                       </Badge>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 p-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] text-xs">
+                    <div className="grid grid-cols-2 gap-2 p-2.5 sm:p-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] text-xs">
                       <div>
                         <span className="text-[10px] text-[#707070] block">Current Stock</span>
                         <span className="font-bold font-mono text-[#1C1C1C]">{rec.current_quantity}</span>
@@ -357,10 +360,10 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] space-y-3">
+                  <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] space-y-2.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-[#707070]">Suggested Order:</span>
-                      <div className="flex items-center gap-2 border border-[rgba(45,45,45,0.12)] rounded-xl p-1 bg-[#FAF8F5]">
+                      <div className="flex items-center gap-1.5 border border-[rgba(45,45,45,0.12)] rounded-xl p-1 bg-[#FAF8F5]">
                         <button
                           onClick={() => updateQuantity(rec.item_id, -1)}
                           disabled={rec.suggested_order_quantity <= 1}
@@ -368,7 +371,7 @@ export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ acti
                         >
                           <Minus className="w-3.5 h-3.5" />
                         </button>
-                        <span className="font-bold font-mono text-xs w-10 text-center text-[#1C1C1C]">
+                        <span className="font-bold font-mono text-xs w-9 text-center text-[#1C1C1C]">
                           {rec.suggested_order_quantity}
                         </span>
                         <button

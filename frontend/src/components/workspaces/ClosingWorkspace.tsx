@@ -212,7 +212,7 @@ export const ClosingWorkspace: React.FC = () => {
       </div>
 
       {/* Real-time Math Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
         <StatCard
           title="1. Opening Stock"
           value={`$${totalOpening.toFixed(2)}`}

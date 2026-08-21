@@ -49,7 +49,7 @@ export const AppContent = () => {
   }, [fetchHealth]);
 
   return (
-    <div className="flex min-h-screen bg-[#F5F3EE] text-[#1C1C1C]">
+    <div className="flex min-h-screen bg-[#F5F3EE] text-[#1C1C1C] overflow-x-hidden w-full max-w-full">
       <Sidebar
         activeWorkspace={activeWorkspace}
         setActiveWorkspace={setActiveWorkspace}
@@ -57,70 +57,72 @@ export const AppContent = () => {
         setMobileOpen={setMobileSidebarOpen}
       />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden">
         <Header onMenuClick={() => setMobileSidebarOpen(true)} />
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto pb-24 md:pb-12">
+        <main className="flex-1 p-3 sm:p-5 lg:p-8 max-w-7xl w-full mx-auto pb-24 md:pb-12 min-w-0 overflow-x-hidden">
           {activeWorkspace === 'dashboard' && (
-            <DashboardOverview health={health} setActiveWorkspace={setActiveWorkspace} />
+            <div className="w-full min-w-0">
+              <DashboardOverview health={health} setActiveWorkspace={setActiveWorkspace} />
+            </div>
           )}
 
           {activeWorkspace === 'organization' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <OrganizationManager />
             </div>
           )}
 
           {activeWorkspace === 'inventory' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <InventoryManager />
             </div>
           )}
 
           {activeWorkspace === 'transfers' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <TransfersWorkspace />
             </div>
           )}
 
           {activeWorkspace === 'purchase' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <PurchaseWorkspace />
             </div>
           )}
 
           {activeWorkspace === 'production' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <ProductionWorkspace />
             </div>
           )}
 
           {activeWorkspace === 'wastage' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <WastageWorkspace />
             </div>
           )}
 
           {activeWorkspace === 'hr' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <HRWorkspace />
             </div>
           )}
 
           {activeWorkspace === 'closing' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <ClosingWorkspace />
             </div>
           )}
 
           {activeWorkspace === 'reports' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <ReportsWorkspace />
             </div>
           )}
 
           {activeWorkspace === 'telemetry' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <TelemetryWorkspace
                 health={health}
                 loading={loadingHealth}
@@ -130,7 +132,7 @@ export const AppContent = () => {
           )}
 
           {activeWorkspace === 'assistant' && (
-            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+            <div className="w-full min-w-0">
               <AIAssistantWorkspace activeOutlet={activeOutlet} />
             </div>
           )}
@@ -144,3 +146,5 @@ export const AppContent = () => {
     </div>
   );
 };
+
+export default AppContent;

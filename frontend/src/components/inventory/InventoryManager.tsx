@@ -285,7 +285,7 @@ export const InventoryManager: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={loadData}
             disabled={loading}
