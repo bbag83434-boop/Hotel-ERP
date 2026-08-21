@@ -135,7 +135,7 @@ export default function AppRoot() {
 
           {activeWorkspace === 'assistant' && (
             <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
-              <AIAssistantWorkspace />
+              <AIAssistantWorkspace activeOutlet={activeOutlet} />
             </div>
           )}
         </main>

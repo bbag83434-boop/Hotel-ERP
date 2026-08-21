@@ -15,8 +15,13 @@ interface Recommendation {
   recommendation: string;
 }
 
-export const AIAssistantWorkspace = () => {
-  const { activeOutlet } = useOutlet();
+import { Outlet } from '@/types';
+
+interface AIAssistantWorkspaceProps {
+  activeOutlet: Outlet;
+}
+
+export const AIAssistantWorkspace: React.FC<AIAssistantWorkspaceProps> = ({ activeOutlet }) => {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
