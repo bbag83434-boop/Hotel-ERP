@@ -12,6 +12,10 @@ import {
   ThreeWayMatchResponse,
   OutletClosingRecord,
   ActiveClosingDraft,
+  SmartRequirementDraft,
+  SmartRequirementItem,
+  BranchRequirementConfig,
+  SmartAIAskResponse,
 } from '@/types/purchase.types';
 import {
   ShoppingCart,
@@ -50,13 +54,20 @@ import {
   ExternalLink,
   AlertTriangle,
   RotateCcw,
+  Upload,
+  Sparkles,
+  Bot,
+  HelpCircle,
+  Sliders,
+  History,
+  Check,
 } from 'lucide-react';
 
 export const PurchaseWorkspace: React.FC = () => {
   const { currentOutlet, activeOutlet, isHeadOffice, outlets } = useOutlet();
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'queue' | 'orders' | 'grn' | 'matching' | 'suppliers' | 'closing'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'orders' | 'grn' | 'matching' | 'smart' | 'suppliers' | 'closing'>('queue');
 
   // Loading & Feedback
   const [loading, setLoading] = useState<boolean>(false);
@@ -78,15 +89,20 @@ export const PurchaseWorkspace: React.FC = () => {
   // Selection & Multi-Consolidation
   const [selectedPRIds, setSelectedPRIds] = useState<string[]>([]);
   const [consolidationModalOpen, setConsolidationModalOpen] = useState<boolean>(false);
+  const [consolidatedSupplierId, setConsolidatedSupplierId] = useState<string>('');
+  const [consolidatedOrderType, setConsolidatedOrderType] = useState<string>('CONSOLIDATED_DIRECT');
+  const [consolidatedBranchId, setConsolidatedBranchId] = useState<string>('');
   const [consolidationNotes, setConsolidationNotes] = useState<string>('');
   const [autoSubmitConsolidated, setAutoSubmitConsolidated] = useState<boolean>(true);
 
-  // Modals & Details
-  const [viewPRModal, setViewPRModal] = useState<any | null>(null);
+  // Modals & Detail Views
   const [createPRModalOpen, setCreatePRModalOpen] = useState<boolean>(false);
   const [createPOModalOpen, setCreatePOModalOpen] = useState<boolean>(false);
   const [createGRNModalOpen, setCreateGRNModalOpen] = useState<boolean>(false);
+  const [viewPRModal, setViewPRModal] = useState<any | null>(null);
   const [viewPOModal, setViewPOModal] = useState<any | null>(null);
+  const [view3WayModal, setView3WayModal] = useState<ThreeWayMatchResponse | null>(null);
+  const [closingDetailModal, setClosingDetailModal] = useState<OutletClosingRecord | null>(null);
   const [selected3WayPOId, setSelected3WayPOId] = useState<string | null>(null);
   const [threeWayData, setThreeWayData] = useState<ThreeWayMatchResponse | null>(null);
   const [loading3Way, setLoading3Way] = useState<boolean>(false);
@@ -117,13 +133,26 @@ export const PurchaseWorkspace: React.FC = () => {
     { item_id: '', ordered_qty: 20, unit_price: 50 },
   ]);
 
-  // New GRN Form State
+  // New GRN / Smart Receiving Form State
   const [newGRNBranchId, setNewGRNBranchId] = useState<string>(activeOutlet.id);
   const [newGRNPOId, setNewGRNPOId] = useState<string>('');
   const [newGRNSupplierId, setNewGRNSupplierId] = useState<string>('');
   const [newGRNInvoiceNum, setNewGRNInvoiceNum] = useState<string>('');
   const [newGRNInvoiceAmt, setNewGRNInvoiceAmt] = useState<number>(0);
   const [newGRNNotes, setNewGRNNotes] = useState<string>('');
+  const [newGRNInvoiceFile, setNewGRNInvoiceFile] = useState<{
+    fileName: string;
+    fileType: string;
+    fileBase64: string;
+    size: number;
+  } | null>(null);
+  const [grnStatusTab, setGrnStatusTab] = useState<'ALL' | 'PENDING_APPROVAL' | 'APPROVED'>('ALL');
+  const [rejectGRNModal, setRejectGRNModal] = useState<{ open: boolean; grnId: string; grnNumber: string }>({
+    open: false,
+    grnId: '',
+    grnNumber: '',
+  });
+  const [grnRejectReason, setGrnRejectReason] = useState<string>('');
   const [newGRNLines, setNewGRNLines] = useState<Array<{
     item_id: string;
     item_name?: string;
@@ -144,6 +173,238 @@ export const PurchaseWorkspace: React.FC = () => {
   const [closingPhysicalCounts, setClosingPhysicalCounts] = useState<{ [itemId: string]: number }>({});
   const [closingNotes, setClosingNotes] = useState<string>('');
   const [closingSubmitting, setClosingSubmitting] = useState<boolean>(false);
+
+  // Smart Requirements & AI Assistant State
+  const [smartDraft, setSmartDraft] = useState<SmartRequirementDraft | null>(null);
+  const [smartDraftLoading, setSmartDraftLoading] = useState<boolean>(false);
+  const [smartConfig, setSmartConfig] = useState<BranchRequirementConfig | null>(null);
+  const [smartConfigModalOpen, setSmartConfigModalOpen] = useState<boolean>(false);
+  const [leadTimeDays, setLeadTimeDays] = useState<number>(1);
+  const [safetyBufferPct, setSafetyBufferPct] = useState<number>(10);
+  const [prepTime, setPrepTime] = useState<string>('16:00');
+  const [autoEnabled, setAutoEnabled] = useState<boolean>(true);
+  const [showAuditTrail, setShowAuditTrail] = useState<boolean>(false);
+
+  // AI Assistant Q&A
+  const [aiQuestion, setAiQuestion] = useState<string>('');
+  const [aiAnswer, setAiAnswer] = useState<SmartAIAskResponse | null>(null);
+  const [aiAsking, setAiAsking] = useState<boolean>(false);
+
+  // Add Item to Draft Modal
+  const [addItemDraftModalOpen, setAddItemDraftModalOpen] = useState<boolean>(false);
+  const [addDraftItemId, setAddDraftItemId] = useState<string>('');
+  const [addDraftQty, setAddDraftQty] = useState<number>(10);
+  const [addDraftNotes, setAddDraftNotes] = useState<string>('');
+
+  // Draft Editing State
+  const [draftNotes, setDraftNotes] = useState<string>('');
+  const [confirmingDraft, setConfirmingDraft] = useState<boolean>(false);
+
+  // Fetch Smart Requirement Draft & Configuration
+  const fetchSmartDraft = async (forceRegenerate = false) => {
+    if (!activeOutlet.id) return;
+    setSmartDraftLoading(true);
+    try {
+      if (forceRegenerate) {
+        const gen = await procurementApi.generateSmartRequirement({
+          branch_id: activeOutlet.id,
+          lead_time_days: leadTimeDays,
+          safety_buffer_percent: safetyBufferPct,
+          force_regenerate: true,
+        });
+        setSmartDraft(gen);
+        setFeedback({ type: 'success', message: 'Smart Requirement draft regenerated successfully.' });
+      } else {
+        const draft = await procurementApi.getSmartRequirementDraft(activeOutlet.id);
+        setSmartDraft(draft);
+      }
+      try {
+        const cfg = await procurementApi.getBranchRequirementConfig(activeOutlet.id);
+        setSmartConfig(cfg);
+        if (cfg) {
+          setPrepTime(cfg.preparation_time || '16:00');
+          setAutoEnabled(cfg.is_auto_enabled ?? true);
+          setLeadTimeDays(cfg.lead_time_days ?? 1);
+          setSafetyBufferPct(Number(cfg.safety_buffer_percent ?? 10));
+        }
+      } catch (cfgErr) {
+        // config fallback
+      }
+    } catch (err: any) {
+      console.warn('Smart requirement fetch note:', err);
+    } finally {
+      setSmartDraftLoading(false);
+    }
+  };
+
+  // AI Q&A Assistant Handler
+  const handleAskAI = async (questionText?: string) => {
+    const q = (questionText || aiQuestion).trim();
+    if (!q || !activeOutlet.id) return;
+    setAiAsking(true);
+    try {
+      const res = await procurementApi.askSmartRequirementAssistant({
+        branch_id: activeOutlet.id,
+        question: q,
+      });
+      setAiAnswer(res);
+      setAiQuestion('');
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.message || err?.message || 'AI Assistant query failed.',
+      });
+    } finally {
+      setAiAsking(false);
+    }
+  };
+
+  // Update Draft Item Quantity
+  const handleUpdateDraftItemQty = async (itemId: string, newQty: number) => {
+    if (!smartDraft) return;
+    const updatedItems = smartDraft.items.map((it) => {
+      if (it.item_id === itemId) {
+        return { ...it, final_order_qty: newQty, is_user_modified: true };
+      }
+      return it;
+    });
+    try {
+      const res = await procurementApi.updateSmartRequirementDraftItems(smartDraft.id, {
+        items: updatedItems,
+        notes: draftNotes || smartDraft.notes,
+      });
+      setSmartDraft(res);
+      setFeedback({ type: 'success', message: 'Quantity updated and audit logged.' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to update item quantity.' });
+    }
+  };
+
+  // Remove Item from Draft
+  const handleRemoveDraftItem = async (itemId: string) => {
+    if (!smartDraft) return;
+    const updatedItems = smartDraft.items.filter((it) => it.item_id !== itemId);
+    try {
+      const res = await procurementApi.updateSmartRequirementDraftItems(smartDraft.id, {
+        items: updatedItems,
+        notes: draftNotes || smartDraft.notes,
+      });
+      setSmartDraft(res);
+      setFeedback({ type: 'success', message: 'Item removed from draft.' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to remove item.' });
+    }
+  };
+
+  // Add Custom Catalog Item to Draft
+  const handleAddItemToDraft = async () => {
+    if (!smartDraft || !addDraftItemId) return;
+    const existing = smartDraft.items.find((it) => it.item_id === addDraftItemId);
+    let updatedItems: SmartRequirementItem[];
+    if (existing) {
+      updatedItems = smartDraft.items.map((it) => {
+        if (it.item_id === addDraftItemId) {
+          return { ...it, final_order_qty: Number(it.final_order_qty) + Number(addDraftQty), is_user_modified: true };
+        }
+        return it;
+      });
+    } else {
+      const itmObj = inventoryItems.find((i) => i.id === addDraftItemId);
+      const newItem: SmartRequirementItem = {
+        item_id: addDraftItemId,
+        item_name: itmObj?.name,
+        item_code: itmObj?.code,
+        unit_symbol: itmObj?.unit?.symbol || 'Units',
+        supplier_id: itmObj?.supplier_id,
+        supplier_name: itmObj?.supplier?.name,
+        current_stock: 0,
+        min_stock: itmObj?.min_stock_level || 0,
+        target_stock: addDraftQty,
+        pending_incoming: 0,
+        daily_consumption: 0,
+        short_qty: addDraftQty,
+        system_suggested_qty: 0,
+        final_order_qty: Number(addDraftQty),
+        priority: 'MEDIUM',
+        is_user_modified: true,
+        is_manually_added: true,
+        reason: 'Manually added by outlet user',
+        notes: addDraftNotes || undefined,
+      };
+      updatedItems = [...smartDraft.items, newItem];
+    }
+    try {
+      const res = await procurementApi.updateSmartRequirementDraftItems(smartDraft.id, {
+        items: updatedItems,
+        notes: draftNotes || smartDraft.notes,
+      });
+      setSmartDraft(res);
+      setAddItemDraftModalOpen(false);
+      setAddDraftItemId('');
+      setAddDraftQty(10);
+      setAddDraftNotes('');
+      setFeedback({ type: 'success', message: 'Item added to draft.' });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to add item.' });
+    }
+  };
+
+  // Confirm Draft -> Converts to Purchase Request
+  const handleConfirmSmartDraft = async () => {
+    if (!smartDraft) return;
+    setConfirmingDraft(true);
+    try {
+      const res = await procurementApi.confirmSmartRequirementDraft(smartDraft.id, {
+        notes: draftNotes || undefined,
+      });
+      setFeedback({
+        type: 'success',
+        message: res.message || `Smart Requirement draft confirmed! Converted to ${res.request_number} (PENDING_APPROVAL).`,
+      });
+      fetchSmartDraft();
+      fetchData();
+      setActiveTab('queue');
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to confirm draft.' });
+    } finally {
+      setConfirmingDraft(false);
+    }
+  };
+
+  // Save Schedule Config
+  const handleSaveScheduleConfig = async () => {
+    if (!activeOutlet.id) return;
+    try {
+      const res = await procurementApi.updateBranchRequirementConfig(activeOutlet.id, {
+        preparation_time: prepTime,
+        is_auto_enabled: autoEnabled,
+        lead_time_days: Number(leadTimeDays),
+        safety_buffer_percent: Number(safetyBufferPct),
+      });
+      setSmartConfig(res);
+      setSmartConfigModalOpen(false);
+      setFeedback({ type: 'success', message: `Schedule updated: Prepares daily at ${prepTime}.` });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to save schedule.' });
+    }
+  };
+
+  // Process Scheduled Requirements
+  const handleTriggerScheduledRun = async () => {
+    setLoading(true);
+    try {
+      const res = await procurementApi.processScheduledRequirements();
+      setFeedback({
+        type: 'success',
+        message: `Scheduled runner finished: ${res.processed_count} prepared, ${res.skipped_count} skipped.`,
+      });
+      fetchSmartDraft();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to trigger scheduled run.' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Fetch Core Data
   const fetchData = async () => {
@@ -212,6 +473,7 @@ export const PurchaseWorkspace: React.FC = () => {
 
   useEffect(() => {
     fetchData();
+    fetchSmartDraft();
   }, [activeOutlet.id, selectedBranchFilter, statusFilter, priorityFilter]);
 
   // Handle 3-Way Match Drill Down
@@ -434,13 +696,15 @@ export const PurchaseWorkspace: React.FC = () => {
     }
   };
 
-  // When PO is chosen for receiving, prefill GRN line items
+  // When PO is chosen for receiving, prefill GRN line items & invoice amount
   const handleSelectPOForGRN = (poId: string) => {
     setNewGRNPOId(poId);
     const po = orders.find((o) => o.id === poId);
     if (po) {
       setNewGRNSupplierId(po.supplier_id || '');
       setNewGRNBranchId(po.branch_id || activeOutlet.id);
+      const totalPoAmt = Number(po.net_amount || po.total_amount || 0);
+      setNewGRNInvoiceAmt(totalPoAmt);
       const lines = (po.items || []).map((pi: any) => ({
         item_id: pi.item_id,
         item_name: pi.item_name || (inventoryItems.find((i) => i.id === pi.item_id)?.name || 'Item'),
@@ -456,46 +720,145 @@ export const PurchaseWorkspace: React.FC = () => {
     }
   };
 
-  // Submit New GRN
+  // Open Smart Receiving modal directly from a PO card
+  const handleOpenReceiveForPO = (po: any) => {
+    setNewGRNPOId(po.id);
+    setNewGRNSupplierId(po.supplier_id || '');
+    setNewGRNBranchId(po.branch_id || activeOutlet.id);
+    setNewGRNInvoiceNum('');
+    const totalPoAmt = Number(po.net_amount || po.total_amount || 0);
+    setNewGRNInvoiceAmt(totalPoAmt);
+    setNewGRNNotes('');
+    setNewGRNInvoiceFile(null);
+    const lines = (po.items || []).map((pi: any) => ({
+      item_id: pi.item_id,
+      item_name: pi.item_name || (inventoryItems.find((i) => i.id === pi.item_id)?.name || 'Item'),
+      unit_symbol: pi.unit_symbol || 'UNIT',
+      po_item_id: pi.id,
+      received_qty: Number(pi.ordered_qty) - Number(pi.received_qty || 0),
+      accepted_qty: Number(pi.ordered_qty) - Number(pi.received_qty || 0),
+      rejected_qty: 0,
+      unit_price: Number(pi.unit_price || 0),
+      qc_status: 'PASSED' as const,
+    }));
+    setNewGRNLines(lines);
+    setCreateGRNModalOpen(true);
+  };
+
+  // Handle Invoice File Upload / Selection
+  const handleInvoiceFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const allowed = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (!allowed.includes(file.type)) {
+      setFeedback({ type: 'error', message: 'Invalid file format. Please upload a PDF, JPG, or PNG invoice document.' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64Str = (reader.result as string).split(',')[1];
+      setNewGRNInvoiceFile({
+        fileName: file.name,
+        fileType: file.type,
+        fileBase64: base64Str,
+        size: file.size,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Submit Smart Receiving from PO
   const handleCreateGRN = async () => {
-    if (newGRNLines.length === 0) {
-      setFeedback({ type: 'error', message: 'No line items to receive.' });
+    if (!newGRNPOId) {
+      setFeedback({ type: 'error', message: 'Please select an approved Purchase Order for receiving.' });
+      return;
+    }
+    if (!newGRNInvoiceNum.trim()) {
+      setFeedback({ type: 'error', message: 'Please enter the Supplier Invoice / Bill Number.' });
       return;
     }
     setLoading(true);
     try {
-      await procurementApi.createGoodsReceiveNote({
+      if (newGRNInvoiceFile) {
+        try {
+          await procurementApi.uploadSupplierInvoice({
+            po_id: newGRNPOId,
+            branch_id: newGRNBranchId,
+            supplier_id: newGRNSupplierId,
+            invoice_number: newGRNInvoiceNum.trim(),
+            invoice_amount: Number(newGRNInvoiceAmt || 0),
+            file_name: newGRNInvoiceFile.fileName,
+            file_type: newGRNInvoiceFile.fileType,
+            file_base64: newGRNInvoiceFile.fileBase64,
+          });
+        } catch (uploadErr) {
+          console.warn('Invoice upload note:', uploadErr);
+        }
+      }
+
+      await procurementApi.createGoodsReceiveFromPO({
+        po_id: newGRNPOId,
         branch_id: newGRNBranchId,
-        po_id: newGRNPOId || undefined,
-        supplier_id: newGRNSupplierId || undefined,
-        supplier_invoice_number: newGRNInvoiceNum || undefined,
-        invoice_amount: newGRNInvoiceAmt || undefined,
+        supplier_invoice_number: newGRNInvoiceNum.trim(),
+        invoice_amount: Number(newGRNInvoiceAmt || 0),
+        invoice_file_name: newGRNInvoiceFile?.fileName || undefined,
         notes: newGRNNotes || undefined,
-        items: newGRNLines.map((l) => ({
-          item_id: l.item_id,
-          po_item_id: l.po_item_id || undefined,
-          received_qty: Number(l.received_qty),
-          accepted_qty: Number(l.accepted_qty),
-          rejected_qty: Number(l.rejected_qty || 0),
-          unit_price: Number(l.unit_price),
-          batch_number: l.batch_number || undefined,
-          expiry_date: l.expiry_date ? new Date(l.expiry_date).toISOString() : undefined,
-          qc_status: l.qc_status,
-          qc_notes: l.qc_notes || undefined,
-        })),
       });
+
       setFeedback({
         type: 'success',
-        message: 'Goods received and destination stock ledger updated directly!',
+        message: 'Receiving submitted successfully! Queued for HO/Central Approval.',
       });
       setCreateGRNModalOpen(false);
       setNewGRNLines([]);
       setNewGRNInvoiceNum('');
       setNewGRNInvoiceAmt(0);
+      setNewGRNNotes('');
+      setNewGRNInvoiceFile(null);
       fetchData();
       setActiveTab('grn');
     } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.message || 'GRN submission failed.' });
+      setFeedback({ type: 'error', message: err?.response?.data?.message || err?.message || 'GRN submission failed.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // HO Approve GRN
+  const handleApproveGRN = async (grnId: string) => {
+    setLoading(true);
+    try {
+      await procurementApi.approveGoodsReceiveNote(grnId);
+      setFeedback({
+        type: 'success',
+        message: 'GRN Approved! Items & quantities successfully posted to destination StockBalance & StockLedger.',
+      });
+      fetchData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Approval failed.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // HO Reject GRN
+  const handleConfirmRejectGRN = async () => {
+    if (!grnRejectReason.trim()) {
+      setFeedback({ type: 'error', message: 'Please provide a reason for rejecting this receiving.' });
+      return;
+    }
+    setLoading(true);
+    try {
+      await procurementApi.rejectGoodsReceiveNote(rejectGRNModal.grnId, { reason: grnRejectReason.trim() });
+      setFeedback({
+        type: 'success',
+        message: `GRN ${rejectGRNModal.grnNumber} rejected. No stock was posted.`,
+      });
+      setRejectGRNModal({ open: false, grnId: '', grnNumber: '' });
+      setGrnRejectReason('');
+      fetchData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Rejection failed.' });
     } finally {
       setLoading(false);
     }
@@ -665,6 +1028,23 @@ export const PurchaseWorkspace: React.FC = () => {
         >
           <Receipt className="w-4 h-4" />
           3-Way Invoice Matching
+        </button>
+
+        <button
+          onClick={() => setActiveTab('smart')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'smart'
+              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-[#C79A3B]" />
+          Smart AI Indent & Assistant
+          {smartDraft && smartDraft.critical_count > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] animate-pulse">
+              {smartDraft.critical_count} Critical
+            </span>
+          )}
         </button>
 
         <button
@@ -1045,6 +1425,16 @@ export const PurchaseWorkspace: React.FC = () => {
                         </div>
                       )}
 
+                      {['APPROVED', 'WHATSAPP_OPENED', 'SENT_MANUALLY', 'ISSUED', 'PARTIALLY_RECEIVED'].includes(po.status) && (
+                        <button
+                          onClick={() => handleOpenReceiveForPO(po)}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] transition-all flex items-center gap-1 shadow-xs"
+                          title="Record Goods Receiving for this PO"
+                        >
+                          <PackageCheck className="w-3.5 h-3.5" /> Receive Stock
+                        </button>
+                      )}
+
                       <button
                         onClick={() => open3WayMatch(po.id)}
                         className="px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-[#B8862D]/30 text-[#B8862D] text-xs font-semibold hover:bg-[#F1E4C5]"
@@ -1063,47 +1453,160 @@ export const PurchaseWorkspace: React.FC = () => {
       {/* TAB 3: GOODS RECEIVE NOTES (GRN) & DESTINATION RECEIVING */}
       {activeTab === 'grn' && (
         <div className="space-y-4">
+          {/* Sub-Tabs for GRN Status Workflow */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 bg-[#FAF8F5] p-1.5 rounded-2xl border border-[rgba(45,45,45,0.08)]">
+              <button
+                onClick={() => setGrnStatusTab('ALL')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  grnStatusTab === 'ALL' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
+                }`}
+              >
+                All Receiving ({grns.length})
+              </button>
+              <button
+                onClick={() => setGrnStatusTab('PENDING_APPROVAL')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  grnStatusTab === 'PENDING_APPROVAL' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5 text-[#B8862D]" />
+                Pending HO Approval ({grns.filter((g) => g.status === 'PENDING_APPROVAL').length})
+              </button>
+              <button
+                onClick={() => setGrnStatusTab('APPROVED')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  grnStatusTab === 'APPROVED' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#2E8B57]" />
+                Approved & Stock Posted ({grns.filter((g) => g.status === 'APPROVED' || g.status === 'RECEIVED' || g.status === 'QC_PASSED').length})
+              </button>
+            </div>
+
+            <button
+              onClick={() => {
+                setNewGRNPOId('');
+                setNewGRNLines([]);
+                setNewGRNInvoiceNum('');
+                setNewGRNInvoiceAmt(0);
+                setNewGRNNotes('');
+                setNewGRNInvoiceFile(null);
+                setCreateGRNModalOpen(true);
+              }}
+              className="px-4 py-2 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs flex items-center gap-1.5"
+            >
+              <PackageCheck className="w-4 h-4" /> Receive Delivery (GRN)
+            </button>
+          </div>
+
           <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                    <th className="p-3.5">GRN Number</th>
+                    <th className="p-3.5">GRN Ref</th>
                     <th className="p-3.5">Receive Date</th>
-                    <th className="p-3.5">Destination Branch</th>
-                    <th className="p-3.5">Destination Warehouse</th>
-                    <th className="p-3.5">Supplier</th>
-                    <th className="p-3.5">PO Ref</th>
+                    <th className="p-3.5">Destination</th>
+                    <th className="p-3.5">Supplier & PO</th>
                     <th className="p-3.5">Supplier Invoice #</th>
-                    <th className="p-3.5">Received Value</th>
-                    <th className="p-3.5">QC Status</th>
+                    <th className="p-3.5">Invoice Amount</th>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[rgba(45,45,45,0.05)]">
-                  {grns.length === 0 ? (
+                  {grns.filter((g) => {
+                    if (grnStatusTab === 'PENDING_APPROVAL') return g.status === 'PENDING_APPROVAL';
+                    if (grnStatusTab === 'APPROVED') return ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
+                    return true;
+                  }).length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-gray-400">
-                        No goods receipt notes recorded yet. Click "Receive Delivery (GRN)" to log arriving stock.
+                      <td colSpan={8} className="p-8 text-center text-gray-400">
+                        {grnStatusTab === 'PENDING_APPROVAL'
+                          ? 'No goods receipts currently waiting for HO approval.'
+                          : 'No goods receipt notes found. Click "Receive Delivery (GRN)" to log arriving stock.'}
                       </td>
                     </tr>
                   ) : (
-                    grns.map((g) => (
-                      <tr key={g.id} className="hover:bg-[#FAF8F5]/60 transition-all">
-                        <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">{g.grn_number}</td>
-                        <td className="p-3.5 text-[#707070]">{new Date(g.receive_date).toLocaleDateString()}</td>
-                        <td className="p-3.5 font-semibold text-[#1C1C1C]">{g.branch_name}</td>
-                        <td className="p-3.5 text-[#707070]">{g.warehouse_name || 'Main Store'}</td>
-                        <td className="p-3.5 text-[#707070]">{g.supplier_name || 'Direct Vendor'}</td>
-                        <td className="p-3.5 font-mono text-[#B8862D]">{g.po_number || 'Direct Delivery'}</td>
-                        <td className="p-3.5 font-mono text-gray-600">{g.supplier_invoice_number || '—'}</td>
-                        <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">${Number(g.total_amount || 0).toFixed(2)}</td>
-                        <td className="p-3.5">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#2E8B57]/15 text-[#2E8B57]">
-                            {g.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
+                    grns
+                      .filter((g) => {
+                        if (grnStatusTab === 'PENDING_APPROVAL') return g.status === 'PENDING_APPROVAL';
+                        if (grnStatusTab === 'APPROVED') return ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
+                        return true;
+                      })
+                      .map((g) => {
+                        const isPending = g.status === 'PENDING_APPROVAL';
+                        const isApproved = ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
+                        const isRejected = g.status === 'REJECTED';
+                        const hasVariance = (g.notes || '').includes('INVOICE VARIANCE FLAGGED');
+
+                        return (
+                          <tr key={g.id} className="hover:bg-[#FAF8F5]/60 transition-all">
+                            <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">{g.grn_number}</td>
+                            <td className="p-3.5 text-[#707070]">{new Date(g.receive_date).toLocaleDateString()}</td>
+                            <td className="p-3.5">
+                              <div className="font-semibold text-[#1C1C1C]">{g.branch_name}</div>
+                              <div className="text-[11px] text-[#707070]">{g.warehouse_name || 'Main Store'}</div>
+                            </td>
+                            <td className="p-3.5">
+                              <div className="text-[#1C1C1C] font-semibold">{g.supplier_name || 'Direct Vendor'}</div>
+                              <div className="font-mono text-[#B8862D] text-[11px]">{g.po_number || 'Direct Delivery'}</div>
+                            </td>
+                            <td className="p-3.5 font-mono font-semibold text-gray-700">{g.supplier_invoice_number || '—'}</td>
+                            <td className="p-3.5">
+                              <div className="font-mono font-bold text-[#1C1C1C]">${Number(g.total_amount || 0).toFixed(2)}</div>
+                              {hasVariance && (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200 mt-0.5">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600" /> Variance Flagged
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3.5">
+                              <span
+                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                  isApproved
+                                    ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
+                                    : isPending
+                                    ? 'bg-[#B8862D]/15 text-[#B8862D] animate-pulse'
+                                    : 'bg-red-100 text-red-700'
+                                }`}
+                              >
+                                {isPending ? 'PENDING APPROVAL' : g.status}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-right">
+                              {isPending ? (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleApproveGRN(g.id)}
+                                    disabled={loading}
+                                    className="px-3 py-1 rounded-lg bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] transition-all flex items-center gap-1 shadow-xs"
+                                    title="Approve Receiving & Post to Destination Stock"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Post Stock
+                                  </button>
+                                  <button
+                                    onClick={() => setRejectGRNModal({ open: true, grnId: g.id, grnNumber: g.grn_number })}
+                                    disabled={loading}
+                                    className="px-2.5 py-1 rounded-lg border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 transition-all"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              ) : isApproved ? (
+                                <span className="text-[#2E8B57] font-semibold text-xs inline-flex items-center gap-1">
+                                  <CheckCircle2 className="w-3.5 h-3.5" /> Stock Posted
+                                </span>
+                              ) : (
+                                <span className="text-red-500 font-semibold text-xs inline-flex items-center gap-1">
+                                  <AlertCircle className="w-3.5 h-3.5" /> Rejected
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
                   )}
                 </tbody>
               </table>
@@ -1265,6 +1768,396 @@ export const PurchaseWorkspace: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB: SMART AI INDENT & ASSISTANT */}
+      {activeTab === 'smart' && (
+        <div className="space-y-6">
+          {/* Outlet Scoping & Control Banner */}
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-[#FAF8F5] via-white to-[#FAF8F5] border border-[#C79A3B]/30 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-[#F1E4C5] text-[#B8862D]">
+                  <Sparkles className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
+                    Outlet Smart AI Indent Engine & Assistant
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-white text-[#B8862D] border border-[#C79A3B]/30">
+                      [{activeOutlet.code}] {activeOutlet.name}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-[#707070] mt-0.5">
+                    Deterministic stock + sales consumption run-rate + lead time & safety buffer calculations scoped exclusively to this outlet.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => fetchSmartDraft(true)}
+                disabled={smartDraftLoading}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5] shadow-xs transition-all"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${smartDraftLoading ? 'animate-spin' : ''}`} />
+                Regenerate AI Draft
+              </button>
+
+              <button
+                onClick={() => setSmartConfigModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5] shadow-xs transition-all"
+              >
+                <Sliders className="w-3.5 h-3.5 text-[#C79A3B]" />
+                Schedule Settings ({prepTime})
+              </button>
+
+              <button
+                onClick={handleTriggerScheduledRun}
+                disabled={loading}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all"
+              >
+                <Clock className="w-3.5 h-3.5 text-[#C79A3B]" />
+                Run Schedules Now
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive AI Assistant Q&A Panel */}
+          <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#F1E4C5] flex items-center justify-center text-[#B8862D]">
+                  <Bot className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-[#1C1C1C]">Outlet Inventory AI Assistant</h4>
+                  <p className="text-[11px] text-[#707070]">Ask instant stock, consumption, critical shortage & replenishment questions</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#2E8B57]/15 text-[#2E8B57]">
+                Active Scope: {activeOutlet.name}
+              </span>
+            </div>
+
+            {/* Quick Prompt Suggestions */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-[#707070] font-semibold flex items-center gap-1">
+                <HelpCircle className="w-3.5 h-3.5 text-[#C79A3B]" /> Quick Questions:
+              </span>
+              {[
+                { label: '🔥 What is critical today?', q: 'What is critical today?' },
+                { label: '⚠️ What stock is low today?', q: 'What stock is low today?' },
+                { label: '📦 What do I need to order?', q: 'What do I need to order?' },
+                { label: '⏳ What is already pending?', q: 'What is already pending?' },
+                { label: '🔮 What do I need for tomorrow?', q: 'What do I need for tomorrow?' },
+              ].map((chip, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleAskAI(chip.q)}
+                  disabled={aiAsking}
+                  className="px-2.5 py-1 rounded-lg bg-[#FAF8F5] hover:bg-[#F1E4C5] text-[#1C1C1C] hover:text-[#B8862D] border border-[rgba(45,45,45,0.08)] text-[11px] font-semibold transition-all"
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom Question Input */}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={aiQuestion}
+                onChange={(e) => setAiQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAskAI();
+                }}
+                placeholder={`Ask AI Assistant about stock, min levels, or indents for ${activeOutlet.name}...`}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs focus:outline-none focus:border-[#C79A3B]"
+              />
+              <button
+                onClick={() => handleAskAI()}
+                disabled={aiAsking || !aiQuestion.trim()}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#B8862D] hover:bg-[#9E7326] text-white text-xs font-bold disabled:opacity-50 transition-all shadow-xs"
+              >
+                <Send className={`w-3.5 h-3.5 ${aiAsking ? 'animate-spin' : ''}`} />
+                {aiAsking ? 'Analyzing...' : 'Ask Assistant'}
+              </button>
+            </div>
+
+            {/* AI Assistant Answer Card */}
+            {aiAnswer && (
+              <div className="p-4 rounded-xl bg-gradient-to-br from-[#FAF8F5] to-white border border-[#C79A3B]/30 space-y-3 animate-fadeIn">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-[#B8862D] text-white">
+                      Intent: {aiAnswer.intent}
+                    </span>
+                    <span className="text-xs font-semibold text-[#1C1C1C]">
+                      &ldquo;{aiAnswer.question}&rdquo;
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setAiAnswer(null)}
+                    className="text-gray-400 hover:text-gray-600 text-xs font-bold"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Answer text */}
+                <div className="p-3 rounded-lg bg-white border border-[rgba(45,45,45,0.06)] text-xs text-[#1C1C1C] whitespace-pre-line leading-relaxed font-sans">
+                  {aiAnswer.answer_text}
+                </div>
+
+                {/* Metrics Chips */}
+                {aiAnswer.metrics && (
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
+                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
+                      <span className="text-[10px] text-[#707070] block">Monitored Items</span>
+                      <span className="font-bold text-[#1C1C1C]">{aiAnswer.metrics.total_monitored_items ?? 0}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
+                      <span className="text-[10px] text-red-600 font-bold block">Critical</span>
+                      <span className="font-bold text-red-600">{aiAnswer.metrics.critical_count ?? 0}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
+                      <span className="text-[10px] text-amber-700 block">Below Min</span>
+                      <span className="font-bold text-amber-700">{aiAnswer.metrics.low_stock_count ?? 0}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
+                      <span className="text-[10px] text-blue-700 block">Need Order</span>
+                      <span className="font-bold text-blue-700">{aiAnswer.metrics.need_order_count ?? 0}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
+                      <span className="text-[10px] text-[#2E8B57] block">Pending Orders</span>
+                      <span className="font-bold text-[#2E8B57]">{aiAnswer.metrics.pending_items_count ?? 0}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Active Smart Requirement Draft Section */}
+          <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-sm overflow-hidden space-y-4 p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[rgba(45,45,45,0.06)] pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-[#1C1C1C] flex items-center gap-1.5">
+                    <ShoppingCart className="w-4 h-4 text-[#C79A3B]" />
+                    Active Smart Indent Draft ({smartDraft?.draft_date || 'Today'})
+                  </h4>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      smartDraft?.status === 'CONFIRMED'
+                        ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {smartDraft?.status || 'DRAFT'}
+                  </span>
+                  {smartDraft?.purchase_request_number && (
+                    <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-mono text-[10px] font-bold border border-blue-200">
+                      Linked PR: {smartDraft.purchase_request_number}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-[#707070] mt-0.5">
+                  Est Total Value: <span className="font-bold text-[#1C1C1C] font-mono">${Number(smartDraft?.estimated_total_order_value || 0).toFixed(2)}</span> | Critical Items: <span className="font-bold text-red-600">{smartDraft?.critical_count || 0}</span> | High: <span className="font-bold text-amber-600">{smartDraft?.high_priority_count || 0}</span>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowAuditTrail(!showAuditTrail)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-[rgba(45,45,45,0.12)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5]"
+                >
+                  <History className="w-3.5 h-3.5 text-[#C79A3B]" />
+                  Audit Trail ({smartDraft?.audit_summary?.user_modifications?.length || 0})
+                </button>
+
+                <button
+                  onClick={() => setAddItemDraftModalOpen(true)}
+                  disabled={smartDraft?.status === 'CONFIRMED'}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5] disabled:opacity-50"
+                >
+                  <Plus className="w-3.5 h-3.5 text-[#C79A3B]" />
+                  Add Catalog Item
+                </button>
+
+                <button
+                  onClick={handleConfirmSmartDraft}
+                  disabled={confirmingDraft || smartDraft?.status === 'CONFIRMED' || !smartDraft?.items?.length}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-[#2E8B57] hover:bg-[#257247] text-white text-xs font-bold disabled:opacity-50 shadow-xs transition-all"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  {confirmingDraft ? 'Submitting...' : smartDraft?.status === 'CONFIRMED' ? 'Confirmed & Converted' : 'Confirm & Convert to PR'}
+                </button>
+              </div>
+            </div>
+
+            {/* Audit Trail Drawer */}
+            {showAuditTrail && smartDraft?.audit_summary && (
+              <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#1C1C1C] flex items-center gap-1.5">
+                    <History className="w-4 h-4 text-[#C79A3B]" /> Modification Audit Trail History
+                  </span>
+                  <span className="text-[10px] text-[#707070]">Generated: {smartDraft.generated_at}</span>
+                </div>
+                {smartDraft.audit_summary.user_modifications?.length ? (
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {smartDraft.audit_summary.user_modifications.map((mod: any, i: number) => (
+                      <div key={i} className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)] flex items-center justify-between text-[11px]">
+                        <div>
+                          <span className="font-bold text-[#B8862D] uppercase mr-2">{mod.action}</span>
+                          <span className="font-semibold text-[#1C1C1C]">{mod.item_name}</span>
+                          {mod.action === 'EDIT_QUANTITY' && (
+                            <span className="text-[#707070] ml-2">
+                              (Original: {mod.original_suggested_qty} &rarr; Old: {mod.old_final_qty} &rarr; New: <strong className="text-[#1C1C1C]">{mod.new_final_qty}</strong>)
+                            </span>
+                          )}
+                          {mod.action === 'ADD_ITEM' && (
+                            <span className="text-[#2E8B57] ml-2 font-semibold">+{mod.added_qty}</span>
+                          )}
+                          {mod.action === 'REMOVE_ITEM' && (
+                            <span className="text-red-500 ml-2 font-semibold">Removed (-{mod.removed_qty})</span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-[#707070]">{mod.modified_by}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[#707070] text-xs">No user edits made yet. Quantities match initial deterministic system calculations.</p>
+                )}
+              </div>
+            )}
+
+            {/* Smart Requirement Items Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
+                    <th className="p-3.5">Item Name & Code</th>
+                    <th className="p-3.5">Supplier</th>
+                    <th className="p-3.5 text-right">Current Stock</th>
+                    <th className="p-3.5 text-right">Min / Target</th>
+                    <th className="p-3.5 text-right">Run-Rate / Pending</th>
+                    <th className="p-3.5 text-right">Deficit</th>
+                    <th className="p-3.5 text-right">Suggested</th>
+                    <th className="p-3.5 text-center">Final Order Qty</th>
+                    <th className="p-3.5">Priority</th>
+                    <th className="p-3.5">Audit Status</th>
+                    <th className="p-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                  {smartDraft?.items?.length ? (
+                    smartDraft.items.map((it) => (
+                      <tr key={it.item_id} className="hover:bg-[#FAF8F5]/60 transition-colors">
+                        <td className="p-3.5">
+                          <div className="font-bold text-[#1C1C1C]">{it.item_name}</div>
+                          <div className="text-[10px] font-mono text-[#707070]">{it.item_code}</div>
+                        </td>
+                        <td className="p-3.5">
+                          <span className="font-semibold text-[#1C1C1C]">{it.supplier_name || 'Mapped Vendor'}</span>
+                          {it.supplier_whatsapp && (
+                            <div className="text-[10px] font-mono text-[#2E8B57] flex items-center gap-0.5">
+                              <MessageCircle className="w-2.5 h-2.5" /> {it.supplier_whatsapp}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-semibold">
+                          <span className={Number(it.current_stock) <= 0 ? 'text-red-600 font-bold' : 'text-[#1C1C1C]'}>
+                            {Number(it.current_stock).toFixed(1)} {it.unit_symbol}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-[#707070]">
+                          <div>Min: {Number(it.min_stock).toFixed(1)} {it.unit_symbol}</div>
+                          <div className="text-[10px] font-bold text-[#1C1C1C]">Target: {Number(it.target_stock).toFixed(1)} {it.unit_symbol}</div>
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-[11px] text-[#707070]">
+                          <div>{Number(it.daily_consumption).toFixed(2)}/day</div>
+                          {Number(it.pending_incoming) > 0 && (
+                            <div className="text-[#2E8B57] font-bold">+{Number(it.pending_incoming).toFixed(1)} pending</div>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-bold text-red-600">
+                          {Number(it.short_qty) > 0 ? `${Number(it.short_qty).toFixed(1)} ${it.unit_symbol}` : '—'}
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-semibold text-[#707070]">
+                          {Number(it.system_suggested_qty).toFixed(1)} {it.unit_symbol}
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            disabled={smartDraft?.status === 'CONFIRMED'}
+                            defaultValue={Number(it.final_order_qty)}
+                            onBlur={(e) => {
+                              const v = parseFloat(e.target.value);
+                              if (!isNaN(v) && v !== Number(it.final_order_qty)) {
+                                handleUpdateDraftItemQty(it.item_id, v);
+                              }
+                            }}
+                            className="w-20 p-1.5 text-center font-mono font-bold text-xs bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-lg focus:outline-none focus:border-[#C79A3B]"
+                          />
+                        </td>
+                        <td className="p-3.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              it.priority === 'CRITICAL'
+                                ? 'bg-red-100 text-red-700'
+                                : it.priority === 'HIGH'
+                                ? 'bg-amber-100 text-amber-800'
+                                : it.priority === 'MEDIUM'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {it.priority}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-[10px]">
+                          {it.is_manually_added ? (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">
+                              Manually Added
+                            </span>
+                          ) : it.is_user_modified ? (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">
+                              User Modified
+                            </span>
+                          ) : (
+                            <span className="text-[#707070]">System Auto</span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={() => handleRemoveDraftItem(it.item_id)}
+                            disabled={smartDraft?.status === 'CONFIRMED'}
+                            className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30"
+                            title="Remove Item from Draft"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={11} className="p-8 text-center text-xs text-[#707070]">
+                        No requirement items calculated or draft is empty. Click &ldquo;Regenerate AI Draft&rdquo; to analyze stock.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1807,238 +2700,294 @@ export const PurchaseWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* 4. Modal: Receive Delivery (Create GRN) */}
+      {/* 4. Modal: Smart PO-Based Goods Receiving */}
       {createGRNModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-3xl w-full space-y-4 shadow-xl border border-[rgba(45,45,45,0.1)] max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-[#1C1C1C] flex items-center gap-2">
-                <PackageCheck className="w-5 h-5 text-[#2E8B57]" />
-                Receive Physical Stock Delivery (Destination GRN)
-              </h3>
-              <button onClick={() => setCreateGRNModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+            <div className="flex items-center justify-between pb-3 border-b border-[rgba(45,45,45,0.08)]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-[#2E8B57]/15 flex items-center justify-center text-[#2E8B57]">
+                  <PackageCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1C1C1C]">
+                    PO-Based Direct Receiving & GRN
+                  </h3>
+                  <p className="text-[11px] text-[#707070]">
+                    Automated receiving locked to approved PO line items & quantities.
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setCreateGRNModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-1">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            {/* Step 1: Select or Display Linked PO */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="block text-[#707070] font-semibold mb-1">Linked Purchase Order:</label>
+                <label className="block text-[#707070] font-bold mb-1">1. Select Approved Purchase Order:</label>
                 <select
                   value={newGRNPOId}
                   onChange={(e) => handleSelectPOForGRN(e.target.value)}
-                  className="w-full p-2 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-semibold"
+                  className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-bold font-mono text-[#1C1C1C]"
                 >
-                  <option value="">-- Direct Supplier Delivery (No PO) --</option>
+                  <option value="">-- Choose Approved PO to Receive --</option>
                   {orders
-                    .filter((o) => o.status !== 'CANCELLED' && o.status !== 'RECEIVED')
+                    .filter((o) => ['APPROVED', 'WHATSAPP_OPENED', 'SENT_MANUALLY', 'ISSUED', 'PARTIALLY_RECEIVED'].includes(o.status))
                     .map((o) => (
                       <option key={o.id} value={o.id}>
-                        {o.po_number} - {o.supplier_name}
+                        {o.po_number} — {o.supplier_name || 'Vendor'} (${Number(o.net_amount || o.total_amount || 0).toFixed(2)})
                       </option>
                     ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-[#707070] font-semibold mb-1">Destination Outlet:</label>
-                <select
-                  value={newGRNBranchId}
-                  onChange={(e) => setNewGRNBranchId(e.target.value)}
-                  className="w-full p-2 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-semibold"
-                >
-                  {outlets.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name} ({o.code})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[#707070] font-semibold mb-1">Supplier Invoice Number:</label>
-                <input
-                  type="text"
-                  placeholder="e.g. INV-2026-8942"
-                  value={newGRNInvoiceNum}
-                  onChange={(e) => setNewGRNInvoiceNum(e.target.value)}
-                  className="w-full p-2 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-semibold font-mono"
-                />
+                <label className="block text-[#707070] font-bold mb-1">Destination Outlet & Receiving Warehouse:</label>
+                <div className="p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] rounded-xl font-semibold text-[#1C1C1C] flex items-center justify-between">
+                  <span>
+                    {outlets.find((o) => o.id === newGRNBranchId)?.name || activeOutlet.name}
+                  </span>
+                  <span className="text-[11px] text-[#707070] font-mono">Main Store Warehouse</span>
+                </div>
               </div>
             </div>
 
-            {/* Receiving Lines */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#1C1C1C]">Received Stock Items & Quality Check:</span>
+            {/* PO Summary & Auto-Loaded Read-Only Items */}
+            {newGRNPOId && (
+              <div className="space-y-3">
+                {/* PO Header details */}
+                {(() => {
+                  const currentPO = orders.find((o) => o.id === newGRNPOId);
+                  const poTotalVal = currentPO ? Number(currentPO.net_amount || currentPO.total_amount || 0) : 0;
+                  const hasVarianceVal = Math.abs(newGRNInvoiceAmt - poTotalVal) > 0.01;
+                  const diffVal = newGRNInvoiceAmt - poTotalVal;
+                  const diffPctVal = poTotalVal > 0 ? (diffVal / poTotalVal) * 100 : 0;
+
+                  return (
+                    <>
+                      <div className="p-3 bg-[#FAF8F5] rounded-2xl border border-[rgba(45,45,45,0.08)] flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div>
+                          <div className="text-[#707070] text-[11px]">Supplier / Vendor:</div>
+                          <div className="font-bold text-[#1C1C1C]">{currentPO?.supplier_name || 'Direct Supplier'}</div>
+                        </div>
+                        <div>
+                          <div className="text-[#707070] text-[11px]">PO Reference:</div>
+                          <div className="font-mono font-bold text-[#B8862D]">{currentPO?.po_number}</div>
+                        </div>
+                        <div>
+                          <div className="text-[#707070] text-[11px]">Approved PO Valuation:</div>
+                          <div className="font-mono font-bold text-[#1C1C1C]">${poTotalVal.toFixed(2)}</div>
+                        </div>
+                        <div>
+                          <div className="text-[#707070] text-[11px]">Status:</div>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#2E8B57]/15 text-[#2E8B57]">
+                            {currentPO?.status}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Locked Items Table */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-[#1C1C1C] flex items-center gap-1.5">
+                            <Lock className="w-3.5 h-3.5 text-[#707070]" />
+                            PO Line Items (Locked from Approved PO — No Manual Entry):
+                          </span>
+                          <span className="text-[11px] text-[#707070] font-semibold">
+                            {newGRNLines.length} item{newGRNLines.length !== 1 ? 's' : ''} to receive
+                          </span>
+                        </div>
+
+                        <div className="border border-[rgba(45,45,45,0.1)] rounded-2xl overflow-hidden bg-white max-h-48 overflow-y-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
+                                <th className="p-2.5">Item Name</th>
+                                <th className="p-2.5 text-center">Unit</th>
+                                <th className="p-2.5 text-right">Approved Qty</th>
+                                <th className="p-2.5 text-right">Unit Rate</th>
+                                <th className="p-2.5 text-right">Line Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[rgba(45,45,45,0.05)] font-medium">
+                              {newGRNLines.map((line, idx) => (
+                                <tr key={idx} className="hover:bg-[#FAF8F5]/50">
+                                  <td className="p-2.5 font-bold text-[#1C1C1C]">{line.item_name}</td>
+                                  <td className="p-2.5 text-center text-[#707070] font-mono">{line.unit_symbol}</td>
+                                  <td className="p-2.5 text-right font-mono font-bold text-[#2E8B57]">
+                                    {line.accepted_qty}
+                                  </td>
+                                  <td className="p-2.5 text-right font-mono text-[#707070]">
+                                    ${Number(line.unit_price).toFixed(2)}
+                                  </td>
+                                  <td className="p-2.5 text-right font-mono font-bold text-[#1C1C1C]">
+                                    ${(Number(line.accepted_qty) * Number(line.unit_price)).toFixed(2)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Step 2: Invoice Number & Invoice Amount */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
+                        <div>
+                          <label className="block text-[#707070] font-bold mb-1">
+                            2. Supplier Invoice / Bill Number <span className="text-red-500">*</span>:
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. INV-2026-9042"
+                            value={newGRNInvoiceNum}
+                            onChange={(e) => setNewGRNInvoiceNum(e.target.value)}
+                            className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-bold font-mono text-[#1C1C1C] focus:bg-white focus:outline-none"
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[#707070] font-bold mb-1">
+                            3. Invoice Billed Amount ($):
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={newGRNInvoiceAmt}
+                            onChange={(e) => setNewGRNInvoiceAmt(parseFloat(e.target.value) || 0)}
+                            className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-bold font-mono text-[#1C1C1C] focus:bg-white focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Variance Alert Banner */}
+                      {hasVarianceVal && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs space-y-1">
+                          <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                            Amount Variance Detected & Flagged for Approval:
+                          </div>
+                          <p className="text-amber-800 text-[11px]">
+                            Approved PO is <strong>${poTotalVal.toFixed(2)}</strong> vs Invoice Amount{' '}
+                            <strong>${newGRNInvoiceAmt.toFixed(2)}</strong> ({diffVal > 0 ? '+' : ''}${diffVal.toFixed(2)} /{' '}
+                            {diffVal > 0 ? '+' : ''}{diffPctVal.toFixed(1)}%). This variance will be highlighted in the Central HO Approval Queue.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Step 3: Supplier Invoice Upload */}
+                      <div className="space-y-1 text-xs">
+                        <label className="block text-[#707070] font-bold">4. Upload Supplier Invoice Document / Photo (PDF, JPG, PNG):</label>
+                        <div className="p-3 bg-[#FAF8F5] border border-dashed border-[rgba(45,45,45,0.2)] rounded-2xl flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <Upload className="w-5 h-5 text-[#707070]" />
+                            {newGRNInvoiceFile ? (
+                              <div>
+                                <div className="font-bold text-[#1C1C1C]">{newGRNInvoiceFile.fileName}</div>
+                                <div className="text-[10px] text-[#707070]">
+                                  {(newGRNInvoiceFile.size / 1024).toFixed(1)} KB — Ready to attach
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-[#707070]">Select invoice document from your device</div>
+                            )}
+                          </div>
+                          <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] font-bold text-xs hover:bg-gray-50 shadow-2xs">
+                            Choose File
+                            <input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={handleInvoiceFileChange}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Notes */}
+                      <div>
+                        <label className="block text-[#707070] font-bold mb-1 text-xs">Receiving & Inspection Notes (optional):</label>
+                        <textarea
+                          placeholder="Delivery package condition, batch numbers, driver notes..."
+                          value={newGRNNotes}
+                          onChange={(e) => setNewGRNNotes(e.target.value)}
+                          rows={2}
+                          className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:bg-white focus:outline-none"
+                        />
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-3 border-t border-[rgba(45,45,45,0.08)]">
+              <div className="text-[11px] text-[#707070] flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-[#2E8B57]" />
+                Stock posts directly to destination warehouse upon Central/HO Approval.
+              </div>
+              <div className="flex items-center gap-2">
                 <button
-                  type="button"
-                  onClick={() =>
-                    setNewGRNLines([
-                      ...newGRNLines,
-                      {
-                        item_id: '',
-                        received_qty: 10,
-                        accepted_qty: 10,
-                        rejected_qty: 0,
-                        unit_price: 50,
-                        qc_status: 'PASSED',
-                      },
-                    ])
-                  }
-                  className="text-xs font-bold text-[#B8862D] hover:underline"
+                  onClick={() => setCreateGRNModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5]"
                 >
-                  + Add Received Line
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateGRN}
+                  disabled={loading || !newGRNPOId || !newGRNInvoiceNum.trim()}
+                  className="px-5 py-2 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  <PackageCheck className="w-4 h-4" />
+                  {loading ? 'Submitting...' : 'Submit for HO Approval'}
                 </button>
               </div>
-
-              <div className="space-y-2 max-h-56 overflow-y-auto">
-                {newGRNLines.map((line, idx) => (
-                  <div key={idx} className="p-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] text-xs space-y-2">
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={line.item_id}
-                        onChange={(e) => {
-                          const sel = inventoryItems.find((it) => it.id === e.target.value);
-                          const updated = [...newGRNLines];
-                          updated[idx].item_id = e.target.value;
-                          if (sel) {
-                            updated[idx].unit_price = Number(sel.cost_price || 0);
-                            updated[idx].item_name = sel.name;
-                            updated[idx].unit_symbol = sel.unit?.symbol || 'UNIT';
-                          }
-                          setNewGRNLines(updated);
-                        }}
-                        className="flex-1 p-1.5 bg-white border border-[rgba(45,45,45,0.15)] rounded-lg font-semibold"
-                      >
-                        <option value="">-- Choose Item --</option>
-                        {inventoryItems.map((it) => (
-                          <option key={it.id} value={it.id}>
-                            {it.name} ({it.unit?.symbol || 'Unit'})
-                          </option>
-                        ))}
-                      </select>
-
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        placeholder="Rec Qty"
-                        value={line.received_qty}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          const updated = [...newGRNLines];
-                          updated[idx].received_qty = val;
-                          updated[idx].accepted_qty = Math.max(0, val - (updated[idx].rejected_qty || 0));
-                          setNewGRNLines(updated);
-                        }}
-                        className="w-20 p-1.5 bg-white border border-[rgba(45,45,45,0.15)] rounded-lg font-mono"
-                        title="Physical Received Qty"
-                      />
-
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        placeholder="Acc Qty"
-                        value={line.accepted_qty}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          const updated = [...newGRNLines];
-                          updated[idx].accepted_qty = val;
-                          setNewGRNLines(updated);
-                        }}
-                        className="w-20 p-1.5 bg-white border border-[#2E8B57]/30 text-[#2E8B57] font-bold rounded-lg font-mono"
-                        title="Accepted Qty"
-                      />
-
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Rate ($)"
-                        value={line.unit_price}
-                        onChange={(e) => {
-                          const updated = [...newGRNLines];
-                          updated[idx].unit_price = parseFloat(e.target.value) || 0;
-                          setNewGRNLines(updated);
-                        }}
-                        className="w-20 p-1.5 bg-white border border-[rgba(45,45,45,0.15)] rounded-lg font-mono"
-                        title="Unit Rate"
-                      />
-
-                      <select
-                        value={line.qc_status}
-                        onChange={(e) => {
-                          const updated = [...newGRNLines];
-                          updated[idx].qc_status = e.target.value as any;
-                          setNewGRNLines(updated);
-                        }}
-                        className="w-24 p-1.5 bg-white border border-[rgba(45,45,45,0.15)] rounded-lg font-semibold"
-                      >
-                        <option value="PASSED">QC PASSED</option>
-                        <option value="FAILED">QC FAILED</option>
-                      </select>
-
-                      <button
-                        type="button"
-                        onClick={() => setNewGRNLines(newGRNLines.filter((_, i) => i !== idx))}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Batch Number (optional)"
-                        value={line.batch_number || ''}
-                        onChange={(e) => {
-                          const updated = [...newGRNLines];
-                          updated[idx].batch_number = e.target.value;
-                          setNewGRNLines(updated);
-                        }}
-                        className="flex-1 p-1 bg-white border border-[rgba(45,45,45,0.1)] rounded-md text-[11px] font-mono"
-                      />
-                      <input
-                        type="date"
-                        placeholder="Expiry Date"
-                        value={line.expiry_date || ''}
-                        onChange={(e) => {
-                          const updated = [...newGRNLines];
-                          updated[idx].expiry_date = e.target.value;
-                          setNewGRNLines(updated);
-                        }}
-                        className="w-36 p-1 bg-white border border-[rgba(45,45,45,0.1)] rounded-md text-[11px]"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
+          </div>
+        </div>
+      )}
 
+      {/* Reject GRN Reason Modal */}
+      {rejectGRNModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-xl border border-[rgba(45,45,45,0.1)]">
+            <div className="flex items-center justify-between pb-2 border-b border-[rgba(45,45,45,0.08)]">
+              <h3 className="text-sm font-bold text-red-600 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" /> Reject Receiving: {rejectGRNModal.grnNumber}
+              </h3>
+              <button
+                onClick={() => setRejectGRNModal({ open: false, grnId: '', grnNumber: '' })}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-[#707070]">
+              Please state why this goods receipt is rejected (e.g. wrong items, damaged package, price discrepancy). No stock will be posted.
+            </p>
             <textarea
-              placeholder="Inspection / receiving notes..."
-              value={newGRNNotes}
-              onChange={(e) => setNewGRNNotes(e.target.value)}
-              rows={2}
-              className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:outline-none"
+              placeholder="Enter rejection reason..."
+              value={grnRejectReason}
+              onChange={(e) => setGrnRejectReason(e.target.value)}
+              rows={3}
+              className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:bg-white focus:outline-none"
             />
-
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
-                onClick={() => setCreateGRNModalOpen(false)}
+                onClick={() => setRejectGRNModal({ open: false, grnId: '', grnNumber: '' })}
                 className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5]"
               >
                 Cancel
               </button>
               <button
-                onClick={handleCreateGRN}
-                disabled={loading}
-                className="px-5 py-2 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs"
+                onClick={handleConfirmRejectGRN}
+                disabled={loading || !grnRejectReason.trim()}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white text-xs font-bold hover:bg-red-700 disabled:opacity-50"
               >
-                {loading ? 'Receiving...' : 'Confirm Goods Receipt'}
+                {loading ? 'Rejecting...' : 'Confirm Rejection'}
               </button>
             </div>
           </div>
@@ -2203,6 +3152,162 @@ export const PurchaseWorkspace: React.FC = () => {
                 className="px-5 py-2 rounded-xl bg-red-600 text-white text-xs font-bold hover:bg-red-700 disabled:opacity-50"
               >
                 {loading ? 'Submitting...' : 'Confirm Action'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. Modal: Smart Requirement Schedule Settings */}
+      {smartConfigModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-xl border border-[rgba(45,45,45,0.1)]">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-[#1C1C1C] flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-[#C79A3B]" />
+                Automated Schedule Config ({activeOutlet.name})
+              </h3>
+              <button onClick={() => setSmartConfigModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Daily Automated Preparation Time (HH:MM):</label>
+                <input
+                  type="time"
+                  value={prepTime}
+                  onChange={(e) => setPrepTime(e.target.value)}
+                  className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Lead Time (Days):</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="14"
+                  value={leadTimeDays}
+                  onChange={(e) => setLeadTimeDays(parseInt(e.target.value) || 1)}
+                  className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Safety Buffer (%):</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={safetyBufferPct}
+                  onChange={(e) => setSafetyBufferPct(parseFloat(e.target.value) || 0)}
+                  className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-mono font-bold"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="autoEnabledToggle"
+                  checked={autoEnabled}
+                  onChange={(e) => setAutoEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded text-[#B8862D] focus:ring-0"
+                />
+                <label htmlFor="autoEnabledToggle" className="font-semibold text-[#1C1C1C] cursor-pointer">
+                  Enable Daily Automated Preparation
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(45,45,45,0.06)]">
+              <button
+                onClick={() => setSmartConfigModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveScheduleConfig}
+                className="px-5 py-2 rounded-xl bg-[#B8862D] text-white text-xs font-bold hover:bg-[#9E7326]"
+              >
+                Save Schedule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. Modal: Add Item to Smart Requirement Draft */}
+      {addItemDraftModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-xl border border-[rgba(45,45,45,0.1)]">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-[#1C1C1C] flex items-center gap-2">
+                <Plus className="w-4 h-4 text-[#C79A3B]" />
+                Add Item to Smart Draft ({activeOutlet.name})
+              </h3>
+              <button onClick={() => setAddItemDraftModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Select Item from Catalog:</label>
+                <select
+                  value={addDraftItemId}
+                  onChange={(e) => setAddDraftItemId(e.target.value)}
+                  className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-semibold"
+                >
+                  <option value="">-- Choose Item --</option>
+                  {inventoryItems.map((itm) => (
+                    <option key={itm.id} value={itm.id}>
+                      {itm.name} ({itm.code}) - {itm.unit?.symbol || 'Units'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Order Quantity:</label>
+                <input
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  value={addDraftQty}
+                  onChange={(e) => setAddDraftQty(parseFloat(e.target.value) || 1)}
+                  className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Notes / Justification:</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Extra catering stock requested by chef"
+                  value={addDraftNotes}
+                  onChange={(e) => setAddDraftNotes(e.target.value)}
+                  className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(45,45,45,0.06)]">
+              <button
+                onClick={() => setAddItemDraftModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddItemToDraft}
+                disabled={!addDraftItemId || addDraftQty <= 0}
+                className="px-5 py-2 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] disabled:opacity-50"
+              >
+                Add Item to Draft
               </button>
             </div>
           </div>

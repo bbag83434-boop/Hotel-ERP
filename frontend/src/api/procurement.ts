@@ -5,6 +5,8 @@ import {
   PurchaseOrder,
   GoodsReceiveNote,
   GoodsReceiveNoteCreate,
+  GoodsReceiveFromPOCreateInput,
+  SupplierInvoiceUploadResult,
   PurchaseOrderCreate,
   ThreeWayMatchResponse,
   OutletClosingRecord,
@@ -104,7 +106,7 @@ export const procurementApi = {
   },
 
   // 4. Goods Receiving Notes (GRN) & 3-Way Match
-  getGoodsReceiveNotes: async (params?: { branch_id?: string; supplier_id?: string; po_id?: string }): Promise<GoodsReceiveNote[]> => {
+  getGoodsReceiveNotes: async (params?: { branch_id?: string; supplier_id?: string; po_id?: string; status_filter?: string }): Promise<GoodsReceiveNote[]> => {
     const res = await apiClient.get<GoodsReceiveNote[]>('/procurement/grn', { params });
     return res.data;
   },
@@ -114,6 +116,33 @@ export const procurementApi = {
   },
   createGoodsReceiveNote: async (payload: GoodsReceiveNoteCreate): Promise<GoodsReceiveNote> => {
     const res = await apiClient.post<GoodsReceiveNote>('/procurement/grn', payload);
+    return res.data;
+  },
+  createGoodsReceiveFromPO: async (payload: GoodsReceiveFromPOCreateInput): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.post<GoodsReceiveNote>('/procurement/grn/from-po', payload);
+    return res.data;
+  },
+  approveGoodsReceiveNote: async (grnId: string, payload?: { notes?: string }): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.post<GoodsReceiveNote>(`/procurement/grn/${grnId}/approve`, payload);
+    return res.data;
+  },
+  rejectGoodsReceiveNote: async (grnId: string, payload: { reason: string }): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.post<GoodsReceiveNote>(`/procurement/grn/${grnId}/reject`, payload);
+    return res.data;
+  },
+  uploadSupplierInvoice: async (payload: {
+    po_id?: string;
+    branch_id?: string;
+    warehouse_id?: string;
+    supplier_id?: string;
+    invoice_number: string;
+    invoice_date?: string;
+    invoice_amount: number;
+    file_name: string;
+    file_type: string;
+    file_base64: string;
+  }): Promise<SupplierInvoiceUploadResult> => {
+    const res = await apiClient.post<SupplierInvoiceUploadResult>('/procurement/grn/upload-invoice', payload);
     return res.data;
   },
   getOrder3WayMatch: async (orderId: string): Promise<ThreeWayMatchResponse> => {

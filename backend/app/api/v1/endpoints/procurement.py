@@ -1,3 +1,5 @@
+import os
+import base64
 import uuid
 import json
 import re
@@ -71,6 +73,11 @@ from app.schemas.procurement import (
     GoodsReceiveItemCreate,
     GoodsReceiveItemResponse,
     GoodsReceiveNoteCreate,
+    GoodsReceiveFromPOCreate,
+    GoodsReceiveNoteApproveRequest,
+    GoodsReceiveNoteRejectRequest,
+    SupplierInvoiceUploadRequest,
+    SupplierInvoiceUploadResponse,
     GoodsReceiveNoteResponse,
     ThreeWayMatchLine,
     ThreeWayMatchResponse,
@@ -1539,7 +1546,111 @@ def format_grn_response(grn: GoodsReceiveNote, db: Session) -> GoodsReceiveNoteR
     )
 
 
+def post_stock_for_grn(grn: GoodsReceiveNote, db: Session, current_user: User):
+    """
+    Idempotently posts stock from an approved GRN directly to destination warehouse
+    StockBalance and StockLedger, updates linked PO items received quantities, and
+    progresses PO status.
+    """
+    if grn.status in ["APPROVED", "RECEIVED", "QC_PASSED"]:
+        return
+
+    warehouse_id = grn.warehouse_id
+    if not warehouse_id:
+        wh = db.query(Warehouse).filter(Warehouse.branch_id == grn.branch_id, Warehouse.is_active == True).first()
+        if not wh:
+            raise NotFoundException(f"No active warehouse found for branch '{grn.branch_id}'.")
+        warehouse_id = wh.id
+        grn.warehouse_id = warehouse_id
+
+    po = None
+    if grn.po_id:
+        po = db.query(PurchaseOrder).filter(PurchaseOrder.id == grn.po_id).first()
+
+    for itm in grn.items:
+        # 1. Update/Create StockBalance in destination warehouse
+        sb = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == warehouse_id,
+            StockBalance.item_id == itm.item_id
+        ).first()
+
+        new_balance = itm.accepted_qty
+        if sb:
+            sb.quantity = (sb.quantity or Decimal("0.0000")) + itm.accepted_qty
+            sb.updated_at = datetime.utcnow()
+            new_balance = sb.quantity
+        else:
+            sb = StockBalance(
+                warehouse_id=warehouse_id,
+                item_id=itm.item_id,
+                quantity=itm.accepted_qty,
+                min_stock_level=Decimal("0.0000"),
+                reorder_qty=Decimal("0.0000"),
+                updated_at=datetime.utcnow()
+            )
+            db.add(sb)
+
+        # 2. Write to StockLedger
+        ledger_entry = StockLedger(
+            warehouse_id=warehouse_id,
+            item_id=itm.item_id,
+            batch_number=itm.batch_number,
+            expiry_date=itm.expiry_date,
+            movement_type='GRN',
+            change_qty=itm.accepted_qty,
+            balance_qty=new_balance,
+            unit_cost=itm.unit_price,
+            total_cost=itm.total_price,
+            reference_type="GRN",
+            reference_id=grn.id,
+            notes=f"Receipt via GRN {grn.grn_number}",
+            created_by_id=current_user.id,
+            created_at=datetime.utcnow(),
+        )
+        db.add(ledger_entry)
+
+        # 3. Update PO line item received qty if linked
+        if itm.po_item_id:
+            po_itm = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.id == itm.po_item_id).first()
+            if po_itm:
+                po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm.accepted_qty
+        elif po:
+            po_itm = db.query(PurchaseOrderItem).filter(
+                PurchaseOrderItem.po_id == po.id,
+                PurchaseOrderItem.item_id == itm.item_id
+            ).first()
+            if po_itm:
+                po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm.accepted_qty
+
+    # 4. If PO linked, calculate total ordered vs received
+    if po:
+        db.flush()
+        po_items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.po_id == po.id).all()
+        total_ord = sum([pi.ordered_qty for pi in po_items])
+        total_rec = sum([pi.received_qty or Decimal("0.0000") for pi in po_items])
+        if total_rec >= total_ord:
+            po.status = POStatus.RECEIVED
+        elif total_rec > Decimal("0.0000"):
+            po.status = POStatus.PARTIALLY_RECEIVED
+        po.updated_at = datetime.utcnow()
+
+    grn.status = "APPROVED"
+    grn.updated_at = datetime.utcnow()
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="APPROVE_GRN_POST_STOCK",
+        entity_type="GoodsReceiveNote",
+        entity_id=grn.id,
+        company_id=grn.company_id,
+        branch_id=grn.branch_id,
+        new_values={"grn_number": grn.grn_number, "status": "APPROVED", "total_amount": float(grn.total_amount or 0)}
+    )
+
+
 @router.post("/grn", response_model=GoodsReceiveNoteResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/receiving", response_model=GoodsReceiveNoteResponse, status_code=status.HTTP_201_CREATED)
 def create_goods_receive_note(
     payload: GoodsReceiveNoteCreate,
     db: Session = Depends(get_db),
@@ -1547,8 +1658,8 @@ def create_goods_receive_note(
 ):
     """
     Records physical Goods Receipt at destination (Outlet, Central Store, Dessert Kitchen).
-    Updates stock balance and stock ledger directly at destination warehouse.
-    Updates PO received quantities and status if linked.
+    If auto_approve is True or not specified and status is not PENDING_APPROVAL,
+    posts stock balance and stock ledger directly at destination warehouse.
     """
     check_user_outlet_access(current_user, payload.branch_id, db)
 
@@ -1604,6 +1715,9 @@ def create_goods_receive_note(
             "qc_notes": item_in.qc_notes,
         })
 
+    is_pending = (payload.auto_approve is False) or (payload.status == "PENDING_APPROVAL")
+    init_status = "PENDING_APPROVAL" if is_pending else "RECEIVED"
+
     grn = GoodsReceiveNote(
         company_id=company_id,
         branch_id=payload.branch_id,
@@ -1613,8 +1727,8 @@ def create_goods_receive_note(
         grn_number=grn_num,
         receive_date=payload.receive_date or datetime.utcnow(),
         invoice_number=payload.supplier_invoice_number,
-        total_amount=total_grn_amount,
-        status=GRNStatus.RECEIVED,
+        total_amount=payload.invoice_amount if payload.invoice_amount is not None else total_grn_amount,
+        status=init_status,
         notes=payload.notes,
         received_by_id=current_user.id,
     )
@@ -1638,71 +1752,74 @@ def create_goods_receive_note(
         )
         db.add(grn_item)
 
-        # 1. Update/Create StockBalance in destination warehouse
-        sb = db.query(StockBalance).filter(
-            StockBalance.warehouse_id == warehouse_id,
-            StockBalance.item_id == itm["item_id"]
-        ).first()
+    if not is_pending:
+        # Immediately post stock
+        for itm in items_to_create:
+            # 1. Update/Create StockBalance in destination warehouse
+            sb = db.query(StockBalance).filter(
+                StockBalance.warehouse_id == warehouse_id,
+                StockBalance.item_id == itm["item_id"]
+            ).first()
 
-        new_balance = itm["accepted_qty"]
-        if sb:
-            sb.quantity = (sb.quantity or Decimal("0.0000")) + itm["accepted_qty"]
-            sb.updated_at = datetime.utcnow()
-            new_balance = sb.quantity
-        else:
-            sb = StockBalance(
+            new_balance = itm["accepted_qty"]
+            if sb:
+                sb.quantity = (sb.quantity or Decimal("0.0000")) + itm["accepted_qty"]
+                sb.updated_at = datetime.utcnow()
+                new_balance = sb.quantity
+            else:
+                sb = StockBalance(
+                    warehouse_id=warehouse_id,
+                    item_id=itm["item_id"],
+                    quantity=itm["accepted_qty"],
+                    min_stock_level=Decimal("0.0000"),
+                    reorder_qty=Decimal("0.0000"),
+                    updated_at=datetime.utcnow()
+                )
+                db.add(sb)
+
+            # 2. Write to StockLedger
+            ledger_entry = StockLedger(
                 warehouse_id=warehouse_id,
                 item_id=itm["item_id"],
-                quantity=itm["accepted_qty"],
-                min_stock_level=Decimal("0.0000"),
-                reorder_qty=Decimal("0.0000"),
-                updated_at=datetime.utcnow()
+                batch_number=itm["batch_number"],
+                expiry_date=itm["expiry_date"],
+                movement_type='GRN',
+                change_qty=itm["accepted_qty"],
+                balance_qty=new_balance,
+                unit_cost=itm["unit_price"],
+                total_cost=itm["total_price"],
+                reference_type="GRN",
+                reference_id=grn.id,
+                notes=f"Receipt via GRN {grn.grn_number}",
+                created_by_id=current_user.id,
+                created_at=datetime.utcnow(),
             )
-            db.add(sb)
+            db.add(ledger_entry)
 
-        # 2. Write to StockLedger
-        ledger_entry = StockLedger(
-            warehouse_id=warehouse_id,
-            item_id=itm["item_id"],
-            batch_number=itm["batch_number"],
-            expiry_date=itm["expiry_date"],
-            movement_type='GRN',
-            change_qty=itm["accepted_qty"],
-            balance_qty=new_balance,
-            unit_cost=itm["unit_price"],
-            total_cost=itm["total_price"],
-            reference_type="GRN",
-            reference_id=grn.id,
-            notes=f"Receipt via GRN {grn.grn_number}",
-            created_by_id=current_user.id,
-            created_at=datetime.utcnow(),
-        )
-        db.add(ledger_entry)
+            # 3. Update PO line item received qty if linked
+            if itm["po_item_id"]:
+                po_itm = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.id == itm["po_item_id"]).first()
+                if po_itm:
+                    po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm["accepted_qty"]
+            elif po:
+                po_itm = db.query(PurchaseOrderItem).filter(
+                    PurchaseOrderItem.po_id == po.id,
+                    PurchaseOrderItem.item_id == itm["item_id"]
+                ).first()
+                if po_itm:
+                    po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm["accepted_qty"]
 
-        # 3. Update PO line item received qty if linked
-        if itm["po_item_id"]:
-            po_itm = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.id == itm["po_item_id"]).first()
-            if po_itm:
-                po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm["accepted_qty"]
-        elif po:
-            po_itm = db.query(PurchaseOrderItem).filter(
-                PurchaseOrderItem.po_id == po.id,
-                PurchaseOrderItem.item_id == itm["item_id"]
-            ).first()
-            if po_itm:
-                po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm["accepted_qty"]
-
-    # 4. If PO linked, calculate total ordered vs received
-    if po:
-        db.flush()
-        po_items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.po_id == po.id).all()
-        total_ord = sum([pi.ordered_qty for pi in po_items])
-        total_rec = sum([pi.received_qty or Decimal("0.0000") for pi in po_items])
-        if total_rec >= total_ord:
-            po.status = POStatus.RECEIVED
-        elif total_rec > Decimal("0.0000"):
-            po.status = POStatus.PARTIALLY_RECEIVED
-        po.updated_at = datetime.utcnow()
+        # 4. If PO linked, calculate total ordered vs received
+        if po:
+            db.flush()
+            po_items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.po_id == po.id).all()
+            total_ord = sum([pi.ordered_qty for pi in po_items])
+            total_rec = sum([pi.received_qty or Decimal("0.0000") for pi in po_items])
+            if total_rec >= total_ord:
+                po.status = POStatus.RECEIVED
+            elif total_rec > Decimal("0.0000"):
+                po.status = POStatus.PARTIALLY_RECEIVED
+            po.updated_at = datetime.utcnow()
 
     db.commit()
     db.refresh(grn)
@@ -1715,17 +1832,303 @@ def create_goods_receive_note(
         entity_id=grn.id,
         company_id=company_id,
         branch_id=payload.branch_id,
-        new_values={"grn_number": grn.grn_number, "total_amount": float(total_grn_amount), "items_count": len(items_to_create)}
+        new_values={"grn_number": grn.grn_number, "total_amount": float(total_grn_amount), "items_count": len(items_to_create), "status": grn.status}
     )
     db.commit()
     return format_grn_response(grn, db)
 
 
+@router.post("/grn/from-po", response_model=GoodsReceiveNoteResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/receiving/from-po", response_model=GoodsReceiveNoteResponse, status_code=status.HTTP_201_CREATED)
+def create_goods_receive_from_po(
+    payload: GoodsReceiveFromPOCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Creates a PO-based Goods Receive Note (GRN) directly from an approved PO.
+    Line items and approved quantities are automatically loaded from PO items.
+    Users cannot manually enter or alter item quantities.
+    Flags invoice amount variance and queues GRN for Central/HO Approval.
+    """
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == payload.po_id).first()
+    if not po:
+        raise NotFoundException(f"Purchase Order '{payload.po_id}' not found.")
+
+    branch_id = payload.branch_id or po.branch_id
+    if not branch_id:
+        branch_id = (current_user.branches[0].branch_id if getattr(current_user, 'branches', None) else None)
+        if not branch_id:
+            first_br = db.query(Branch).filter(Branch.is_active == True).first()
+            branch_id = first_br.id if first_br else None
+
+    if not branch_id:
+        raise BadRequestException("A valid destination branch is required for receiving.")
+
+    check_user_outlet_access(current_user, branch_id, db)
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise NotFoundException(f"Branch '{branch_id}' not found.")
+
+    warehouse_id = payload.warehouse_id
+    if not warehouse_id:
+        wh = db.query(Warehouse).filter(Warehouse.branch_id == branch_id, Warehouse.is_active == True).first()
+        if not wh:
+            raise NotFoundException(f"No active warehouse found for destination branch '{branch.name}'.")
+        warehouse_id = wh.id
+
+    company_id = branch.company_id or current_user.company_id
+    grn_num = f"GRN-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(branch_id) + str(datetime.utcnow()))) % 10000:04d}"
+
+    # Load PO items
+    po_items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.po_id == po.id).all()
+    if not po_items:
+        raise BadRequestException("The linked purchase order has no items to receive.")
+
+    total_po_amount = Decimal("0.0000")
+    items_to_create = []
+    for pi in po_items:
+        outstanding_qty = pi.ordered_qty - (pi.received_qty or Decimal("0.0000"))
+        if outstanding_qty <= Decimal("0.0000"):
+            outstanding_qty = pi.ordered_qty
+
+        item_tot = outstanding_qty * pi.unit_price
+        total_po_amount += item_tot
+
+        items_to_create.append({
+            "item_id": pi.item_id,
+            "po_item_id": pi.id,
+            "received_qty": outstanding_qty,
+            "accepted_qty": outstanding_qty,
+            "rejected_qty": Decimal("0.0000"),
+            "unit_price": pi.unit_price,
+            "total_price": item_tot,
+            "qc_status": "PASSED",
+            "qc_notes": "PO-derived quantity locked",
+        })
+
+    # Variance detection
+    entered_invoice_amt = payload.invoice_amount if payload.invoice_amount is not None else total_po_amount
+    variance_note = ""
+    if abs(entered_invoice_amt - total_po_amount) > Decimal("0.01"):
+        diff = entered_invoice_amt - total_po_amount
+        pct = (diff / total_po_amount * 100) if total_po_amount > 0 else Decimal("0.00")
+        sign = "+" if diff > 0 else ""
+        variance_note = f" [INVOICE VARIANCE FLAGGED: PO Total ${total_po_amount:.2f} vs Invoice ${entered_invoice_amt:.2f} ({sign}${diff:.2f} / {sign}{pct:.2f}%)]"
+
+    combined_notes = (payload.notes or "") + variance_note
+    if payload.invoice_file_name:
+        combined_notes += f" [Invoice File: {payload.invoice_file_name}]"
+
+    grn = GoodsReceiveNote(
+        company_id=company_id,
+        branch_id=branch_id,
+        warehouse_id=warehouse_id,
+        supplier_id=po.supplier_id,
+        po_id=po.id,
+        grn_number=grn_num,
+        receive_date=datetime.utcnow(),
+        invoice_number=payload.supplier_invoice_number,
+        total_amount=entered_invoice_amt,
+        status="PENDING_APPROVAL",
+        notes=combined_notes.strip() or None,
+        received_by_id=current_user.id,
+    )
+    db.add(grn)
+    db.flush()
+
+    for itm in items_to_create:
+        grn_item = GoodsReceiveItem(
+            grn_id=grn.id,
+            po_item_id=itm["po_item_id"],
+            item_id=itm["item_id"],
+            received_qty=itm["received_qty"],
+            accepted_qty=itm["accepted_qty"],
+            rejected_qty=itm["rejected_qty"],
+            unit_price=itm["unit_price"],
+            total_price=itm["total_price"],
+            qc_status=itm["qc_status"],
+            qc_notes=itm["qc_notes"],
+        )
+        db.add(grn_item)
+
+    db.commit()
+    db.refresh(grn)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="SUBMIT_PO_RECEIVING",
+        entity_type="GoodsReceiveNote",
+        entity_id=grn.id,
+        company_id=company_id,
+        branch_id=branch_id,
+        new_values={
+            "po_number": po.po_number,
+            "grn_number": grn.grn_number,
+            "invoice_number": payload.supplier_invoice_number,
+            "invoice_amount": float(entered_invoice_amt),
+            "status": "PENDING_APPROVAL",
+        }
+    )
+    db.commit()
+    return format_grn_response(grn, db)
+
+
+@router.post("/grn/{grn_id}/approve", response_model=GoodsReceiveNoteResponse)
+@router.post("/receiving/{grn_id}/approve", response_model=GoodsReceiveNoteResponse)
+def approve_goods_receive_note(
+    grn_id: str = Path(...),
+    payload: Optional[GoodsReceiveNoteApproveRequest] = Body(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    HO/Central Approval for a submitted GRN.
+    Posts the PO items and received quantities to destination StockBalance and StockLedger.
+    Updates linked PO status and marks GRN as APPROVED.
+    Prevents duplicate stock posting.
+    """
+    grn = db.query(GoodsReceiveNote).filter(GoodsReceiveNote.id == grn_id).first()
+    if not grn:
+        raise NotFoundException(f"Goods Receive Note '{grn_id}' not found.")
+
+    check_user_outlet_access(current_user, grn.branch_id, db)
+
+    if grn.status in ["APPROVED", "RECEIVED", "QC_PASSED"]:
+        raise BadRequestException("Stock has already been posted for this Goods Receive Note.")
+
+    post_stock_for_grn(grn, db, current_user)
+    if payload and payload.notes:
+        grn.notes = (grn.notes or "") + f" [Approval Notes: {payload.notes}]"
+
+    db.commit()
+    db.refresh(grn)
+    return format_grn_response(grn, db)
+
+
+@router.post("/grn/{grn_id}/reject", response_model=GoodsReceiveNoteResponse)
+@router.post("/receiving/{grn_id}/reject", response_model=GoodsReceiveNoteResponse)
+def reject_goods_receive_note(
+    grn_id: str = Path(...),
+    payload: GoodsReceiveNoteRejectRequest = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Rejects a submitted GRN. No stock is posted.
+    """
+    grn = db.query(GoodsReceiveNote).filter(GoodsReceiveNote.id == grn_id).first()
+    if not grn:
+        raise NotFoundException(f"Goods Receive Note '{grn_id}' not found.")
+
+    check_user_outlet_access(current_user, grn.branch_id, db)
+
+    if grn.status in ["APPROVED", "RECEIVED"]:
+        raise BadRequestException("Cannot reject a GRN that has already been approved and posted to stock.")
+
+    grn.status = "REJECTED"
+    grn.notes = (grn.notes or "") + f" [REJECTION REASON: {payload.reason}]"
+    grn.updated_at = datetime.utcnow()
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="REJECT_GRN",
+        entity_type="GoodsReceiveNote",
+        entity_id=grn.id,
+        company_id=grn.company_id,
+        branch_id=grn.branch_id,
+        new_values={"grn_number": grn.grn_number, "reason": payload.reason}
+    )
+    db.commit()
+    db.refresh(grn)
+    return format_grn_response(grn, db)
+
+
+@router.post("/grn/upload-invoice", response_model=SupplierInvoiceUploadResponse)
+@router.post("/invoices/upload", response_model=SupplierInvoiceUploadResponse)
+@router.post("/receiving/upload-invoice", response_model=SupplierInvoiceUploadResponse)
+def upload_supplier_invoice(
+    payload: SupplierInvoiceUploadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Validates and stores supplier invoice attachment (PDF or JPEG/PNG image).
+    Validates magic byte signatures and returns storage reference.
+    """
+    allowed_types = ["application/pdf", "image/jpeg", "image/jpg", "image/png"]
+    if payload.file_type not in allowed_types:
+        raise BadRequestException(f"Unsupported file type '{payload.file_type}'. Supported: PDF, JPEG, PNG.")
+
+    try:
+        raw_bytes = base64.b64decode(payload.file_base64)
+    except Exception:
+        raise BadRequestException("Invalid base64 encoding for invoice file.")
+
+    if len(raw_bytes) < 4:
+        raise BadRequestException("Corrupted or empty file data.")
+
+    if payload.file_type == "application/pdf":
+        if not raw_bytes.startswith(b"%PDF-"):
+            raise BadRequestException("Invalid PDF document signature.")
+    elif payload.file_type in ["image/jpeg", "image/jpg"]:
+        if not (raw_bytes.startswith(b"\xff\xd8\xff") or raw_bytes.startswith(b"\xff\xd8")):
+            raise BadRequestException("Invalid JPEG image signature.")
+    elif payload.file_type == "image/png":
+        if not raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise BadRequestException("Invalid PNG image signature.")
+
+    upload_dir = os.path.join(os.getcwd(), "uploads", "invoices")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    ext = ".pdf" if "pdf" in payload.file_type else (".png" if "png" in payload.file_type else ".jpg")
+    safe_name = f"{uuid.uuid4().hex[:12]}_{payload.file_name.replace(' ', '_')}"
+    if not safe_name.endswith(ext):
+        safe_name += ext
+
+    file_path = os.path.join(upload_dir, safe_name)
+    with open(file_path, "wb") as f:
+        f.write(raw_bytes)
+
+    storage_ref = f"uploads/invoices/{safe_name}"
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="UPLOAD_SUPPLIER_INVOICE",
+        entity_type="SupplierInvoice",
+        entity_id=payload.invoice_number,
+        company_id=current_user.company_id,
+        branch_id=payload.branch_id or (current_user.branches[0].branch_id if getattr(current_user, 'branches', None) else None),
+        new_values={
+            "invoice_number": payload.invoice_number,
+            "invoice_amount": float(payload.invoice_amount),
+            "file_name": payload.file_name,
+            "storage_ref": storage_ref,
+        }
+    )
+    db.commit()
+
+    return SupplierInvoiceUploadResponse(
+        id=str(uuid.uuid4()),
+        file_name=payload.file_name,
+        file_type=payload.file_type,
+        storage_ref=storage_ref,
+        invoice_number=payload.invoice_number,
+        invoice_amount=payload.invoice_amount,
+        created_at=datetime.utcnow(),
+    )
+
+
 @router.get("/grn", response_model=List[GoodsReceiveNoteResponse])
+@router.get("/receiving", response_model=List[GoodsReceiveNoteResponse])
 def list_goods_receive_notes(
     branch_id: Optional[str] = None,
     supplier_id: Optional[str] = None,
     po_id: Optional[str] = None,
+    status_filter: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -1740,12 +2143,15 @@ def list_goods_receive_notes(
         query = query.filter(GoodsReceiveNote.supplier_id == supplier_id)
     if po_id:
         query = query.filter(GoodsReceiveNote.po_id == po_id)
+    if status_filter:
+        query = query.filter(GoodsReceiveNote.status == status_filter)
 
     grns = query.order_by(desc(GoodsReceiveNote.created_at)).all()
     return [format_grn_response(g, db) for g in grns]
 
 
 @router.get("/grn/{grn_id}", response_model=GoodsReceiveNoteResponse)
+@router.get("/receiving/{grn_id}", response_model=GoodsReceiveNoteResponse)
 def get_goods_receive_note(
     grn_id: str = Path(...),
     db: Session = Depends(get_db),

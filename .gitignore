@@ -39,3 +39,6 @@ Thumbs.db
 # Uploaded Files
 uploads/
 backend/uploads/
+
+# Build Info
+*.tsbuildinfo

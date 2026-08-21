@@ -1,9 +1,30 @@
 export type PRStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'ORDERED' | 'CANCELLED';
 export type PRPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type POStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'WHATSAPP_OPENED' | 'SENT_MANUALLY' | 'ISSUED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'REJECTED' | 'CANCELLED';
-export type GRNStatus = 'RECEIVED' | 'QC_PASSED' | 'QC_FAILED' | 'REJECTED';
+export type GRNStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'RECEIVED' | 'QC_PASSED' | 'QC_FAILED' | 'REJECTED';
 export type QCStatus = 'PASSED' | 'FAILED' | 'PENDING';
 export type SupplierTxType = 'INVOICE' | 'PAYMENT' | 'RETURN' | 'ADJUSTMENT';
+
+export interface GoodsReceiveFromPOCreateInput {
+  po_id: string;
+  branch_id?: string;
+  warehouse_id?: string;
+  supplier_invoice_number: string;
+  invoice_amount?: number;
+  invoice_file_name?: string;
+  invoice_file_data?: string;
+  notes?: string;
+}
+
+export interface SupplierInvoiceUploadResult {
+  id: string;
+  file_name: string;
+  file_type: string;
+  storage_ref: string;
+  invoice_number: string;
+  invoice_amount: number;
+  created_at: string;
+}
 
 export interface Supplier {
   id: string;
@@ -186,9 +207,21 @@ export interface BranchRequirementConfig {
 }
 
 export interface SmartAIAskResponse {
-  answer: string;
+  success: boolean;
+  branch_id: string;
+  branch_name: string;
+  question: string;
+  intent: string;
+  answer_text: string;
+  metrics?: {
+    total_monitored_items?: number;
+    critical_count?: number;
+    low_stock_count?: number;
+    need_order_count?: number;
+    pending_items_count?: number;
+  };
+  items: SmartRequirementItem[];
   suggested_action?: string;
-  data?: any;
 }
 
 export interface ThreeWayMatchLine {

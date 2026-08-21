@@ -34,6 +34,8 @@ class POStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
 
 class GRNStatus(str, enum.Enum):
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+    APPROVED = "APPROVED"
     RECEIVED = "RECEIVED"
     QC_PASSED = "QC_PASSED"
     QC_FAILED = "QC_FAILED"
@@ -202,7 +204,7 @@ class GoodsReceiveNote(BaseModel):
     receive_date = Column("receiveDate", DateTime, default=datetime.utcnow, nullable=False)
     invoice_number = Column("invoiceNumber", String(100), nullable=True)
     total_amount = Column("totalAmount", Numeric(14, 4), default=0, nullable=True)
-    status = Column(SQLEnum(GRNStatus, name="GRNStatus"), default=GRNStatus.RECEIVED, nullable=False)
+    status = Column(String(50), default=GRNStatus.PENDING_APPROVAL.value, nullable=False)
     notes = Column(String(500), nullable=True)
     received_by_id = Column("receivedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 

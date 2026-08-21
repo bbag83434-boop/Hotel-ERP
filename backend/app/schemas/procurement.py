@@ -251,7 +251,46 @@ class GoodsReceiveNoteCreate(BaseModel):
     supplier_invoice_number: Optional[str] = None
     invoice_amount: Optional[Decimal] = None
     notes: Optional[str] = None
+    auto_approve: Optional[bool] = None
+    status: Optional[str] = None
     items: List[GoodsReceiveItemCreate]
+
+class GoodsReceiveFromPOCreate(BaseModel):
+    po_id: str
+    branch_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
+    supplier_invoice_number: str = Field(..., min_length=1)
+    invoice_amount: Optional[Decimal] = None
+    invoice_file_name: Optional[str] = None
+    invoice_file_data: Optional[str] = None
+    notes: Optional[str] = None
+
+class GoodsReceiveNoteApproveRequest(BaseModel):
+    notes: Optional[str] = None
+
+class GoodsReceiveNoteRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+class SupplierInvoiceUploadRequest(BaseModel):
+    po_id: Optional[str] = None
+    branch_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
+    supplier_id: Optional[str] = None
+    invoice_number: str
+    invoice_date: Optional[str] = None
+    invoice_amount: Decimal
+    file_name: str
+    file_type: str
+    file_base64: str
+
+class SupplierInvoiceUploadResponse(BaseModel):
+    id: str
+    file_name: str
+    file_type: str
+    storage_ref: str
+    invoice_number: str
+    invoice_amount: Decimal
+    created_at: datetime
 
 class GoodsReceiveNoteResponse(BaseModel):
     id: str
