@@ -21,6 +21,7 @@ import HRWorkspace from '@/components/workspaces/HRWorkspace';
 import ClosingWorkspace from '@/components/workspaces/ClosingWorkspace';
 import ReportsWorkspace from '@/components/workspaces/ReportsWorkspace';
 import TelemetryWorkspace from '@/components/workspaces/TelemetryWorkspace';
+import AIAssistantWorkspace from '@/components/workspaces/AIAssistantWorkspace';
 
 export default function AppRoot() {
   const { currentOutlet, activeOutlet } = useOutlet();
@@ -129,6 +130,12 @@ export default function AppRoot() {
                 loading={loadingHealth}
                 onRefresh={fetchHealth}
               />
+            </div>
+          )}
+
+          {activeWorkspace === 'assistant' && (
+            <div className="luxury-card p-6 bg-white/85 border border-[rgba(45,45,45,0.08)] shadow-[0_4px_24px_rgba(45,45,45,0.03)]">
+              <AIAssistantWorkspace />
             </div>
           )}
         </main>

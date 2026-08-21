@@ -32,7 +32,8 @@ export type WorkspaceId =
   | 'hr'
   | 'closing'
   | 'reports'
-  | 'telemetry';
+  | 'telemetry'
+  | 'assistant';
 
 interface SidebarProps {
   activeWorkspace: WorkspaceId;
@@ -55,6 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Core Operations',
       items: [
         { id: 'dashboard' as WorkspaceId, label: 'Executive Dashboard', icon: LayoutDashboard, badge: null },
+        { id: 'assistant' as WorkspaceId, label: 'AI Assistant', icon: Sparkles, badge: 'Smart' },
         { id: 'organization' as WorkspaceId, label: '14+ Outlets & Master', icon: Building2, badge: '14 Units' },
         { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
         { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },
