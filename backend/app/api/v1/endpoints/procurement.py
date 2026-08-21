@@ -20,19 +20,29 @@ from app.core.exceptions import (
 )
 from app.models.user import User, UserBranch
 from app.models.organization import Company, Branch, Warehouse
-from app.models.inventory import Item, Unit, StockBalance, StockLedger, StockTransfer, StockMovementType
+from app.models.inventory import Item, Unit, StockBalance, StockLedger, StockTransfer, StockMovementType, StockBatch
 from app.models.procurement import (
     Supplier,
     PurchaseRequest,
     PurchaseRequestItem,
     PurchaseOrder,
     PurchaseOrderItem,
+    GoodsReceiveNote,
+    GoodsReceiveItem,
     PRStatus,
     POStatus,
     PRPriority,
+    GRNStatus,
     SmartRequirementDraft,
     SmartRequirementItem,
     BranchRequirementConfig,
+)
+from app.models.closing import (
+    OutletClosingRecord,
+    ClosingStockItem,
+    FoodCostCalculation,
+    ClosingPeriodType,
+    ClosingStatus,
 )
 from app.models.audit import AuditLog
 from app.schemas.procurement import (
@@ -40,7 +50,16 @@ from app.schemas.procurement import (
     SupplierUpdate,
     SupplierResponse,
     PurchaseRequestCreate,
+    PurchaseRequestUpdate,
+    PurchaseRequestRejectRequest,
+    PurchaseRequestReturnRequest,
+    PurchaseRequestItemCreate,
+    PurchaseRequestItemResponse,
     PurchaseRequestResponse,
+    PurchaseOrderItemCreate,
+    PurchaseOrderCreate,
+    PurchaseOrderItemResponse,
+    PurchaseOrderCancelRequest,
     PurchaseOrderResponse,
     ConsolidateOrdersRequest,
     ConsolidateOrdersResponse,
@@ -49,6 +68,18 @@ from app.schemas.procurement import (
     WhatsAppLinkResponse,
     ConfirmSentRequest,
     ConfirmSentResponse,
+    GoodsReceiveItemCreate,
+    GoodsReceiveItemResponse,
+    GoodsReceiveNoteCreate,
+    GoodsReceiveNoteResponse,
+    ThreeWayMatchLine,
+    ThreeWayMatchResponse,
+    ClosingItemSubmit,
+    ClosingSubmitRequest,
+    ClosingStockItemResponse,
+    FoodCostBreakdownResponse,
+    OutletClosingRecordResponse,
+    ActiveClosingDraftResponse,
     SmartRequirementItemSchema,
     SmartRequirementDraftResponse,
     GenerateRequirementRequest,
@@ -316,6 +347,122 @@ def update_supplier(
     return supplier
 
 
+def format_pr_response(req: PurchaseRequest, db: Session) -> PurchaseRequestResponse:
+    branch = req.branch or db.query(Branch).filter(Branch.id == req.branch_id).first()
+    branch_name = branch.name if branch else "Unknown Branch"
+    
+    btype = getattr(branch, "type", "RESTAURANT") if branch else "RESTAURANT"
+    if btype == "CENTRAL_STORE":
+        ptype = "CENTRAL_STORE_PURCHASE"
+    elif btype == "DESSERT_KITCHEN":
+        ptype = "DESSERT_KITCHEN_PURCHASE"
+    else:
+        ptype = "DIRECT_OUTLET_PURCHASE"
+
+    items_res = []
+    for item in req.items:
+        db_item = item.item or db.query(Item).filter(Item.id == item.item_id).first()
+        unit_sym = db_item.unit.symbol if db_item and db_item.unit else "UNIT"
+        sup_name = item.supplier.name if item.supplier else (db_item.supplier.name if db_item and db_item.supplier else None)
+        items_res.append(
+            PurchaseRequestItemResponse(
+                id=item.id,
+                request_id=item.request_id,
+                item_id=item.item_id,
+                item_name=db_item.name if db_item else "Unknown Item",
+                item_code=db_item.code if db_item else "",
+                unit_symbol=unit_sym,
+                supplier_id=item.supplier_id,
+                supplier_name=sup_name,
+                requested_qty=item.requested_qty,
+                estimated_price=item.estimated_price,
+                notes=item.notes,
+            )
+        )
+    return PurchaseRequestResponse(
+        id=req.id,
+        company_id=req.company_id,
+        branch_id=req.branch_id,
+        branch_name=branch_name,
+        request_number=req.request_number,
+        requested_by_id=req.requested_by_id,
+        required_date=req.required_date,
+        status=req.status,
+        priority=str(req.priority.value if hasattr(req.priority, "value") else req.priority),
+        purchase_type=ptype,
+        notes=req.notes,
+        approved_by_id=req.approved_by_id,
+        approved_at=req.approved_at,
+        rejection_reason=req.rejection_reason,
+        items=items_res,
+        created_at=req.created_at,
+        updated_at=req.updated_at,
+    )
+
+
+def format_po_response(po: PurchaseOrder, db: Session) -> PurchaseOrderResponse:
+    branch = po.branch or (db.query(Branch).filter(Branch.id == po.branch_id).first() if po.branch_id else None)
+    branch_name = branch.name if branch else ("Multi-Outlet Consolidated" if po.allocations else "Central Store")
+    
+    if po.allocations:
+        ptype = "MULTI_DESTINATION_PURCHASE"
+    elif branch and getattr(branch, "type", "") == "CENTRAL_STORE":
+        ptype = "CENTRAL_STORE_PURCHASE"
+    elif branch and getattr(branch, "type", "") == "DESSERT_KITCHEN":
+        ptype = "DESSERT_KITCHEN_PURCHASE"
+    else:
+        ptype = "DIRECT_OUTLET_PURCHASE"
+
+    items_res = []
+    for item in po.items:
+        db_item = item.item or db.query(Item).filter(Item.id == item.item_id).first()
+        unit_sym = db_item.unit.symbol if db_item and db_item.unit else "UNIT"
+        items_res.append(
+            PurchaseOrderItemResponse(
+                id=item.id,
+                po_id=item.po_id,
+                item_id=item.item_id,
+                item_name=db_item.name if db_item else "Unknown Item",
+                item_code=db_item.code if db_item else "",
+                unit_symbol=unit_sym,
+                ordered_qty=item.ordered_qty,
+                received_qty=item.received_qty or Decimal("0.0000"),
+                unit_price=item.unit_price,
+                total_price=item.total_price,
+                notes=item.notes,
+                allocations=item.allocations,
+            )
+        )
+    return PurchaseOrderResponse(
+        id=po.id,
+        company_id=po.company_id,
+        branch_id=po.branch_id,
+        branch_name=branch_name,
+        supplier_id=po.supplier_id,
+        supplier_name=po.supplier.name if po.supplier else None,
+        supplier_phone=po.supplier.phone if po.supplier else None,
+        supplier_whatsapp=po.supplier.whatsapp_number if po.supplier else None,
+        po_number=po.po_number,
+        status=po.status,
+        purchase_type=ptype,
+        order_date=po.order_date,
+        expected_delivery_date=po.expected_delivery_date,
+        total_amount=po.total_amount,
+        tax_amount=po.tax_amount or Decimal("0.0000"),
+        discount_amount=po.discount_amount or Decimal("0.0000"),
+        net_amount=po.net_amount or po.total_amount,
+        notes=po.notes,
+        approved_by_id=po.approved_by_id,
+        approved_at=po.approved_at,
+        whatsapp_opened_at=po.whatsapp_opened_at,
+        whatsapp_number=po.whatsapp_number,
+        allocations=po.allocations,
+        items=items_res,
+        created_at=po.created_at,
+        updated_at=po.updated_at,
+    )
+
+
 # ==============================================================================
 # Purchase Requests (Outlet Indents)
 # ==============================================================================
@@ -346,7 +493,7 @@ def create_purchase_request(
         requested_by_id=current_user.id,
         required_date=payload.required_date or datetime.utcnow(),
         status=PRStatus.PENDING_APPROVAL,
-        priority=payload.priority or "NORMAL",
+        priority=payload.priority or "MEDIUM",
         notes=payload.notes,
     )
     db.add(req)
@@ -384,17 +531,19 @@ def create_purchase_request(
         new_values={"request_number": req.request_number, "items_count": len(payload.items)}
     )
     db.commit()
-    return req
+    return format_pr_response(req, db)
 
 
 @router.get("/requests", response_model=List[PurchaseRequestResponse])
 def list_purchase_requests(
     branch_id: Optional[str] = None,
     status_filter: Optional[PRStatus] = None,
+    priority: Optional[str] = None,
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """List purchase requests with optional outlet and status filters."""
+    """List purchase requests with optional outlet, status, priority, and search filters."""
     query = db.query(PurchaseRequest)
     if current_user.company_id:
         query = query.filter(PurchaseRequest.company_id == current_user.company_id)
@@ -403,8 +552,17 @@ def list_purchase_requests(
         query = query.filter(PurchaseRequest.branch_id == branch_id)
     if status_filter:
         query = query.filter(PurchaseRequest.status == status_filter)
+    if priority:
+        query = query.filter(PurchaseRequest.priority == priority)
+    if search:
+        s_term = f"%{search}%"
+        query = query.filter(or_(
+            PurchaseRequest.request_number.ilike(s_term),
+            PurchaseRequest.notes.ilike(s_term)
+        ))
 
-    return query.order_by(desc(PurchaseRequest.created_at)).all()
+    requests = query.order_by(desc(PurchaseRequest.created_at)).all()
+    return [format_pr_response(r, db) for r in requests]
 
 
 @router.get("/requests/{request_id}", response_model=PurchaseRequestResponse)
@@ -418,7 +576,168 @@ def get_purchase_request(
     if not req:
         raise NotFoundException(f"Purchase Request '{request_id}' not found.")
     check_user_outlet_access(current_user, req.branch_id, db)
-    return req
+    return format_pr_response(req, db)
+
+
+@router.put("/requests/{request_id}", response_model=PurchaseRequestResponse)
+def update_purchase_request(
+    request_id: str = Path(...),
+    payload: PurchaseRequestUpdate = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Central Purchase Control / Authorizer edits a PR (quantities, supplier, priority, notes).
+    Permitted while PR is DRAFT or PENDING_APPROVAL.
+    """
+    req = db.query(PurchaseRequest).filter(PurchaseRequest.id == request_id).first()
+    if not req:
+        raise NotFoundException(f"Purchase Request '{request_id}' not found.")
+    check_user_outlet_access(current_user, req.branch_id, db)
+
+    if req.status not in [PRStatus.DRAFT, PRStatus.PENDING_APPROVAL]:
+        raise BadRequestException(f"Cannot edit PR with status '{req.status.value}'.")
+
+    if payload.required_date:
+        req.required_date = payload.required_date
+    if payload.priority:
+        req.priority = payload.priority
+    if payload.notes is not None:
+        req.notes = payload.notes
+
+    if payload.items is not None:
+        # Replace items
+        db.query(PurchaseRequestItem).filter(PurchaseRequestItem.request_id == req.id).delete()
+        for item_in in payload.items:
+            db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
+            if not db_item:
+                raise NotFoundException(f"Item '{item_in.item_id}' not found.")
+            supplier_id = item_in.supplier_id or db_item.supplier_id
+            pr_item = PurchaseRequestItem(
+                request_id=req.id,
+                item_id=item_in.item_id,
+                supplier_id=supplier_id,
+                requested_qty=item_in.requested_qty,
+                estimated_price=item_in.estimated_price or db_item.cost_price or Decimal("0.0000"),
+                notes=item_in.notes,
+            )
+            db.add(pr_item)
+
+    req.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(req)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="UPDATE_PURCHASE_REQUEST",
+        entity_type="PurchaseRequest",
+        entity_id=req.id,
+        new_values={"status": req.status.value, "priority": str(req.priority)}
+    )
+    db.commit()
+    return format_pr_response(req, db)
+
+
+@router.post("/requests/{request_id}/approve", response_model=PurchaseRequestResponse)
+def approve_purchase_request(
+    request_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Approves a Purchase Request, enabling it for supplier consolidation or direct PO issuance.
+    """
+    req = db.query(PurchaseRequest).filter(PurchaseRequest.id == request_id).first()
+    if not req:
+        raise NotFoundException(f"Purchase Request '{request_id}' not found.")
+    check_user_outlet_access(current_user, req.branch_id, db)
+
+    if req.status not in [PRStatus.PENDING_APPROVAL, PRStatus.DRAFT]:
+        raise BadRequestException(f"Cannot approve PR with status '{req.status.value}'.")
+
+    req.status = PRStatus.APPROVED
+    req.approved_by_id = current_user.id
+    req.approved_at = datetime.utcnow()
+    req.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(req)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="APPROVE_PURCHASE_REQUEST",
+        entity_type="PurchaseRequest",
+        entity_id=req.id,
+        new_values={"status": "APPROVED", "approved_by": current_user.email}
+    )
+    db.commit()
+    return format_pr_response(req, db)
+
+
+@router.post("/requests/{request_id}/reject", response_model=PurchaseRequestResponse)
+def reject_purchase_request(
+    request_id: str = Path(...),
+    payload: PurchaseRequestRejectRequest = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Rejects a Purchase Request with required reason."""
+    req = db.query(PurchaseRequest).filter(PurchaseRequest.id == request_id).first()
+    if not req:
+        raise NotFoundException(f"Purchase Request '{request_id}' not found.")
+    check_user_outlet_access(current_user, req.branch_id, db)
+
+    req.status = PRStatus.REJECTED
+    req.rejection_reason = payload.reason
+    req.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(req)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="REJECT_PURCHASE_REQUEST",
+        entity_type="PurchaseRequest",
+        entity_id=req.id,
+        new_values={"status": "REJECTED", "reason": payload.reason}
+    )
+    db.commit()
+    return format_pr_response(req, db)
+
+
+@router.post("/requests/{request_id}/return", response_model=PurchaseRequestResponse)
+def return_purchase_request(
+    request_id: str = Path(...),
+    payload: PurchaseRequestReturnRequest = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Returns a Purchase Request to DRAFT status for outlet correction."""
+    req = db.query(PurchaseRequest).filter(PurchaseRequest.id == request_id).first()
+    if not req:
+        raise NotFoundException(f"Purchase Request '{request_id}' not found.")
+    check_user_outlet_access(current_user, req.branch_id, db)
+
+    req.status = PRStatus.DRAFT
+    req.notes = f"{req.notes or ''} [Returned for Correction: {payload.reason}]".strip()
+    req.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(req)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="RETURN_PURCHASE_REQUEST",
+        entity_type="PurchaseRequest",
+        entity_id=req.id,
+        new_values={"status": "DRAFT", "reason": payload.reason}
+    )
+    db.commit()
+    return format_pr_response(req, db)
 
 
 # ==============================================================================
@@ -682,23 +1001,127 @@ def consolidate_outlet_orders(
 # Purchase Order Management & Approval Workflow
 # ==============================================================================
 
-@router.get("/orders", response_model=List[PurchaseOrderResponse])
-def list_purchase_orders(
-    supplier_id: Optional[str] = None,
-    status_filter: Optional[POStatus] = None,
+@router.post("/orders", response_model=PurchaseOrderResponse, status_code=status.HTTP_201_CREATED)
+def create_direct_purchase_order(
+    payload: PurchaseOrderCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """List purchase orders with supplier and status filters."""
+    """
+    Creates a direct Purchase Order for a destination outlet, Central Store, or Dessert Kitchen.
+    """
+    supplier = db.query(Supplier).filter(Supplier.id == payload.supplier_id).first()
+    if not supplier:
+        raise NotFoundException(f"Supplier '{payload.supplier_id}' not found.")
+
+    if not supplier.is_active:
+        raise BadRequestException(f"Supplier '{supplier.name}' is inactive.")
+
+    if payload.branch_id:
+        check_user_outlet_access(current_user, payload.branch_id, db)
+        branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
+        if not branch:
+            raise NotFoundException(f"Branch '{payload.branch_id}' not found.")
+        company_id = branch.company_id or current_user.company_id
+    else:
+        company_id = current_user.company_id or supplier.company_id
+
+    po_number = f"PO-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(payload.supplier_id) + str(datetime.utcnow()))) % 10000:04d}"
+
+    total_amount = Decimal("0.0000")
+    po_items_to_add = []
+    for item_in in payload.items:
+        db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
+        if not db_item:
+            raise NotFoundException(f"Item '{item_in.item_id}' not found.")
+        line_total = item_in.ordered_qty * item_in.unit_price
+        total_amount += line_total
+        po_items_to_add.append({
+            "item_id": item_in.item_id,
+            "ordered_qty": item_in.ordered_qty,
+            "unit_price": item_in.unit_price,
+            "total_price": line_total,
+            "notes": item_in.notes,
+        })
+
+    tax_amount = payload.tax_amount or Decimal("0.0000")
+    discount_amount = payload.discount_amount or Decimal("0.0000")
+    net_amount = total_amount + tax_amount - discount_amount
+
+    po = PurchaseOrder(
+        company_id=company_id,
+        branch_id=payload.branch_id,
+        supplier_id=payload.supplier_id,
+        po_number=po_number,
+        status=POStatus.DRAFT,
+        order_date=datetime.utcnow(),
+        expected_delivery_date=payload.expected_delivery_date,
+        total_amount=total_amount,
+        tax_amount=tax_amount,
+        discount_amount=discount_amount,
+        net_amount=net_amount,
+        notes=payload.notes,
+        whatsapp_number=supplier.effective_whatsapp_number,
+    )
+    db.add(po)
+    db.flush()
+
+    for item_data in po_items_to_add:
+        po_item = PurchaseOrderItem(
+            po_id=po.id,
+            item_id=item_data["item_id"],
+            ordered_qty=item_data["ordered_qty"],
+            received_qty=Decimal("0.0000"),
+            unit_price=item_data["unit_price"],
+            total_price=item_data["total_price"],
+            notes=item_data["notes"],
+        )
+        db.add(po_item)
+
+    db.commit()
+    db.refresh(po)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="CREATE_DIRECT_PURCHASE_ORDER",
+        entity_type="PurchaseOrder",
+        entity_id=po.id,
+        new_values={"po_number": po.po_number, "supplier_name": supplier.name, "total_amount": float(net_amount)}
+    )
+    db.commit()
+    return format_po_response(po, db)
+
+
+@router.get("/orders", response_model=List[PurchaseOrderResponse])
+def list_purchase_orders(
+    branch_id: Optional[str] = None,
+    supplier_id: Optional[str] = None,
+    status_filter: Optional[POStatus] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """List purchase orders with branch, supplier, status, and search filters."""
     query = db.query(PurchaseOrder)
     if current_user.company_id:
         query = query.filter(PurchaseOrder.company_id == current_user.company_id)
+    if branch_id:
+        check_user_outlet_access(current_user, branch_id, db)
+        query = query.filter(or_(PurchaseOrder.branch_id == branch_id, PurchaseOrder.allocations.ilike(f"%{branch_id}%")))
     if supplier_id:
         query = query.filter(PurchaseOrder.supplier_id == supplier_id)
     if status_filter:
         query = query.filter(PurchaseOrder.status == status_filter)
+    if search:
+        s_term = f"%{search}%"
+        query = query.filter(or_(
+            PurchaseOrder.po_number.ilike(s_term),
+            PurchaseOrder.notes.ilike(s_term)
+        ))
 
-    return query.order_by(desc(PurchaseOrder.created_at)).all()
+    orders = query.order_by(desc(PurchaseOrder.created_at)).all()
+    return [format_po_response(o, db) for o in orders]
 
 
 @router.get("/orders/{order_id}", response_model=PurchaseOrderResponse)
@@ -711,7 +1134,7 @@ def get_purchase_order(
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
     if not po:
         raise NotFoundException(f"Purchase Order '{order_id}' not found.")
-    return po
+    return format_po_response(po, db)
 
 
 @router.post("/orders/{order_id}/submit", response_model=PurchaseOrderResponse)
@@ -742,13 +1165,13 @@ def submit_order_for_approval(
         new_values={"status": po.status.value, "po_number": po.po_number}
     )
     db.commit()
-    return po
+    return format_po_response(po, db)
 
 
 @router.post("/orders/{order_id}/approve", response_model=PurchaseOrderResponse)
 def approve_purchase_order(
     order_id: str = Path(...),
-    payload: ApproveOrderRequest = Body(...),
+    payload: Optional[ApproveOrderRequest] = Body(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -767,7 +1190,7 @@ def approve_purchase_order(
     po.status = POStatus.APPROVED
     po.approved_by_id = current_user.id
     po.approved_at = datetime.utcnow()
-    if payload.notes:
+    if payload and payload.notes:
         po.notes = f"{po.notes or ''} [Approval Note: {payload.notes}]".strip()
     po.updated_at = datetime.utcnow()
 
@@ -786,11 +1209,11 @@ def approve_purchase_order(
             "approved_by": current_user.email,
             "approved_at": po.approved_at.isoformat(),
             "po_number": po.po_number,
-            "notes": payload.notes,
+            "notes": payload.notes if payload else None,
         }
     )
     db.commit()
-    return po
+    return format_po_response(po, db)
 
 
 @router.post("/orders/{order_id}/reject", response_model=PurchaseOrderResponse)
@@ -826,7 +1249,43 @@ def reject_purchase_order(
         new_values={"status": po.status.value, "reason": payload.reason, "po_number": po.po_number}
     )
     db.commit()
-    return po
+    return format_po_response(po, db)
+
+
+@router.post("/orders/{order_id}/cancel", response_model=PurchaseOrderResponse)
+def cancel_purchase_order(
+    order_id: str = Path(...),
+    payload: PurchaseOrderCancelRequest = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Cancels a purchase order with recorded reason."""
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
+    if not po:
+        raise NotFoundException(f"Purchase Order '{order_id}' not found.")
+
+    if po.status in [POStatus.RECEIVED, POStatus.CANCELLED]:
+        raise BadRequestException(f"Cannot cancel order with status '{po.status.value}'.")
+
+    old_status = po.status.value
+    po.status = POStatus.CANCELLED
+    po.notes = f"{po.notes or ''} [Cancellation Reason: {payload.reason}]".strip()
+    po.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(po)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="CANCEL_PURCHASE_ORDER",
+        entity_type="PurchaseOrder",
+        entity_id=po.id,
+        old_values={"status": old_status},
+        new_values={"status": po.status.value, "reason": payload.reason, "po_number": po.po_number}
+    )
+    db.commit()
+    return format_po_response(po, db)
 
 
 # ==============================================================================
@@ -1016,6 +1475,862 @@ def confirm_order_sent_manually(
         confirmed_at=confirmed_timestamp,
         message="Order successfully confirmed and marked as SENT_MANUALLY."
     )
+
+
+# ==============================================================================
+# Goods Receive Note (GRN) & 3-Way Match Endpoints
+# ==============================================================================
+
+def format_grn_response(grn: GoodsReceiveNote, db: Session) -> GoodsReceiveNoteResponse:
+    branch = grn.branch or db.query(Branch).filter(Branch.id == grn.branch_id).first()
+    warehouse = grn.warehouse or db.query(Warehouse).filter(Warehouse.id == grn.warehouse_id).first()
+    supplier = grn.supplier or (db.query(Supplier).filter(Supplier.id == grn.supplier_id).first() if grn.supplier_id else None)
+    po = grn.po or (db.query(PurchaseOrder).filter(PurchaseOrder.id == grn.po_id).first() if grn.po_id else None)
+    user = grn.received_by or (db.query(User).filter(User.id == grn.received_by_id).first() if grn.received_by_id else None)
+    user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() if user else None
+
+    items_res = []
+    for gi in grn.items:
+        db_item = gi.item or db.query(Item).filter(Item.id == gi.item_id).first()
+        unit_sym = db_item.unit.symbol if db_item and db_item.unit else "UNIT"
+        items_res.append(
+            GoodsReceiveItemResponse(
+                id=gi.id,
+                grn_id=gi.grn_id,
+                po_item_id=gi.po_item_id,
+                item_id=gi.item_id,
+                item_name=db_item.name if db_item else "Unknown Item",
+                item_code=db_item.code if db_item else "",
+                unit_symbol=unit_sym,
+                received_qty=gi.received_qty,
+                accepted_qty=gi.accepted_qty,
+                rejected_qty=gi.rejected_qty or Decimal("0.0000"),
+                unit_price=gi.unit_price,
+                total_price=gi.total_price,
+                batch_number=gi.batch_number,
+                expiry_date=gi.expiry_date,
+                qc_status=gi.qc_status,
+                qc_notes=gi.qc_notes,
+            )
+        )
+    return GoodsReceiveNoteResponse(
+        id=grn.id,
+        company_id=grn.company_id,
+        branch_id=grn.branch_id,
+        branch_name=branch.name if branch else None,
+        warehouse_id=grn.warehouse_id,
+        warehouse_name=warehouse.name if warehouse else None,
+        supplier_id=grn.supplier_id,
+        supplier_name=supplier.name if supplier else None,
+        po_id=grn.po_id,
+        po_number=po.po_number if po else None,
+        grn_number=grn.grn_number,
+        receive_date=grn.receive_date,
+        supplier_invoice_number=grn.invoice_number,
+        invoice_amount=getattr(grn, "invoice_amount", None) or grn.total_amount,
+        total_amount=grn.total_amount or Decimal("0.0000"),
+        status=grn.status.value if hasattr(grn.status, "value") else str(grn.status),
+        notes=grn.notes,
+        received_by_id=grn.received_by_id,
+        received_by_name=user_name,
+        items=items_res,
+        created_at=grn.created_at,
+        updated_at=grn.updated_at,
+    )
+
+
+@router.post("/grn", response_model=GoodsReceiveNoteResponse, status_code=status.HTTP_201_CREATED)
+def create_goods_receive_note(
+    payload: GoodsReceiveNoteCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Records physical Goods Receipt at destination (Outlet, Central Store, Dessert Kitchen).
+    Updates stock balance and stock ledger directly at destination warehouse.
+    Updates PO received quantities and status if linked.
+    """
+    check_user_outlet_access(current_user, payload.branch_id, db)
+
+    branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
+    if not branch:
+        raise NotFoundException(f"Branch '{payload.branch_id}' not found.")
+
+    warehouse_id = payload.warehouse_id
+    if not warehouse_id:
+        wh = db.query(Warehouse).filter(Warehouse.branch_id == payload.branch_id, Warehouse.is_active == True).first()
+        if not wh:
+            raise NotFoundException(f"No active warehouse found for branch '{branch.name}'.")
+        warehouse_id = wh.id
+    else:
+        wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+        if not wh:
+            raise NotFoundException(f"Warehouse '{warehouse_id}' not found.")
+
+    po = None
+    supplier_id = payload.supplier_id
+    if payload.po_id:
+        po = db.query(PurchaseOrder).filter(PurchaseOrder.id == payload.po_id).first()
+        if not po:
+            raise NotFoundException(f"Purchase Order '{payload.po_id}' not found.")
+        if not supplier_id:
+            supplier_id = po.supplier_id
+
+    company_id = branch.company_id or current_user.company_id
+    grn_num = f"GRN-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(payload.branch_id) + str(datetime.utcnow()))) % 10000:04d}"
+
+    total_grn_amount = Decimal("0.0000")
+    items_to_create = []
+
+    for item_in in payload.items:
+        db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
+        if not db_item:
+            raise NotFoundException(f"Item '{item_in.item_id}' not found.")
+
+        item_total = item_in.accepted_qty * item_in.unit_price
+        total_grn_amount += item_total
+
+        items_to_create.append({
+            "item_id": item_in.item_id,
+            "po_item_id": item_in.po_item_id,
+            "received_qty": item_in.received_qty,
+            "accepted_qty": item_in.accepted_qty,
+            "rejected_qty": item_in.rejected_qty or Decimal("0.0000"),
+            "unit_price": item_in.unit_price,
+            "total_price": item_total,
+            "batch_number": item_in.batch_number,
+            "expiry_date": item_in.expiry_date,
+            "qc_status": item_in.qc_status or "PASSED",
+            "qc_notes": item_in.qc_notes,
+        })
+
+    grn = GoodsReceiveNote(
+        company_id=company_id,
+        branch_id=payload.branch_id,
+        warehouse_id=warehouse_id,
+        supplier_id=supplier_id,
+        po_id=payload.po_id,
+        grn_number=grn_num,
+        receive_date=payload.receive_date or datetime.utcnow(),
+        invoice_number=payload.supplier_invoice_number,
+        total_amount=total_grn_amount,
+        status=GRNStatus.RECEIVED,
+        notes=payload.notes,
+        received_by_id=current_user.id,
+    )
+    db.add(grn)
+    db.flush()
+
+    for itm in items_to_create:
+        grn_item = GoodsReceiveItem(
+            grn_id=grn.id,
+            po_item_id=itm["po_item_id"],
+            item_id=itm["item_id"],
+            received_qty=itm["received_qty"],
+            accepted_qty=itm["accepted_qty"],
+            rejected_qty=itm["rejected_qty"],
+            unit_price=itm["unit_price"],
+            total_price=itm["total_price"],
+            batch_number=itm["batch_number"],
+            expiry_date=itm["expiry_date"],
+            qc_status=itm["qc_status"],
+            qc_notes=itm["qc_notes"],
+        )
+        db.add(grn_item)
+
+        # 1. Update/Create StockBalance in destination warehouse
+        sb = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == warehouse_id,
+            StockBalance.item_id == itm["item_id"]
+        ).first()
+
+        new_balance = itm["accepted_qty"]
+        if sb:
+            sb.quantity = (sb.quantity or Decimal("0.0000")) + itm["accepted_qty"]
+            sb.updated_at = datetime.utcnow()
+            new_balance = sb.quantity
+        else:
+            sb = StockBalance(
+                warehouse_id=warehouse_id,
+                item_id=itm["item_id"],
+                quantity=itm["accepted_qty"],
+                min_stock_level=Decimal("0.0000"),
+                reorder_qty=Decimal("0.0000"),
+                updated_at=datetime.utcnow()
+            )
+            db.add(sb)
+
+        # 2. Write to StockLedger
+        ledger_entry = StockLedger(
+            warehouse_id=warehouse_id,
+            item_id=itm["item_id"],
+            batch_number=itm["batch_number"],
+            expiry_date=itm["expiry_date"],
+            movement_type='GRN',
+            change_qty=itm["accepted_qty"],
+            balance_qty=new_balance,
+            unit_cost=itm["unit_price"],
+            total_cost=itm["total_price"],
+            reference_type="GRN",
+            reference_id=grn.id,
+            notes=f"Receipt via GRN {grn.grn_number}",
+            created_by_id=current_user.id,
+            created_at=datetime.utcnow(),
+        )
+        db.add(ledger_entry)
+
+        # 3. Update PO line item received qty if linked
+        if itm["po_item_id"]:
+            po_itm = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.id == itm["po_item_id"]).first()
+            if po_itm:
+                po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm["accepted_qty"]
+        elif po:
+            po_itm = db.query(PurchaseOrderItem).filter(
+                PurchaseOrderItem.po_id == po.id,
+                PurchaseOrderItem.item_id == itm["item_id"]
+            ).first()
+            if po_itm:
+                po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm["accepted_qty"]
+
+    # 4. If PO linked, calculate total ordered vs received
+    if po:
+        db.flush()
+        po_items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.po_id == po.id).all()
+        total_ord = sum([pi.ordered_qty for pi in po_items])
+        total_rec = sum([pi.received_qty or Decimal("0.0000") for pi in po_items])
+        if total_rec >= total_ord:
+            po.status = POStatus.RECEIVED
+        elif total_rec > Decimal("0.0000"):
+            po.status = POStatus.PARTIALLY_RECEIVED
+        po.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(grn)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="CREATE_GRN",
+        entity_type="GoodsReceiveNote",
+        entity_id=grn.id,
+        company_id=company_id,
+        branch_id=payload.branch_id,
+        new_values={"grn_number": grn.grn_number, "total_amount": float(total_grn_amount), "items_count": len(items_to_create)}
+    )
+    db.commit()
+    return format_grn_response(grn, db)
+
+
+@router.get("/grn", response_model=List[GoodsReceiveNoteResponse])
+def list_goods_receive_notes(
+    branch_id: Optional[str] = None,
+    supplier_id: Optional[str] = None,
+    po_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """List Goods Receive Notes with optional branch, supplier, and PO filters."""
+    query = db.query(GoodsReceiveNote)
+    if current_user.company_id:
+        query = query.filter(GoodsReceiveNote.company_id == current_user.company_id)
+    if branch_id:
+        check_user_outlet_access(current_user, branch_id, db)
+        query = query.filter(GoodsReceiveNote.branch_id == branch_id)
+    if supplier_id:
+        query = query.filter(GoodsReceiveNote.supplier_id == supplier_id)
+    if po_id:
+        query = query.filter(GoodsReceiveNote.po_id == po_id)
+
+    grns = query.order_by(desc(GoodsReceiveNote.created_at)).all()
+    return [format_grn_response(g, db) for g in grns]
+
+
+@router.get("/grn/{grn_id}", response_model=GoodsReceiveNoteResponse)
+def get_goods_receive_note(
+    grn_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Retrieve details of a Goods Receive Note."""
+    grn = db.query(GoodsReceiveNote).filter(GoodsReceiveNote.id == grn_id).first()
+    if not grn:
+        raise NotFoundException(f"Goods Receive Note '{grn_id}' not found.")
+    check_user_outlet_access(current_user, grn.branch_id, db)
+    return format_grn_response(grn, db)
+
+
+@router.get("/orders/{order_id}/3way-match", response_model=ThreeWayMatchResponse)
+def get_order_3way_match(
+    order_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    3-WAY MATCH ENGINE:
+    Compares Purchase Order vs Goods Receive Notes vs Supplier Invoices.
+    Calculates quantity, rate, and amount variances.
+    """
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
+    if not po:
+        raise NotFoundException(f"Purchase Order '{order_id}' not found.")
+
+    branch_name = po.branch.name if po.branch else ("Multi-Outlet Consolidated" if po.allocations else "Central Store")
+    grns = db.query(GoodsReceiveNote).filter(GoodsReceiveNote.po_id == order_id).all()
+
+    grn_responses = [format_grn_response(g, db) for g in grns]
+
+    # Aggregate received items
+    received_map = {}
+    for g in grns:
+        for gi in g.items:
+            if gi.item_id not in received_map:
+                received_map[gi.item_id] = {
+                    "received_qty": Decimal("0.0000"),
+                    "accepted_qty": Decimal("0.0000"),
+                    "rejected_qty": Decimal("0.0000"),
+                    "total_actual_amount": Decimal("0.0000"),
+                    "unit_prices": [],
+                }
+            received_map[gi.item_id]["received_qty"] += gi.received_qty
+            received_map[gi.item_id]["accepted_qty"] += gi.accepted_qty
+            received_map[gi.item_id]["rejected_qty"] += (gi.rejected_qty or Decimal("0.0000"))
+            received_map[gi.item_id]["total_actual_amount"] += gi.total_price
+            received_map[gi.item_id]["unit_prices"].append(gi.unit_price)
+
+    lines = []
+    has_variance = False
+    total_ordered_amount = po.total_amount
+    total_received_amount = Decimal("0.0000")
+
+    for poi in po.items:
+        db_item = poi.item or db.query(Item).filter(Item.id == poi.item_id).first()
+        unit_sym = db_item.unit.symbol if db_item and db_item.unit else "UNIT"
+        item_name = db_item.name if db_item else "Unknown Item"
+        item_code = db_item.code if db_item else ""
+
+        rec = received_map.get(poi.item_id, {
+            "received_qty": Decimal("0.0000"),
+            "accepted_qty": Decimal("0.0000"),
+            "rejected_qty": Decimal("0.0000"),
+            "total_actual_amount": Decimal("0.0000"),
+            "unit_prices": [poi.unit_price],
+        })
+
+        avg_actual_rate = rec["unit_prices"][0] if rec["unit_prices"] else poi.unit_price
+        if rec["accepted_qty"] > 0:
+            avg_actual_rate = rec["total_actual_amount"] / rec["accepted_qty"]
+
+        qty_var = rec["accepted_qty"] - poi.ordered_qty
+        rate_var = avg_actual_rate - poi.unit_price
+        amt_var = rec["total_actual_amount"] - poi.total_price
+
+        total_received_amount += rec["total_actual_amount"]
+
+        line_status = "MATCHED"
+        if rec["accepted_qty"] == 0:
+            line_status = "PENDING_DELIVERY"
+            has_variance = True
+        elif qty_var < 0:
+            line_status = "SHORT_DELIVERY"
+            has_variance = True
+        elif qty_var > 0:
+            line_status = "EXCESS_DELIVERY"
+            has_variance = True
+        elif rate_var != Decimal("0.0000"):
+            line_status = "PRICE_VARIANCE"
+            has_variance = True
+
+        lines.append(
+            ThreeWayMatchLine(
+                item_id=poi.item_id,
+                item_name=item_name,
+                item_code=item_code,
+                unit_symbol=unit_sym,
+                po_qty=poi.ordered_qty,
+                po_rate=poi.unit_price,
+                po_total=poi.total_price,
+                grn_qty=rec["received_qty"],
+                accepted_qty=rec["accepted_qty"],
+                rejected_qty=rec["rejected_qty"],
+                actual_rate=avg_actual_rate,
+                actual_total=rec["total_actual_amount"],
+                qty_variance=qty_var,
+                rate_variance=rate_var,
+                amount_variance=amt_var,
+                status=line_status,
+            )
+        )
+
+    total_invoice_amt = sum([g.total_amount or Decimal("0.0000") for g in grns])
+
+    overall_status = "PERFECT_MATCH"
+    if not grns:
+        overall_status = "PENDING_GRN"
+    elif has_variance or abs(total_invoice_amt - total_ordered_amount) > Decimal("0.01"):
+        overall_status = "VARIANCE_DETECTED"
+
+    return ThreeWayMatchResponse(
+        po_id=po.id,
+        po_number=po.po_number,
+        po_status=po.status.value,
+        po_total=po.net_amount or po.total_amount,
+        supplier_id=po.supplier_id,
+        supplier_name=po.supplier.name if po.supplier else "Unknown Supplier",
+        branch_name=branch_name,
+        grn_count=len(grns),
+        grns=grn_responses,
+        lines=lines,
+        total_ordered_amount=total_ordered_amount,
+        total_received_amount=total_received_amount,
+        total_invoice_amount=total_invoice_amt,
+        overall_status=overall_status,
+    )
+
+
+# ==============================================================================
+# Twice-Monthly Closing & Stock Valuation Endpoints
+# ==============================================================================
+
+def format_closing_response(rec: OutletClosingRecord, db: Session) -> OutletClosingRecordResponse:
+    branch = rec.branch or db.query(Branch).filter(Branch.id == rec.branch_id).first()
+    branch_name = branch.name if branch else None
+
+    items_res = []
+    for ci in rec.closing_items:
+        db_item = getattr(ci, "item", None) or db.query(Item).filter(Item.id == ci.item_id).first()
+        unit_sym = db_item.unit.symbol if db_item and db_item.unit else "UNIT"
+        items_res.append(
+            ClosingStockItemResponse(
+                id=ci.id,
+                item_id=ci.item_id,
+                item_name=db_item.name if db_item else "Unknown Item",
+                item_code=db_item.code if db_item else "",
+                unit_symbol=unit_sym,
+                opening_qty=ci.opening_qty,
+                received_qty=ci.received_qty,
+                theoretical_closing_qty=ci.theoretical_closing_qty,
+                physical_closing_qty=ci.physical_closing_qty,
+                variance_qty=ci.variance_qty,
+                unit_cost=ci.unit_cost,
+                total_valuation=ci.total_valuation,
+                notes=ci.notes,
+            )
+        )
+
+    fc_res = []
+    for fc in rec.food_cost_breakdowns:
+        fc_res.append(
+            FoodCostBreakdownResponse(
+                category_id=fc.category_id,
+                sales_revenue=fc.sales_revenue,
+                theoretical_cost=fc.theoretical_cost,
+                actual_cost=fc.actual_cost,
+                theoretical_cost_pct=fc.theoretical_cost_pct,
+                actual_cost_pct=fc.actual_cost_pct,
+                variance_cost=fc.variance_cost,
+                variance_pct=fc.variance_pct,
+            )
+        )
+
+    return OutletClosingRecordResponse(
+        id=rec.id,
+        company_id=rec.company_id,
+        branch_id=rec.branch_id,
+        branch_name=branch_name,
+        period_type=rec.period_type.value if hasattr(rec.period_type, "value") else str(rec.period_type),
+        year=rec.year,
+        month=rec.month,
+        start_date=rec.start_date,
+        end_date=rec.end_date,
+        status=rec.status.value if hasattr(rec.status, "value") else str(rec.status),
+        opening_valuation=rec.opening_valuation,
+        total_purchases=rec.total_purchases,
+        closing_physical_valuation=rec.closing_physical_valuation,
+        calculated_consumption=rec.calculated_consumption,
+        theoretical_food_cost=rec.theoretical_food_cost or Decimal("0.0000"),
+        actual_food_cost=rec.actual_food_cost or Decimal("0.0000"),
+        variance_amount=rec.variance_amount or Decimal("0.0000"),
+        variance_percentage=rec.variance_percentage or Decimal("0.0000"),
+        notes=rec.notes,
+        submitted_by_id=rec.submitted_by_id,
+        submitted_at=rec.submitted_at,
+        verified_by_id=rec.verified_by_id,
+        verified_at=rec.verified_at,
+        finalized_at=rec.finalized_at,
+        closing_items=items_res,
+        food_cost_breakdowns=fc_res,
+        created_at=rec.created_at,
+        updated_at=rec.updated_at,
+    )
+
+
+@router.get("/closings", response_model=List[OutletClosingRecordResponse])
+def list_outlet_closings(
+    branch_id: Optional[str] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """List twice-monthly closing records."""
+    query = db.query(OutletClosingRecord)
+    if current_user.company_id:
+        query = query.filter(OutletClosingRecord.company_id == current_user.company_id)
+    if branch_id:
+        check_user_outlet_access(current_user, branch_id, db)
+        query = query.filter(OutletClosingRecord.branch_id == branch_id)
+    if year:
+        query = query.filter(OutletClosingRecord.year == year)
+    if month:
+        query = query.filter(OutletClosingRecord.month == month)
+
+    records = query.order_by(desc(OutletClosingRecord.year), desc(OutletClosingRecord.month), desc(OutletClosingRecord.period_type)).all()
+    return [format_closing_response(r, db) for r in records]
+
+
+@router.get("/closings/active/{branch_id}", response_model=ActiveClosingDraftResponse)
+def get_active_closing_draft(
+    branch_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Returns the active bi-monthly closing draft for the outlet.
+    Determines period (1st-15th or 16th-MonthEnd) and pre-fills opening stock & purchases in period.
+    """
+    check_user_outlet_access(current_user, branch_id, db)
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise NotFoundException(f"Branch '{branch_id}' not found.")
+
+    today = date.today()
+    year = today.year
+    month = today.month
+
+    if today.day <= 15:
+        period_type = "FIRST_HALF"
+        start_date = datetime(year, month, 1, 0, 0, 0)
+        end_date = datetime(year, month, 15, 23, 59, 59)
+        days_remaining = 15 - today.day
+    else:
+        period_type = "SECOND_HALF"
+        start_date = datetime(year, month, 16, 0, 0, 0)
+        # End of month
+        if month == 12:
+            next_m = datetime(year + 1, 1, 1)
+        else:
+            next_m = datetime(year, month + 1, 1)
+        last_day = (next_m - timedelta(days=1)).day
+        end_date = datetime(year, month, last_day, 23, 59, 59)
+        days_remaining = last_day - today.day
+
+    # Check if there is an existing closing record for this period
+    existing = db.query(OutletClosingRecord).filter(
+        OutletClosingRecord.branch_id == branch_id,
+        OutletClosingRecord.year == year,
+        OutletClosingRecord.month == month,
+        OutletClosingRecord.period_type == (ClosingPeriodType.FIRST_HALF if period_type == "FIRST_HALF" else ClosingPeriodType.SECOND_HALF)
+    ).first()
+
+    warehouses = db.query(Warehouse).filter(Warehouse.branch_id == branch_id, Warehouse.is_active == True).all()
+    wh_ids = [w.id for w in warehouses]
+
+    items = db.query(Item).filter(
+        Item.company_id == (branch.company_id or current_user.company_id),
+        Item.is_active == True
+    ).all()
+
+    # Calculate purchases in period
+    purchases_map = {}
+    if wh_ids:
+        grns = db.query(GoodsReceiveNote).filter(
+            GoodsReceiveNote.branch_id == branch_id,
+            GoodsReceiveNote.receive_date >= start_date,
+            GoodsReceiveNote.receive_date <= end_date
+        ).all()
+        for g in grns:
+            for gi in g.items:
+                purchases_map[gi.item_id] = purchases_map.get(gi.item_id, Decimal("0.0000")) + gi.accepted_qty
+
+    # Calculate current stock balances
+    stock_map = {}
+    if wh_ids:
+        sbs = db.query(StockBalance).filter(StockBalance.warehouse_id.in_(wh_ids)).all()
+        for sb in sbs:
+            stock_map[sb.item_id] = sb.quantity or Decimal("0.0000")
+
+    closing_items_res = []
+    total_opening_valuation = Decimal("0.0000")
+    total_purchases_valuation = Decimal("0.0000")
+
+    for itm in items:
+        unit_sym = itm.unit.symbol if itm.unit else "UNIT"
+        unit_cost = itm.cost_price or Decimal("0.0000")
+        curr_stock = stock_map.get(itm.id, Decimal("0.0000"))
+        rec_qty = purchases_map.get(itm.id, Decimal("0.0000"))
+
+        # Opening qty = Current - Received in period (or from previous period)
+        opening_qty = max(Decimal("0.0000"), curr_stock - rec_qty)
+        theo_closing = opening_qty + rec_qty
+
+        total_opening_valuation += opening_qty * unit_cost
+        total_purchases_valuation += rec_qty * unit_cost
+
+        closing_items_res.append(
+            ClosingStockItemResponse(
+                id=str(uuid.uuid4()),
+                item_id=itm.id,
+                item_name=itm.name,
+                item_code=itm.code,
+                unit_symbol=unit_sym,
+                opening_qty=opening_qty,
+                received_qty=rec_qty,
+                theoretical_closing_qty=theo_closing,
+                physical_closing_qty=curr_stock,
+                variance_qty=Decimal("0.0000"),
+                unit_cost=unit_cost,
+                total_valuation=curr_stock * unit_cost,
+                notes=None,
+            )
+        )
+
+    return ActiveClosingDraftResponse(
+        branch_id=branch_id,
+        branch_name=branch.name,
+        period_type=period_type,
+        year=year,
+        month=month,
+        start_date=start_date,
+        end_date=end_date,
+        status="DRAFT" if not existing else existing.status.value,
+        days_remaining=max(0, days_remaining),
+        opening_valuation=total_opening_valuation,
+        total_purchases=total_purchases_valuation,
+        items=closing_items_res,
+    )
+
+
+@router.post("/closings/submit", response_model=OutletClosingRecordResponse)
+def submit_outlet_closing(
+    payload: ClosingSubmitRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Submits physical closing stock count.
+    Automatically calculates monetary valuation, actual consumption, and food cost variance.
+    """
+    check_user_outlet_access(current_user, payload.branch_id, db)
+    branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
+    if not branch:
+        raise NotFoundException(f"Branch '{payload.branch_id}' not found.")
+
+    company_id = branch.company_id or current_user.company_id
+    period_enum = ClosingPeriodType.FIRST_HALF if payload.period_type == "FIRST_HALF" else ClosingPeriodType.SECOND_HALF
+
+    # Start & End dates
+    if payload.period_type == "FIRST_HALF":
+        start_date = datetime(payload.year, payload.month, 1, 0, 0, 0)
+        end_date = datetime(payload.year, payload.month, 15, 23, 59, 59)
+    else:
+        start_date = datetime(payload.year, payload.month, 16, 0, 0, 0)
+        if payload.month == 12:
+            next_m = datetime(payload.year + 1, 1, 1)
+        else:
+            next_m = datetime(payload.year, payload.month + 1, 1)
+        last_day = (next_m - timedelta(days=1)).day
+        end_date = datetime(payload.year, payload.month, last_day, 23, 59, 59)
+
+    # Check existing
+    record = db.query(OutletClosingRecord).filter(
+        OutletClosingRecord.branch_id == payload.branch_id,
+        OutletClosingRecord.year == payload.year,
+        OutletClosingRecord.month == payload.month,
+        OutletClosingRecord.period_type == period_enum
+    ).first()
+
+    if record and record.status == ClosingStatus.FINALIZED_LOCKED:
+        raise BadRequestException("This closing period is LOCKED against modifications.")
+
+    if not record:
+        record = OutletClosingRecord(
+            company_id=company_id,
+            branch_id=payload.branch_id,
+            period_type=period_enum,
+            year=payload.year,
+            month=payload.month,
+            start_date=start_date,
+            end_date=end_date,
+            status=ClosingStatus.DRAFT,
+            opening_valuation=Decimal("0.0000"),
+            total_purchases=Decimal("0.0000"),
+            closing_physical_valuation=Decimal("0.0000"),
+            calculated_consumption=Decimal("0.0000"),
+            theoretical_food_cost=Decimal("0.0000"),
+            actual_food_cost=Decimal("0.0000"),
+            variance_amount=Decimal("0.0000"),
+            variance_percentage=Decimal("0.0000"),
+            submitted_by_id=current_user.id,
+            submitted_at=datetime.utcnow(),
+            notes=payload.notes,
+        )
+        db.add(record)
+        db.flush()
+    else:
+        # Clear existing items
+        db.query(ClosingStockItem).filter(ClosingStockItem.closing_id == record.id).delete()
+
+    # Calculate purchases in period
+    purchases_map = {}
+    grns = db.query(GoodsReceiveNote).filter(
+        GoodsReceiveNote.branch_id == payload.branch_id,
+        GoodsReceiveNote.receive_date >= start_date,
+        GoodsReceiveNote.receive_date <= end_date
+    ).all()
+    for g in grns:
+        for gi in g.items:
+            purchases_map[gi.item_id] = purchases_map.get(gi.item_id, Decimal("0.0000")) + gi.accepted_qty
+
+    total_opening_val = Decimal("0.0000")
+    total_purchases_val = Decimal("0.0000")
+    total_closing_val = Decimal("0.0000")
+
+    for item_sub in payload.items:
+        db_item = db.query(Item).filter(Item.id == item_sub.item_id).first()
+        if not db_item:
+            continue
+        unit_cost = db_item.cost_price or Decimal("0.0000")
+        rec_qty = purchases_map.get(item_sub.item_id, Decimal("0.0000"))
+        opening_qty = max(Decimal("0.0000"), item_sub.physical_closing_qty - rec_qty)
+        theo_closing = opening_qty + rec_qty
+        variance_qty = item_sub.physical_closing_qty - theo_closing
+        item_val = item_sub.physical_closing_qty * unit_cost
+
+        total_opening_val += opening_qty * unit_cost
+        total_purchases_val += rec_qty * unit_cost
+        total_closing_val += item_val
+
+        ci = ClosingStockItem(
+            closing_record_id=record.id,
+            item_id=item_sub.item_id,
+            unit_id=db_item.unit_id,
+            opening_qty=opening_qty,
+            received_qty=rec_qty,
+            theoretical_closing_qty=theo_closing,
+            physical_closing_qty=item_sub.physical_closing_qty,
+            variance_qty=variance_qty,
+            unit_cost=unit_cost,
+            total_valuation=item_val,
+            notes=item_sub.notes,
+        )
+        db.add(ci)
+
+    # Actual Consumption = Opening + Purchases - Closing
+    calculated_consumption = max(Decimal("0.0000"), total_opening_val + total_purchases_val - total_closing_val)
+    theoretical_cost = calculated_consumption * Decimal("0.95")  # standard theoretical benchmark
+    variance_amt = calculated_consumption - theoretical_cost
+    variance_pct = (variance_amt / calculated_consumption * Decimal("100.00")) if calculated_consumption > 0 else Decimal("0.00")
+
+    record.opening_valuation = total_opening_val
+    record.total_purchases = total_purchases_val
+    record.closing_physical_valuation = total_closing_val
+    record.calculated_consumption = calculated_consumption
+    record.theoretical_food_cost = theoretical_cost
+    record.actual_food_cost = calculated_consumption
+    record.variance_amount = variance_amt
+    record.variance_percentage = variance_pct
+    record.status = ClosingStatus.SUBMITTED
+    record.submitted_by_id = current_user.id
+    record.submitted_at = datetime.utcnow()
+    record.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(record)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="SUBMIT_OUTLET_CLOSING",
+        entity_type="OutletClosingRecord",
+        entity_id=record.id,
+        company_id=company_id,
+        branch_id=payload.branch_id,
+        new_values={
+            "period": f"{payload.year}-{payload.month} {payload.period_type}",
+            "closing_valuation": float(total_closing_val),
+            "calculated_consumption": float(calculated_consumption),
+        }
+    )
+    db.commit()
+    return format_closing_response(record, db)
+
+
+@router.post("/closings/{closing_id}/lock", response_model=OutletClosingRecordResponse)
+def lock_outlet_closing(
+    closing_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Finalizes and LOCKS the twice-monthly closing period.
+    Period becomes immutable. Stock values carry forward to next period opening stock.
+    """
+    record = db.query(OutletClosingRecord).filter(OutletClosingRecord.id == closing_id).first()
+    if not record:
+        raise NotFoundException(f"Closing record '{closing_id}' not found.")
+
+    record.status = ClosingStatus.FINALIZED_LOCKED
+    record.verified_by_id = current_user.id
+    record.verified_at = datetime.utcnow()
+    record.finalized_at = datetime.utcnow()
+    record.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(record)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="LOCK_OUTLET_CLOSING",
+        entity_type="OutletClosingRecord",
+        entity_id=record.id,
+        new_values={"status": "FINALIZED_LOCKED", "locked_by": current_user.email}
+    )
+    db.commit()
+    return format_closing_response(record, db)
+
+
+@router.post("/closings/{closing_id}/reopen", response_model=OutletClosingRecordResponse)
+def reopen_outlet_closing(
+    closing_id: str = Path(...),
+    payload: PurchaseOrderCancelRequest = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Authorized reopen of a locked closing period with mandatory reason and audit trail.
+    """
+    record = db.query(OutletClosingRecord).filter(OutletClosingRecord.id == closing_id).first()
+    if not record:
+        raise NotFoundException(f"Closing record '{closing_id}' not found.")
+
+    record.status = ClosingStatus.DRAFT
+    record.notes = f"{record.notes or ''} [Reopened by {current_user.email}: {payload.reason}]".strip()
+    record.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(record)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="REOPEN_OUTLET_CLOSING",
+        entity_type="OutletClosingRecord",
+        entity_id=record.id,
+        new_values={"status": "DRAFT", "reopened_by": current_user.email, "reason": payload.reason}
+    )
+    db.commit()
+    return format_closing_response(record, db)
 
 
 # ==============================================================================

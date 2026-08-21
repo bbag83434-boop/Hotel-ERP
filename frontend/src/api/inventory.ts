@@ -4,6 +4,7 @@ import {
   Unit,
   Item,
   ItemCreateInput,
+  Warehouse,
   StockBalance,
   LowStockAlert,
   StockTransfer,
@@ -90,6 +91,14 @@ export const inventoryApi = {
   getValuation: async (warehouseId?: string): Promise<InventoryValuation> => {
     const res = await apiClient.get<InventoryValuation>('/inventory/valuation', {
       params: warehouseId ? { warehouse_id: warehouseId } : undefined,
+    });
+    return res.data;
+  },
+
+  // Warehouses
+  getWarehouses: async (params?: { branch_id?: string }): Promise<Warehouse[]> => {
+    const res = await apiClient.get<Warehouse[]>('/organization/warehouses', {
+      params,
     });
     return res.data;
   },

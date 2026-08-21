@@ -50,9 +50,10 @@ from app.models.closing import (
 )
 from app.models.recipe import Recipe, RecipeItem, ProductionOrder, ProductionConsumption, ProductionStatus
 from app.models.wastage import WastageEntry, WastageItem, WastageReasonCode, WastageStatus
-from app.models.restaurant import DiningTable, Floor, RestaurantOrder, OrderItem, OrderStatus
+from app.models.restaurant import DiningTable, Floor, Menu, MenuCategory, MenuItem, RestaurantOrder, OrderItem, OrderStatus
 from app.models.customer import Customer, CustomerAddress, LoyaltyTransaction, QRSession, CustomerType, LoyaltyTransactionType
 from app.models.finance import ChartOfAccount, JournalEntry, JournalEntryLine, AccountsPayable, AccountType, JournalStatus
+from app.models.report import ReportSnapshot, ReportSchedule, ReportType, ReportFrequency
 from app.models.audit import AuditLog, IdempotencyRecord
 
 __all__ = [
@@ -118,6 +119,9 @@ __all__ = [
     "WastageStatus",
     "DiningTable",
     "Floor",
+    "Menu",
+    "MenuCategory",
+    "MenuItem",
     "RestaurantOrder",
     "OrderItem",
     "OrderStatus",
@@ -133,6 +137,10 @@ __all__ = [
     "AccountsPayable",
     "AccountType",
     "JournalStatus",
+    "ReportSnapshot",
+    "ReportSchedule",
+    "ReportType",
+    "ReportFrequency",
     "AuditLog",
     "IdempotencyRecord",
 ]

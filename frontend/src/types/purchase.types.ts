@@ -186,19 +186,169 @@ export interface BranchRequirementConfig {
 }
 
 export interface SmartAIAskResponse {
-  success: boolean;
+  answer: string;
+  suggested_action?: string;
+  data?: any;
+}
+
+export interface ThreeWayMatchLine {
+  item_id: string;
+  item_name: string;
+  item_code: string;
+  unit_symbol: string;
+  po_qty: number;
+  po_rate: number;
+  po_total: number;
+  grn_qty: number;
+  accepted_qty: number;
+  rejected_qty: number;
+  actual_rate: number;
+  actual_total: number;
+  qty_variance: number;
+  rate_variance: number;
+  amount_variance: number;
+  status: 'MATCHED' | 'SHORT_DELIVERY' | 'EXCESS_DELIVERY' | 'PRICE_VARIANCE' | 'PENDING_DELIVERY';
+}
+
+export interface ThreeWayMatchResponse {
+  po_id: string;
+  po_number: string;
+  po_status: string;
+  po_total: number;
+  supplier_id: string;
+  supplier_name: string;
+  branch_name: string;
+  grn_count: number;
+  grns: GoodsReceiveNote[];
+  lines: ThreeWayMatchLine[];
+  total_ordered_amount: number;
+  total_received_amount: number;
+  total_invoice_amount: number;
+  overall_status: 'PERFECT_MATCH' | 'VARIANCE_DETECTED' | 'PENDING_GRN';
+}
+
+export interface ClosingStockItem {
+  id: string;
+  item_id: string;
+  item_name?: string;
+  item_code?: string;
+  unit_symbol?: string;
+  opening_qty: number;
+  received_qty: number;
+  theoretical_closing_qty: number;
+  physical_closing_qty: number;
+  variance_qty: number;
+  unit_cost: number;
+  total_valuation: number;
+  notes?: string;
+}
+
+export interface FoodCostBreakdown {
+  category_id?: string;
+  category_name?: string;
+  sales_revenue: number;
+  theoretical_cost: number;
+  actual_cost: number;
+  theoretical_cost_pct: number;
+  actual_cost_pct: number;
+  variance_cost: number;
+  variance_pct: number;
+}
+
+export interface OutletClosingRecord {
+  id: string;
+  company_id: string;
+  branch_id: string;
+  branch_name?: string;
+  period_type: 'FIRST_HALF' | 'SECOND_HALF';
+  year: number;
+  month: number;
+  start_date: string;
+  end_date: string;
+  status: 'DRAFT' | 'SUBMITTED' | 'FINALIZED_LOCKED' | 'LOCKED' | 'AUDITED';
+  opening_valuation: number;
+  total_purchases: number;
+  closing_physical_valuation: number;
+  calculated_consumption: number;
+  theoretical_food_cost: number;
+  actual_food_cost: number;
+  variance_amount: number;
+  variance_percentage: number;
+  notes?: string;
+  submitted_by_id?: string;
+  submitted_at?: string;
+  verified_by_id?: string;
+  verified_at?: string;
+  finalized_at?: string;
+  closing_items: ClosingStockItem[];
+  food_cost_breakdowns?: FoodCostBreakdown[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ActiveClosingDraft {
   branch_id: string;
   branch_name: string;
-  question: string;
-  intent: string;
-  answer_text: string;
-  metrics: {
-    total_monitored_items: number;
-    critical_count: number;
-    low_stock_count: number;
-    need_order_count: number;
-    pending_items_count: number;
-  };
-  items: SmartRequirementItem[];
+  period_type: 'FIRST_HALF' | 'SECOND_HALF';
+  year: number;
+  month: number;
+  start_date: string;
+  end_date: string;
+  status: string;
+  days_remaining: number;
+  opening_valuation: number;
+  total_purchases: number;
+  items: ClosingStockItem[];
+}
+
+export interface ClosingSubmitRequest {
+  branch_id: string;
+  period_type: 'FIRST_HALF' | 'SECOND_HALF';
+  year: number;
+  month: number;
+  items: Array<{ item_id: string; physical_closing_qty: number; notes?: string }>;
+  notes?: string;
+}
+
+export interface GoodsReceiveItemCreate {
+  item_id: string;
+  po_item_id?: string;
+  received_qty: number;
+  accepted_qty: number;
+  rejected_qty?: number;
+  unit_price: number;
+  batch_number?: string;
+  expiry_date?: string;
+  qc_status?: 'PASSED' | 'FAILED' | 'PENDING';
+  qc_notes?: string;
+}
+
+export interface GoodsReceiveNoteCreate {
+  branch_id: string;
+  warehouse_id?: string;
+  supplier_id?: string;
+  po_id?: string;
+  receive_date?: string;
+  supplier_invoice_number?: string;
+  invoice_amount?: number;
+  notes?: string;
+  items: GoodsReceiveItemCreate[];
+}
+
+export interface PurchaseOrderItemCreate {
+  item_id: string;
+  ordered_qty: number;
+  unit_price: number;
+  notes?: string;
+}
+
+export interface PurchaseOrderCreate {
+  branch_id?: string;
+  supplier_id: string;
+  expected_delivery_date?: string;
+  tax_amount?: number;
+  discount_amount?: number;
+  notes?: string;
+  items: PurchaseOrderItemCreate[];
 }
 

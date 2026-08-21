@@ -128,6 +128,69 @@ Never unnecessarily rebuild completed functionality.
 
 3.2 Part-by-part development
 
+3.3 FULL-STACK COMPLETION RULE — NON-NEGOTIABLE
+
+Every function in the current Part must be implemented as one complete working
+vertical slice whenever that function requires both UI and server behavior.
+
+Required flow:
+
+DATABASE / DATA MODEL
+        ↓
+BACKEND BUSINESS LOGIC
+        ↓
+API + VALIDATION + AUTHORIZATION
+        ↓
+FRONTEND TYPES / API CLIENT
+        ↓
+FRONTEND UI
+        ↓
+REAL USER ACTION
+        ↓
+BACKEND ACTION
+        ↓
+DATABASE UPDATE
+        ↓
+UI RESULT / REFRESH
+        ↓
+AUDIT / STATUS WHERE REQUIRED
+
+A function is NOT complete if it is only:
+
+frontend UI
+
+backend API
+
+database schema
+
+mock/demo interaction
+
+disconnected API
+
+placeholder button
+
+For every required function:
+
+Inspect existing implementation first.
+
+Reuse working code.
+
+Fix partial/broken code.
+
+Build only missing pieces.
+
+Connect frontend and backend.
+
+Test the real end-to-end workflow.
+
+Mark complete only after the complete workflow works.
+
+Never create duplicate pages, components, APIs, routes, tables, models,
+services, AI tools, automation jobs or records.
+
+If a real blocker prevents full completion, mark the Part/function
+PARTIALLY COMPLETED or BLOCKED and document the exact blocker.
+
 The complete system will be developed in independent Parts.
 
 Each Part must:
@@ -206,7 +269,7 @@ Deployment: existing Render service/pipeline
 AI provider/model: provider-agnostic
 
 Do not introduce React/Vue/Angular separately from Next.js.
-Do not introduce another frontend framework.
+Do not introduce Tailwind unless explicitly approved.
 Tailwind CSS v4 is the UI component baseline.
 
 4.2 High-level architecture
@@ -275,236 +338,6 @@ Do not reproduce the old application's visual language.
 
 Tailwind CSS v4 should be used with its modern CSS-first approach and design tokens.
 Avoid unnecessary CSS preprocessors or duplicated styling systems.
-
-4.2.2 PROFESSIONAL ERP UI / UX DESIGN SYSTEM
-
-The new application must use a custom professional enterprise ERP interface.
-Reference screenshots may be used only to understand layout quality, hierarchy,
-spacing and usability. Do NOT copy another product's visual design, branding,
-components, wording or exact layout.
-
-Desktop Application Shell
-
-┌─────────────────────────────────────────────────────────────────────┐
-│ Top Header: Brand | Current Outlet/Scope | Search | Alerts | User   │
-├───────────────┬─────────────────────────────────────────────────────┤
-│ LEFT SIDEBAR  │                                                     │
-│               │                 MAIN WORKSPACE                      │
-│ Dashboard     │                                                     │
-│ Operations    │                                                     │
-│ Inventory     │                                                     │
-│ Purchase      │                                                     │
-│ Production    │                                                     │
-│ HR            │                                                     │
-│ Finance       │                                                     │
-│ Reports       │                                                     │
-│ Automation    │                                                     │
-│ Settings      │                                                     │
-│               │                                                     │
-│ Collapse      │                                                     │
-└───────────────┴─────────────────────────────────────────────────────┘
-
-The desktop sidebar is the primary navigation system. It must be collapsible,
-clean and logically grouped. Major modules must not be duplicated as large
-navigation blocks inside the Dashboard.
-
-Mobile / PWA Application Shell
-
-┌───────────────────────────────┐
-│ Menu | Page Title | Alerts    │
-├───────────────────────────────┤
-│                               │
-│       MAIN WORKSPACE          │
-│                               │
-├───────────────────────────────┤
-│ Optional compact actions      │
-└───────────────────────────────┘
-
-Menu → Off-canvas / Drawer Navigation
-
-Mobile must NOT use a permanent desktop sidebar. Navigation must open through a
-clean touch-friendly drawer/off-canvas menu. The application must remain
-mobile-first, responsive and PWA-friendly with no unnecessary horizontal
-scrolling.
-
-Dashboard Rule
-
-The Dashboard is a management/control center, not a CRUD workspace.
-
-It should contain only the information needed for quick decisions:
-
-KPI / summary cards
-
-Important alerts
-
-Pending approvals
-
-Quick actions
-
-Useful charts / trends
-
-Outlet or business summary
-
-Recent important activity
-
-Large CRUD tables, long forms and full module-management sections belong inside
-their dedicated module pages, not on the main Dashboard.
-
-Module Workspace Rule
-
-Every major module must have its own dedicated workspace. Related functions
-must be grouped logically rather than displayed as unrelated cards.
-
-Recommended structure:
-
-Page Header
-   ↓
-Module Summary / KPI
-   ↓
-Tabs or Module Navigation (when required)
-   ↓
-Search + Filters + Date/Outlet Scope
-   ↓
-Primary Data Table / Cards
-   ↓
-Create / Edit / View / Approve / Export Actions
-   ↓
-Details / Drawer / Dialog
-
-Each module must provide consistent:
-
-Loading state
-
-Empty state
-
-Error state
-
-Success feedback
-
-Validation feedback
-
-Permission-aware actions
-
-Responsive table/card behavior
-
-Visual Quality Rules
-
-The visual system must be:
-
-Professional enterprise SaaS quality
-
-Clean and spacious
-
-High readability
-
-Consistent typography hierarchy
-
-Consistent spacing scale
-
-Consistent buttons and form controls
-
-Consistent cards, tables, dialogs and status badges
-
-Subtle borders and restrained shadows
-
-Clear primary/secondary/destructive action hierarchy
-
-Accessible contrast and touch targets
-
-Responsive on desktop, tablet and mobile
-
-The design must feel custom-built for this restaurant ERP and must not look like
-a copied template.
-
-Design System Rules
-
-Create reusable components and centralized design tokens for:
-
-App shell
-
-Sidebar / drawer
-
-Header
-
-Page header
-
-KPI cards
-
-Tabs
-
-Buttons
-
-Inputs / selects
-
-Search / filters
-
-Tables
-
-Data cards
-
-Status badges
-
-Dialogs / drawers
-
-Toast / feedback
-
-Loading skeletons
-
-Empty states
-
-Error states
-
-Confirmation dialogs
-
-Do not create duplicate components when an existing shared component can be reused.
-
-Frontend Architecture Requirement
-
-Frontend implementation is explicitly:
-
-Next.js App Router
-
-React
-
-TypeScript
-
-Tailwind CSS v4
-
-Custom reusable design system
-
-PWA
-
-Mobile-first responsive UI
-
-Backend implementation is explicitly:
-
-Python
-
-FastAPI
-
-REST/JSON APIs
-
-PostgreSQL / Neon
-
-Backend business rules remain the source of truth for financial, inventory,
-authorization and outlet-scope calculations.
-
-Backend + Frontend Part Rule
-
-For a feature that requires both layers, the same Part must implement and verify:
-
-Backend API / Business Logic
-        ↓
-Database
-        ↓
-Frontend API Integration
-        ↓
-Frontend UI
-        ↓
-End-to-End Verification
-
-Do not build disconnected frontend screens with fake data when the backend
-contract is available.
 
 The project must target modern browsers supported by the selected Tailwind CSS v4 release.
 If an older browser requirement appears later, document the compatibility tradeoff before changing the stack.
@@ -3629,95 +3462,15 @@ Inventory & Stock Intelligence Foundation
 
 PART 7
 
-Purchase & Supplier System [FEATURES IMPLEMENTED / COMPLETED]
-1. Feature: Supplier-Wise Auto Order Consolidation + Multi-Level Approval + WhatsApp Pre-filled Deep-Link Dispatch
-- Auto Consolidation Engine: Identifies supplier per item across multiple outlet requests, aggregates identical item quantities, and preserves exact outlet-wise allocation JSON metadata.
-- Status Lifecycle: DRAFT -> PENDING_APPROVAL -> APPROVED -> WHATSAPP_OPENED -> SENT_MANUALLY (with REJECTED/CANCELLED support). Never auto-marks as sent upon link generation.
-- WhatsApp Integration: Validates supplier numbers (E.164 sanitization), generates formatted pre-filled `https://wa.me/{phone}?text={encoded}` order text with outlet breakdown and PO reference.
-- Endpoints:
-  - `POST /api/v1/procurement/orders/consolidate` (Auto consolidation)
-  - `POST /api/v1/procurement/orders/{id}/submit`
-  - `POST /api/v1/procurement/orders/{id}/approve`
-  - `POST /api/v1/procurement/orders/{id}/reject`
-  - `POST /api/v1/procurement/orders/{id}/whatsapp-link` (Generates pre-filled URL, sets WHATSAPP_OPENED)
-  - `POST /api/v1/procurement/orders/{id}/confirm-sent` (User confirms manual send -> SENT_MANUALLY)
-  - `GET/POST/PUT /api/v1/procurement/suppliers`
-  - `GET/POST /api/v1/procurement/requests`
-- Security & Audit: RBAC permission enforcement, outlet scope isolation, and immutable structured `AuditLog` logging.
-- Verification: 12 comprehensive automated test cases (56 assertions) in `test_supplier_auto_consolidation_whatsapp.py` passing 100%.
-
-2. Feature: Outlet Smart AI Requirement [FEATURE IMPLEMENTED / COMPLETED]
-- Deterministic Requirement Engine: Backend logic calculating outlet requirements using real data: actual stock (`StockBalance`) + 14-day consumption run-rate (`StockLedger`) + target/min safety levels + in-flight pending purchase orders / inbound transfers + supplier catalog mapping.
-- Structured Columns: `Item | Current Qty | Required Qty | Short Qty | Suggested Order Qty | Supplier | Priority` (e.g. Rice — 18 KG — Required 40 KG — Short 22 KG — Order 22 KG).
-- Interactive Smart Assistant Q&A:
-  - Supports queries: *"What stock is low today?"*, *"What do I need to order?"*, *"What is critical?"*, *"What is already pending?"*, *"What do I need for tomorrow?"*.
-- Outlet Draft Workflow:
-  - Auto Requirement Generation (`POST /api/v1/procurement/smart-requirements/generate`)
-  - Outlet Review (`GET /api/v1/procurement/smart-requirements/draft/{branch_id}`)
-  - User Edit/Add/Remove (`PUT /api/v1/procurement/smart-requirements/draft/{draft_id}/items`) with full audit history tracking user modifications vs system calculation
-  - Confirm Requirement (`POST /api/v1/procurement/smart-requirements/draft/{draft_id}/confirm`) -> converts draft directly into `PurchaseRequest` (`PENDING_APPROVAL`) which seamlessly enters the Supplier Consolidation & WhatsApp pipeline.
-- Scheduled Preparation Time & Duplicate Prevention:
-  - Outlet schedule configuration (`GET/PUT /api/v1/procurement/smart-requirements/config/{branch_id}`).
-  - Auto-scheduled runner (`POST /api/v1/procurement/smart-requirements/process-schedules`) preparing drafts at configured time while preventing duplicate generation for the same calendar date.
-- Multi-Tenant Scoping & Security: Strict outlet isolation with 403 Forbidden enforcement on unauthorized branch access.
-- Verification: Comprehensive test suite `test_outlet_smart_requirement.py` passing 100%.
+Purchase & Supplier System
 
 PART 8
 
-Production & Recipe System [COMPLETED]
-- Recipe / Bill of Materials (BOM) Engine: Standardized dish recipes linking raw ingredients to finished goods/semi-finished goods with yield quantities, preparation times, and dynamic recursive costing rollups.
-- Dynamic Sub-Recipe Explosion: Hierarchical multi-level BOM explosion calculating raw ingredient requirements based on target batch quantities.
-- Interactive Production Batch Engine:
-  - Batch preview with sufficiency checking against real-time kitchen warehouse stock.
-  - One-click production batch execution: automatically generates finished goods, deducts raw ingredients via `PRODUCTION_OUT`, logs `PRODUCTION_IN` stock ledger entries, assigns batch numbers/expiry dates, and recalculates unit food cost.
-  - Production status lifecycle (`DRAFT` -> `IN_PROGRESS` -> `COMPLETED` / `CANCELLED`).
-  - Production reversals (`POST /recipes/production/orders/{id}/reverse`) restoring ingredient stock on quality check rejection.
-- Endpoints:
-  - `GET/POST /api/v1/recipes` (Recipe CRUD & directory)
-  - `GET/PUT/DELETE /api/v1/recipes/{id}`
-  - `POST /api/v1/recipes/{id}/clone`
-  - `GET /api/v1/recipes/{id}/costing`
-  - `POST /api/v1/recipes/{id}/explode`
-  - `POST /api/v1/recipes/production/preview`
-  - `POST /api/v1/recipes/production/execute`
-  - `GET/POST /api/v1/recipes/production/orders`
-  - `GET /api/v1/recipes/production/orders/{id}`
-  - `POST /api/v1/recipes/production/orders/{id}/check-sufficiency`
-  - `PUT /api/v1/recipes/production/orders/{id}/status`
-  - `GET /api/v1/recipes/production/orders/{id}/variance`
-  - `POST /api/v1/recipes/production/orders/{id}/reverse`
-- Frontend Integration: `frontend/src/api/production.ts` and `frontend/src/components/workspaces/ProductionWorkspace.tsx` featuring standard recipe registry, batch run log, sufficiency checking tool, and one-click production execution.
-- Verification: 68/68 automated tests in `test_part7_recipe_bom.py` and 100% test pass rate in `test_part9_production_engine.py`.
+Production & Recipe System
 
 PART 9
 
-Wastage Management [COMPLETED]
-- Core Schema & ORM: `WastageEntry` and `WastageItem` models in `backend/app/models/wastage.py` with full Neon PostgreSQL migration.
-- Standard Reason Codes: `EXPIRED`, `PREPARATION_LOSS`, `BURNT_DROPPED`, `QUALITY_ISSUE`, `STORAGE_FAILURE`, `CUSTOMER_RETURN`, `OTHER`.
-- Lifecycle & Approval Workflow:
-  - `DRAFT` $\rightarrow$ `PENDING_APPROVAL` $\rightarrow$ `APPROVED` / `REJECTED`.
-  - Automatic threshold checking (entries $\ge$ ₹1,000 auto-trigger `PENDING_APPROVAL` and require manager sign-off).
-  - On Approval: Deducts item quantity from warehouse `StockBalance`, writes structured `StockLedger` audit record with `movementType = 'WASTAGE'`, `referenceType = 'WASTAGE_ENTRY'`, and logs audit trail.
-  - On Rejection: Mandatory rejection reason without inventory deduction.
-- Analytics & Outlier Detection:
-  - Aggregate loss valuation by date range and outlet.
-  - Reason code breakdown with cost and percentage contributions.
-  - Top high-loss items ranking.
-  - Abnormal spoilage detection alerting on high-cost spikes (+50% surge over baseline).
-- API Endpoints:
-  - `GET /api/v1/wastage/reasons`
-  - `GET /api/v1/wastage/entries`
-  - `POST /api/v1/wastage/entries`
-  - `GET /api/v1/wastage/entries/{id}`
-  - `POST /api/v1/wastage/entries/{id}/submit`
-  - `POST /api/v1/wastage/entries/{id}/approve`
-  - `POST /api/v1/wastage/entries/{id}/reject`
-  - `GET /api/v1/wastage/analytics`
-- Frontend Integration:
-  - TypeScript types in `frontend/src/types/wastage.types.ts`.
-  - API client in `frontend/src/api/wastage.ts`.
-  - Interactive `frontend/src/components/workspaces/WastageWorkspace.tsx` with KPI summary cards, filterable audit log table, inline/drawer multi-item log form with live valuation calculations, approval/rejection actions, and analytics charts.
-- Verification: 100% test pass rate in `test_part9_wastage_management.py`.
+Wastage Management
 
 PART 10
 
@@ -3801,6 +3554,59 @@ Final AI Agent & Automation Optimization
 
 The exact sequence may be adjusted if a dependency requires it, but
 changes must be documented before implementation.
+
+28.1 RE-RUN / QUOTA INTERRUPTION SAFETY
+
+If the same Part is run again because of quota/session/tool interruption:
+
+Read the current Master Blueprint status.
+
+Inspect the current repository and Git status/diff.
+
+Identify what is already working.
+
+Continue only missing/partial/broken work.
+
+Never rebuild completed functionality.
+
+Never recreate existing tables, APIs, pages, services, jobs or records.
+
+Preserve all previous working Parts.
+
+Use this decision:
+
+WORKING  → REUSE
+PARTIAL  → COMPLETE
+BROKEN   → FIX
+MISSING  → BUILD
+DUPLICATE → DO NOT CREATE
+
+The second run must continue from the current codebase, not restart the Part.
+
+28.2 COMPLETION STATUS SOURCE OF TRUTH
+
+The Master Blueprint records the project roadmap and implementation status.
+
+For a Part to be marked COMPLETED, both must be true:
+
+REQUIRED IMPLEMENTATION EXISTS
++
+REQUIRED TESTS PASS
+
+Do not mark a Part COMPLETED merely because files were created or a build
+passed.
+
+After successful completion, update this existing Blueprint with:
+
+status
+
+concise implementation summary
+
+tests/results
+
+important known issues only
+
+Do not create a second competing Blueprint.
 
 29. GEMINI CLI DEVELOPMENT RULES
 
@@ -3926,6 +3732,33 @@ business rules
 
 RULE 9 — FINANCIAL INTEGRITY
 
+Financial accuracy requirements
+
+For monetary and quantity-sensitive business logic:
+
+Use PostgreSQL NUMERIC / appropriate fixed-precision values or Python
+Decimal; do not use binary floating-point for final financial values.
+
+Calculate final totals in deterministic backend/domain logic.
+
+Validate totals again before persistence where appropriate.
+
+Keep related stock/ledger/financial writes atomic using database transactions.
+
+Use idempotency/unique constraints for operations that may be retried.
+
+Do not allow AI output to become the final source of truth for money, stock,
+tax, payment, accounting or requirement quantities.
+
+Preserve auditability of important adjustments.
+
+Reconcile report totals against source transactions where applicable.
+
+The system must be designed to safely support high transaction/value volume,
+including the intended approximately ₹6–8 crore monthly turnover target.
+Performance must be verified by the later testing/performance Parts rather
+than assumed from architecture alone.
+
 Never use AI to perform final arithmetic.
 
 Use deterministic backend/database logic for:
@@ -3976,6 +3809,24 @@ fabricate results
 
 RULE 11 — NO UNNECESSARY PACKAGES
 
+LOW-TOKEN / LOW-DUPLICATION WORKFLOW
+
+For the current Part:
+
+Read the relevant Blueprint section, not the entire repository repeatedly.
+
+Search before creating a new file/component/API/table.
+
+Inspect only affected modules deeply.
+
+Reuse existing contracts and services where correct.
+
+Do not repeat completed tests unless affected code changed.
+
+Do not produce unnecessary documentation or large rewrites.
+
+Keep changes small, traceable and reversible.
+
 Install only packages required by the current Part.
 
 RULE 12 — TEST EVERY PART
@@ -3998,31 +3849,13 @@ calculation tests
 
 automation tests
 
-RULE 13 — TEST → COMMIT → PUSH
+RULE 13 — NO AUTO DEPLOY
 
 Do not deploy automatically.
 
-Do not modify the production environment directly.
+Do not modify the production environment.
 
-For a Part that has been explicitly started by the user:
-
-Implement the current Part only.
-
-Run the required backend/API/database/frontend tests.
-
-Run the production build where applicable.
-
-Fix failures caused by the current Part.
-
-Review git diff and git status.
-
-When all required tests/build checks pass, commit the completed Part.
-
-Push the commit to the existing Git repository.
-
-Stop. Do not start the next Part automatically.
-
-If a destructive Git, database, infrastructure or production action is required, stop and ask first.
+Do not push to GitHub automatically unless explicitly instructed.
 
 RULE 14 — NO MASSIVE BLIND REWRITES
 
@@ -4049,26 +3882,6 @@ next Part
 RULE 16 — STOP ON BLOCKER
 
 If a dependency prevents safe implementation, stop and report the exact blocker instead of creating a fake workaround.
-
-RULE 17 — LOW-TOKEN EXECUTION
-
-Gemini CLI must work efficiently:
-
-Read only files relevant to the current Part.
-
-Do not repeatedly reread the entire repository or Blueprint.
-
-Do not repeat requirements already present in this Blueprint.
-
-Do not produce long planning explanations.
-
-Do not create unnecessary documentation.
-
-Inspect → implement → test → fix → build → verify → commit → push → stop.
-
-Report only concise completion information.
-
-
 
 Gemini must follow these rules for every Part.
 
@@ -4128,7 +3941,23 @@ Do not mark a Part complete if required functionality is not tested.
 
 RULE 14
 
-For every Part explicitly started by the user, once implementation, tests, build and verification pass, review the diff, commit the completed Part, and push to the existing Git repository. Do not push if tests/build fail or if the action would be destructive.
+When the user has instructed the project to commit/push completed Parts:
+
+test first
+
+review git diff/status
+
+update the Master Blueprint
+
+commit only the current Part
+
+push to the existing configured branch/remote
+
+never force-push
+
+never push unrelated changes
+
+If tests fail, do not mark complete and do not push incomplete work.
 
 RULE 15
 
@@ -4226,6 +4055,21 @@ COMPLETION CRITERIA
 
 FINAL REPORT FORMAT
 
+31.1 FULL-STACK ACCEPTANCE ADDITION
+
+For a function requiring both frontend and backend, completion additionally
+requires:
+
+[ ] Backend business logic works
+[ ] API works
+[ ] Authorization/outlet scope works
+[ ] Frontend uses the real API
+[ ] UI action reaches the backend
+[ ] Database state changes correctly
+[ ] UI reflects the real result
+[ ] End-to-end workflow tested
+[ ] No mock-only implementation remains
+
 31. COMPLETION CRITERIA
 
 A Part is complete only when:
@@ -4249,10 +4093,6 @@ A Part is complete only when:
 [ ] No unnecessary files changed
 [ ] No secrets committed
 [ ] No automatic deployment performed
-[ ] Git diff reviewed
-[ ] Commit created after all required checks passed
-[ ] Commit pushed to the existing Git repository
-[ ] Next Part NOT started automatically
 [ ] Final status reported
 
 A Part is complete only when:
@@ -4505,10 +4345,6 @@ Human approval > unrestricted AI action
 Stable architecture > unnecessary complexity
 
 40. STARTING POINT
-
-The existing Master Blueprint file is the single source of truth for this new project.
-If the Blueprint needs correction or expansion, modify this existing file rather than creating a second competing Blueprint.
-Do not rewrite the whole document for a small requirement; update only the relevant section.
 
 This document is the MASTER BLUEPRINT only.
 
@@ -5085,3 +4921,35 @@ Commit and push the completed Part.
 Stop and give me the final Part report.
 
 Do not continue beyond PART 1.
+
+
+
+BLUEPRINT REVISION NOTE — FULL-STACK / ACCURACY / CONTINUATION SAFETY
+
+This revision preserves the original project vision, domain scope, roadmap,
+architecture, existing completed-work documentation and safety rules.
+
+It adds only the following controlling requirements:
+
+Every applicable function must be completed Frontend + Backend + Database/API together.
+
+Existing working code must be reused; duplicates must not be created.
+
+Re-running a Part after quota/session interruption must continue from the current state.
+
+A Part cannot be marked COMPLETED without required tests passing.
+
+Financial calculations must use deterministic fixed-precision logic and transactional persistence.
+
+The intended ₹6–8 crore/month turnover must be treated as a design/load target,
+with actual performance verified in the designated testing/performance Parts.
+
+The Master Blueprint remains the single source of truth.
+
+The original roadmap is preserved; Part numbers are NOT renumbered.
+
+Git commit/push follows the user's explicitly authorized workflow; no force push.
+
+Low-token inspection/reuse rules are added to prevent unnecessary rework.
+
+Do not create another Blueprint to replace this one.

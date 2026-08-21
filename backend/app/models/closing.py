@@ -66,6 +66,8 @@ class ClosingStockItem(BaseModel):
     notes = Column(String(255), nullable=True)
 
     closing_record = relationship("OutletClosingRecord", back_populates="closing_items")
+    item = relationship("Item")
+    unit = relationship("Unit")
 
 class FoodCostCalculation(BaseModel):
     __tablename__ = "food_cost_calculations"

@@ -3,6 +3,13 @@ import {
   Supplier,
   PurchaseRequest,
   PurchaseOrder,
+  GoodsReceiveNote,
+  GoodsReceiveNoteCreate,
+  PurchaseOrderCreate,
+  ThreeWayMatchResponse,
+  OutletClosingRecord,
+  ActiveClosingDraft,
+  ClosingSubmitRequest,
   SmartRequirementDraft,
   BranchRequirementConfig,
   SmartAIAskResponse,
@@ -24,17 +31,49 @@ export const procurementApi = {
     return res.data;
   },
 
-  // 2. Purchase Requests (Indents)
-  getPurchaseRequests: async (params?: { branch_id?: string; status?: string }): Promise<PurchaseRequest[]> => {
+  // 2. Purchase Requests (Indents) & Central Purchase Control Queue
+  getPurchaseRequests: async (params?: { branch_id?: string; status_filter?: string; priority?: string; search?: string }): Promise<PurchaseRequest[]> => {
     const res = await apiClient.get<PurchaseRequest[]>('/procurement/requests', { params });
+    return res.data;
+  },
+  getPurchaseRequest: async (id: string): Promise<PurchaseRequest> => {
+    const res = await apiClient.get<PurchaseRequest>(`/procurement/requests/${id}`);
     return res.data;
   },
   createPurchaseRequest: async (payload: any): Promise<PurchaseRequest> => {
     const res = await apiClient.post<PurchaseRequest>('/procurement/requests', payload);
     return res.data;
   },
+  updatePurchaseRequest: async (id: string, payload: any): Promise<PurchaseRequest> => {
+    const res = await apiClient.put<PurchaseRequest>(`/procurement/requests/${id}`, payload);
+    return res.data;
+  },
+  approvePurchaseRequest: async (id: string): Promise<PurchaseRequest> => {
+    const res = await apiClient.post<PurchaseRequest>(`/procurement/requests/${id}/approve`);
+    return res.data;
+  },
+  rejectPurchaseRequest: async (id: string, payload: { reason: string }): Promise<PurchaseRequest> => {
+    const res = await apiClient.post<PurchaseRequest>(`/procurement/requests/${id}/reject`, payload);
+    return res.data;
+  },
+  returnPurchaseRequest: async (id: string, payload: { reason: string }): Promise<PurchaseRequest> => {
+    const res = await apiClient.post<PurchaseRequest>(`/procurement/requests/${id}/return`, payload);
+    return res.data;
+  },
 
-  // 3. Auto Consolidation & WhatsApp Order Workflow
+  // 3. Purchase Orders & WhatsApp Dispatch
+  getPurchaseOrders: async (params?: { branch_id?: string; supplier_id?: string; status_filter?: string; search?: string }): Promise<PurchaseOrder[]> => {
+    const res = await apiClient.get<PurchaseOrder[]>('/procurement/orders', { params });
+    return res.data;
+  },
+  getPurchaseOrder: async (orderId: string): Promise<PurchaseOrder> => {
+    const res = await apiClient.get<PurchaseOrder>(`/procurement/orders/${orderId}`);
+    return res.data;
+  },
+  createDirectPurchaseOrder: async (payload: PurchaseOrderCreate): Promise<PurchaseOrder> => {
+    const res = await apiClient.post<PurchaseOrder>('/procurement/orders', payload);
+    return res.data;
+  },
   consolidateOrders: async (payload: { request_ids: string[]; auto_submit?: boolean; notes?: string }): Promise<any> => {
     const res = await apiClient.post('/procurement/orders/consolidate', payload);
     return res.data;
@@ -51,6 +90,10 @@ export const procurementApi = {
     const res = await apiClient.post<PurchaseOrder>(`/procurement/orders/${orderId}/reject`, payload);
     return res.data;
   },
+  cancelPurchaseOrder: async (orderId: string, payload: { reason: string }): Promise<PurchaseOrder> => {
+    const res = await apiClient.post<PurchaseOrder>(`/procurement/orders/${orderId}/cancel`, payload);
+    return res.data;
+  },
   getWhatsAppLink: async (orderId: string): Promise<any> => {
     const res = await apiClient.post(`/procurement/orders/${orderId}/whatsapp-link`);
     return res.data;
@@ -60,7 +103,47 @@ export const procurementApi = {
     return res.data;
   },
 
-  // 4. Outlet Smart AI Requirement Endpoints
+  // 4. Goods Receiving Notes (GRN) & 3-Way Match
+  getGoodsReceiveNotes: async (params?: { branch_id?: string; supplier_id?: string; po_id?: string }): Promise<GoodsReceiveNote[]> => {
+    const res = await apiClient.get<GoodsReceiveNote[]>('/procurement/grn', { params });
+    return res.data;
+  },
+  getGoodsReceiveNote: async (grnId: string): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.get<GoodsReceiveNote>(`/procurement/grn/${grnId}`);
+    return res.data;
+  },
+  createGoodsReceiveNote: async (payload: GoodsReceiveNoteCreate): Promise<GoodsReceiveNote> => {
+    const res = await apiClient.post<GoodsReceiveNote>('/procurement/grn', payload);
+    return res.data;
+  },
+  getOrder3WayMatch: async (orderId: string): Promise<ThreeWayMatchResponse> => {
+    const res = await apiClient.get<ThreeWayMatchResponse>(`/procurement/orders/${orderId}/3way-match`);
+    return res.data;
+  },
+
+  // 5. Twice-Monthly Closing & Food Cost Tie-In
+  getOutletClosings: async (params?: { branch_id?: string; year?: number; month?: number }): Promise<OutletClosingRecord[]> => {
+    const res = await apiClient.get<OutletClosingRecord[]>('/procurement/closings', { params });
+    return res.data;
+  },
+  getActiveClosingDraft: async (branchId: string): Promise<ActiveClosingDraft> => {
+    const res = await apiClient.get<ActiveClosingDraft>(`/procurement/closings/active/${branchId}`);
+    return res.data;
+  },
+  submitOutletClosing: async (payload: ClosingSubmitRequest): Promise<OutletClosingRecord> => {
+    const res = await apiClient.post<OutletClosingRecord>('/procurement/closings/submit', payload);
+    return res.data;
+  },
+  lockOutletClosing: async (closingId: string): Promise<OutletClosingRecord> => {
+    const res = await apiClient.post<OutletClosingRecord>(`/procurement/closings/${closingId}/lock`);
+    return res.data;
+  },
+  reopenOutletClosing: async (closingId: string, payload: { reason: string }): Promise<OutletClosingRecord> => {
+    const res = await apiClient.post<OutletClosingRecord>(`/procurement/closings/${closingId}/reopen`, payload);
+    return res.data;
+  },
+
+  // 6. Outlet Smart AI Requirement Endpoints
   generateSmartRequirement: async (payload: {
     branch_id: string;
     draft_date?: string;

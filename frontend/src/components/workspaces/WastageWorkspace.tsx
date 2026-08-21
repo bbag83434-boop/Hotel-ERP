@@ -116,7 +116,7 @@ export const WastageWorkspace: React.FC = () => {
     if (field === 'item_id') {
       const selectedItem = items.find((itm) => itm.id === value);
       if (selectedItem) {
-        updated[idx].unit_cost = Number(selectedItem.costPrice || 0);
+        updated[idx].unit_cost = Number((selectedItem as any).cost_price || (selectedItem as any).costPrice || 0);
       }
     }
     setFormItems(updated);
@@ -125,7 +125,7 @@ export const WastageWorkspace: React.FC = () => {
   // Calculate live total cost for new entry
   const calculatedTotalCost = formItems.reduce((sum, fi) => {
     const itm = items.find((i) => i.id === fi.item_id);
-    const cost = fi.unit_cost !== undefined ? fi.unit_cost : Number(itm?.costPrice || 0);
+    const cost = fi.unit_cost !== undefined ? fi.unit_cost : Number((itm as any)?.cost_price || (itm as any)?.costPrice || 0);
     return sum + (fi.quantity || 0) * cost;
   }, 0);
 
@@ -625,7 +625,7 @@ export const WastageWorkspace: React.FC = () => {
                       <option value="">-- Choose Item --</option>
                       {items.map((itm) => (
                         <option key={itm.id} value={itm.id}>
-                          {itm.name} ({itm.code}) - ₹{Number(itm.costPrice || 0).toFixed(2)}
+                          {itm.name} ({itm.code}) - ₹{Number((itm as any).cost_price || (itm as any).costPrice || 0).toFixed(2)}
                         </option>
                       ))}
                     </select>

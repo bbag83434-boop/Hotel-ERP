@@ -172,6 +172,19 @@ export interface StockAdjustmentResult {
   notes?: string;
 }
 
+export interface Warehouse {
+  id: string;
+  company_id?: string;
+  branch_id?: string;
+  branchId?: string;
+  name: string;
+  code?: string;
+  is_central?: boolean;
+  isCentral?: boolean;
+  is_active?: boolean;
+  isActive?: boolean;
+}
+
 export interface InventoryValuation {
   company_id: string;
   total_inventory_value: number | string;

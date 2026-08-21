@@ -77,6 +77,18 @@ class PurchaseRequestCreate(BaseModel):
     notes: Optional[str] = None
     items: List[PurchaseRequestItemCreate]
 
+class PurchaseRequestUpdate(BaseModel):
+    required_date: Optional[datetime] = None
+    priority: Optional[str] = None
+    notes: Optional[str] = None
+    items: Optional[List[PurchaseRequestItemCreate]] = None
+
+class PurchaseRequestRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+class PurchaseRequestReturnRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
 class PurchaseRequestResponse(BaseModel):
     id: str
     company_id: str
@@ -87,6 +99,7 @@ class PurchaseRequestResponse(BaseModel):
     required_date: datetime
     status: PRStatus
     priority: str
+    purchase_type: Optional[str] = None
     notes: Optional[str] = None
     approved_by_id: Optional[str] = None
     approved_at: Optional[datetime] = None
@@ -134,16 +147,36 @@ class PurchaseOrderItemResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class PurchaseOrderItemCreate(BaseModel):
+    item_id: str
+    ordered_qty: Decimal = Field(..., gt=0)
+    unit_price: Decimal = Field(..., ge=0)
+    notes: Optional[str] = None
+
+class PurchaseOrderCreate(BaseModel):
+    branch_id: Optional[str] = None  # None indicates Multi-destination or Central Store
+    supplier_id: str
+    expected_delivery_date: Optional[datetime] = None
+    tax_amount: Optional[Decimal] = Decimal("0.0000")
+    discount_amount: Optional[Decimal] = Decimal("0.0000")
+    notes: Optional[str] = None
+    items: List[PurchaseOrderItemCreate]
+
+class PurchaseOrderCancelRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
 class PurchaseOrderResponse(BaseModel):
     id: str
     company_id: str
     branch_id: Optional[str] = None
+    branch_name: Optional[str] = None
     supplier_id: str
     supplier_name: Optional[str] = None
     supplier_phone: Optional[str] = None
     supplier_whatsapp: Optional[str] = None
     po_number: str
     status: POStatus
+    purchase_type: Optional[str] = None
     order_date: datetime
     expected_delivery_date: Optional[datetime] = None
     total_amount: Decimal
@@ -172,6 +205,209 @@ class PurchaseOrderResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# ==========================================
+# Goods Receive Note (GRN) & 3-Way Match Schemas
+# ==========================================
+class GoodsReceiveItemCreate(BaseModel):
+    item_id: str
+    po_item_id: Optional[str] = None
+    received_qty: Decimal = Field(..., gt=0)
+    accepted_qty: Decimal = Field(..., ge=0)
+    rejected_qty: Optional[Decimal] = Decimal("0.0000")
+    unit_price: Decimal = Field(..., ge=0)
+    batch_number: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    qc_status: Optional[str] = "PASSED"
+    qc_notes: Optional[str] = None
+
+class GoodsReceiveItemResponse(BaseModel):
+    id: str
+    grn_id: str
+    po_item_id: Optional[str] = None
+    item_id: str
+    item_name: Optional[str] = None
+    item_code: Optional[str] = None
+    unit_symbol: Optional[str] = None
+    received_qty: Decimal
+    accepted_qty: Decimal
+    rejected_qty: Decimal
+    unit_price: Decimal
+    total_price: Decimal
+    batch_number: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    qc_status: Optional[str] = None
+    qc_notes: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class GoodsReceiveNoteCreate(BaseModel):
+    branch_id: str
+    warehouse_id: Optional[str] = None
+    supplier_id: Optional[str] = None
+    po_id: Optional[str] = None
+    receive_date: Optional[datetime] = None
+    supplier_invoice_number: Optional[str] = None
+    invoice_amount: Optional[Decimal] = None
+    notes: Optional[str] = None
+    items: List[GoodsReceiveItemCreate]
+
+class GoodsReceiveNoteResponse(BaseModel):
+    id: str
+    company_id: str
+    branch_id: str
+    branch_name: Optional[str] = None
+    warehouse_id: str
+    warehouse_name: Optional[str] = None
+    supplier_id: Optional[str] = None
+    supplier_name: Optional[str] = None
+    po_id: Optional[str] = None
+    po_number: Optional[str] = None
+    grn_number: str
+    receive_date: datetime
+    supplier_invoice_number: Optional[str] = None
+    invoice_amount: Optional[Decimal] = None
+    total_amount: Decimal
+    status: str
+    notes: Optional[str] = None
+    received_by_id: Optional[str] = None
+    received_by_name: Optional[str] = None
+    items: List[GoodsReceiveItemResponse] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class ThreeWayMatchLine(BaseModel):
+    item_id: str
+    item_name: str
+    item_code: str
+    unit_symbol: str
+    po_qty: Decimal
+    po_rate: Decimal
+    po_total: Decimal
+    grn_qty: Decimal
+    accepted_qty: Decimal
+    rejected_qty: Decimal
+    actual_rate: Decimal
+    actual_total: Decimal
+    qty_variance: Decimal
+    rate_variance: Decimal
+    amount_variance: Decimal
+    status: str  # MATCHED, SHORT_DELIVERY, EXCESS_DELIVERY, PRICE_VARIANCE
+
+class ThreeWayMatchResponse(BaseModel):
+    po_id: str
+    po_number: str
+    po_status: str
+    po_total: Decimal
+    supplier_id: str
+    supplier_name: str
+    branch_name: str
+    grn_count: int
+    grns: List[GoodsReceiveNoteResponse] = []
+    lines: List[ThreeWayMatchLine] = []
+    total_ordered_amount: Decimal
+    total_received_amount: Decimal
+    total_invoice_amount: Decimal
+    overall_status: str  # PERFECT_MATCH, VARIANCE_DETECTED, PENDING_GRN
+
+# ==========================================
+# Twice-Monthly Closing Schemas
+# ==========================================
+class ClosingItemSubmit(BaseModel):
+    item_id: str
+    physical_closing_qty: Decimal = Field(..., ge=0)
+    notes: Optional[str] = None
+
+class ClosingSubmitRequest(BaseModel):
+    branch_id: str
+    period_type: str  # FIRST_HALF or SECOND_HALF
+    year: int
+    month: int
+    items: List[ClosingItemSubmit]
+    notes: Optional[str] = None
+
+class ClosingStockItemResponse(BaseModel):
+    id: str
+    item_id: str
+    item_name: Optional[str] = None
+    item_code: Optional[str] = None
+    unit_symbol: Optional[str] = None
+    opening_qty: Decimal
+    received_qty: Decimal
+    theoretical_closing_qty: Decimal
+    physical_closing_qty: Decimal
+    variance_qty: Decimal
+    unit_cost: Decimal
+    total_valuation: Decimal
+    notes: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class FoodCostBreakdownResponse(BaseModel):
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
+    sales_revenue: Decimal
+    theoretical_cost: Decimal
+    actual_cost: Decimal
+    theoretical_cost_pct: Decimal
+    actual_cost_pct: Decimal
+    variance_cost: Decimal
+    variance_pct: Decimal
+
+    class Config:
+        from_attributes = True
+
+class OutletClosingRecordResponse(BaseModel):
+    id: str
+    company_id: str
+    branch_id: str
+    branch_name: Optional[str] = None
+    period_type: str
+    year: int
+    month: int
+    start_date: datetime
+    end_date: datetime
+    status: str
+    opening_valuation: Decimal
+    total_purchases: Decimal
+    closing_physical_valuation: Decimal
+    calculated_consumption: Decimal
+    theoretical_food_cost: Decimal
+    actual_food_cost: Decimal
+    variance_amount: Decimal
+    variance_percentage: Decimal
+    notes: Optional[str] = None
+    submitted_by_id: Optional[str] = None
+    submitted_at: Optional[datetime] = None
+    verified_by_id: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    finalized_at: Optional[datetime] = None
+    closing_items: List[ClosingStockItemResponse] = []
+    food_cost_breakdowns: List[FoodCostBreakdownResponse] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class ActiveClosingDraftResponse(BaseModel):
+    branch_id: str
+    branch_name: str
+    period_type: str
+    year: int
+    month: int
+    start_date: datetime
+    end_date: datetime
+    status: str
+    days_remaining: int
+    opening_valuation: Decimal
+    total_purchases: Decimal
+    items: List[ClosingStockItemResponse] = []
 
 class ConsolidateOrdersRequest(BaseModel):
     request_ids: List[str] = Field(..., min_items=1, description="List of Purchase Request / Indent IDs to consolidate")
