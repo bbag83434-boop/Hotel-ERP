@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 import { useOutlet } from '@/context/OutletContext';
 import { usePWA } from '@/context/PWAContext';
 import { apiClient } from '@/api/client';
@@ -24,11 +26,19 @@ import TelemetryWorkspace from '@/components/workspaces/TelemetryWorkspace';
 import AIAssistantWorkspace from '@/components/workspaces/AIAssistantWorkspace';
 
 export const AppContent = () => {
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const router = useRouter();
   const { activeOutlet } = useOutlet();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [loadingHealth, setLoadingHealth] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push('/login');
+    }
+  }, [authLoading, isAuthenticated, router]);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -45,8 +55,14 @@ export const AppContent = () => {
   }, []);
 
   useEffect(() => {
-    fetchHealth();
-  }, [fetchHealth]);
+    if (isAuthenticated) {
+      fetchHealth();
+    }
+  }, [fetchHealth, isAuthenticated]);
+
+  if (authLoading || !isAuthenticated) {
+    return <div className="min-h-screen flex items-center justify-center bg-[#F5F3EE]">Loading...</div>;
+  }
 
   return (
     <div className="flex min-h-screen bg-[#F5F3EE] text-[#1C1C1C] overflow-x-hidden w-full max-w-full">
@@ -61,6 +77,7 @@ export const AppContent = () => {
         <Header onMenuClick={() => setMobileSidebarOpen(true)} />
 
         <main className="flex-1 p-3 sm:p-5 lg:p-8 max-w-7xl w-full mx-auto pb-24 md:pb-12 min-w-0 overflow-x-hidden">
+          {/* Dashboard and other workspaces render here */}
           {activeWorkspace === 'dashboard' && (
             <div className="w-full min-w-0">
               <DashboardOverview health={health} setActiveWorkspace={setActiveWorkspace} />
@@ -146,5 +163,3 @@ export const AppContent = () => {
     </div>
   );
 };
-
-export default AppContent;
