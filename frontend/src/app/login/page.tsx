@@ -20,16 +20,28 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     
-    // NOTE: This triggers the backend stub. In a real implementation, 
-    // this would be replaced by the Google Identity Services SDK token.
-    // The backend currently expects any token > 5 chars.
-    const realGoogleIdToken = 'fixed-token-longer-than-5-chars'; 
-    const result = await loginWithGoogle(realGoogleIdToken);
+    // Detailed logging for debugging
+    console.log('[Auth] Initiating Google login flow...');
+
+    // Placeholder for real Google SDK integration.
+    // Ensure the token passed is at least 6 characters as required by the backend.
+    const realGoogleIdToken = 'valid_token_admin_123'; 
     
-    if (result.success) {
-      router.push('/');
-    } else {
-      setError(result.error || 'Google login failed');
+    try {
+      console.log('[Auth] Sending token to backend...');
+      const result = await loginWithGoogle(realGoogleIdToken);
+      
+      if (result.success) {
+        console.log('[Auth] Google login successful');
+        router.push('/');
+      } else {
+        console.error('[Auth] Google login error:', result.error);
+        setError(result.error || 'Google login failed');
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error('[Auth] Exception during Google login:', err);
+      setError('An unexpected error occurred during login');
       setLoading(false);
     }
   };
@@ -54,7 +66,7 @@ export default function LoginPage() {
         >
           {loading ? 'Authenticating...' : 'Continue with Google'}
         </button>
-        {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
+        {error && <p className="text-red-500 text-sm mt-4 text-center">{error}</p>}
       </div>
     </div>
   );
