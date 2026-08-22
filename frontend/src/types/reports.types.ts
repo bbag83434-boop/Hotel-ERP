@@ -197,3 +197,109 @@ export interface ReportSnapshot {
   summaryText?: string;
   createdAt: string;
 }
+
+// --- Single-Outlet Dashboard Types ---
+export interface OutletDashboardInfo {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  isActive: boolean;
+  companyName?: string;
+}
+
+export interface OutletTodaySalesSummary {
+  todaySales: number;
+  todayOrdersCount: number;
+  todayNetSales: number;
+  activeTablesOccupied: number;
+  totalDiningTables: number;
+  avgOrderValue: number;
+}
+
+export interface LowStockAlertItem {
+  itemId: string;
+  name: string;
+  code: string;
+  categoryName: string;
+  currentStock: number;
+  minStockLevel: number;
+  unitSymbol: string;
+  costPrice: number;
+}
+
+export interface OutletStockSummary {
+  totalItemsInStock: number;
+  totalStockValue: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  expiringBatchesCount: number;
+  lowStockItems: LowStockAlertItem[];
+}
+
+export interface OutletProcurementSummary {
+  pendingPrCount: number;
+  approvedPrCount: number;
+  directPoCount: number;
+  pendingGrnCount: number;
+  monthPoSpend: number;
+}
+
+export interface OutletProductionSummary {
+  activeRecipesCount: number;
+  todayProductionBatches: number;
+  todayProducedQty: number;
+}
+
+export interface OutletTransfersSummary {
+  pendingInboundTransfers: number;
+  pendingOutboundTransfers: number;
+  todayCompletedTransfers: number;
+}
+
+export interface OutletWastageSummary {
+  todayWastageCost: number;
+  todayWastageEntries: number;
+  periodWastageCost: number;
+  pendingWastageApprovals: number;
+}
+
+export interface OutletStaffSummary {
+  activeStaffCount: number;
+  totalStaffCount: number;
+}
+
+export interface OutletClosingCycleInfo {
+  periodLabel: string;
+  periodType: 'FIRST_HALF' | 'SECOND_HALF';
+  startDate: string;
+  endDate: string;
+  daysRemaining: number;
+  periodSales: number;
+  periodOrdersCount: number;
+}
+
+export interface OutletActivityItem {
+  id: string;
+  type: 'ORDER' | 'PURCHASE_REQUEST' | 'WASTAGE' | 'TRANSFER' | 'PRODUCTION';
+  title: string;
+  description: string;
+  timestamp: string;
+  status: string;
+  amount?: number | null;
+}
+
+export interface OutletDashboardResponse {
+  outlet: OutletDashboardInfo;
+  todaySales: OutletTodaySalesSummary;
+  stock: OutletStockSummary;
+  procurement: OutletProcurementSummary;
+  production: OutletProductionSummary;
+  transfers: OutletTransfersSummary;
+  wastage: OutletWastageSummary;
+  staff: OutletStaffSummary;
+  closingCycle: OutletClosingCycleInfo;
+  recentActivities: OutletActivityItem[];
+  allowedModules: string[];
+}
+

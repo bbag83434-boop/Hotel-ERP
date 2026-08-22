@@ -29,23 +29,32 @@ class Floor(BaseModel):
     branchId = synonym("branch_id")
     floorNumber = synonym("floor_number")
 
-    tables = relationship("DiningTable", back_populates="floor")
+class TableStatus(str, enum.Enum):
+    AVAILABLE = "AVAILABLE"
+    OCCUPIED = "OCCUPIED"
+    RESERVED = "RESERVED"
+    CLEANING = "CLEANING"
+    BLOCKED = "BLOCKED"
 
 class DiningTable(BaseModel):
     __tablename__ = "dining_tables"
 
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
     branch_id = Column("branchId", String(36), ForeignKey("branches.id", ondelete="CASCADE"), nullable=False, index=True)
-    floor_id = Column("floorId", String(36), ForeignKey("floors.id", ondelete="SET NULL"), nullable=True, index=True)
     table_number = Column("tableNumber", String(50), nullable=False)
+    name = Column(String(255), nullable=True)
     capacity = Column(Integer, default=4, nullable=False)
-    is_occupied = Column("isOccupied", Boolean, default=False, nullable=False)
+    section = Column(String(100), default="Main Hall", nullable=False)
+    status = Column(SQLEnum(TableStatus, name="TableStatus"), default=TableStatus.AVAILABLE, nullable=False)
+    active_order_id = Column("activeOrderId", String(36), nullable=True)
+    is_active = Column("isActive", Boolean, default=True, nullable=False)
 
+    companyId = synonym("company_id")
     branchId = synonym("branch_id")
-    floorId = synonym("floor_id")
     tableNumber = synonym("table_number")
-    isOccupied = synonym("is_occupied")
+    activeOrderId = synonym("active_order_id")
+    isActive = synonym("is_active")
 
-    floor = relationship("Floor", back_populates="tables")
     orders = relationship("RestaurantOrder", back_populates="table")
 
 class Menu(BaseModel):

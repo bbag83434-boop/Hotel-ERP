@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { apiClient } from '@/api/client';
 import {
   ExecutiveDashboardResponse,
   SalesSummaryResponse,
@@ -9,12 +10,13 @@ import {
   ReportExportRequest,
   ReportExportResponse,
   ReportSnapshot,
+  OutletDashboardResponse,
 } from '@/types/reports.types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 const getAuthHeaders = () => {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('apex_auth_token') || localStorage.getItem('token') : null;
   return {
     headers: {
       Authorization: token ? `Bearer ${token}` : '',
@@ -23,6 +25,14 @@ const getAuthHeaders = () => {
 };
 
 export const reportsApi = {
+  getOutletDashboard: async (branchId?: string): Promise<OutletDashboardResponse> => {
+    const res = await apiClient.get('/reports/outlet-dashboard', {
+      params: {
+        branch_id: branchId,
+      },
+    });
+    return res.data;
+  },
   getExecutiveSummary: async (params?: { startDate?: string; endDate?: string }): Promise<ExecutiveDashboardResponse> => {
     const res = await axios.get(`${API_BASE}/reports/executive-summary`, {
       ...getAuthHeaders(),

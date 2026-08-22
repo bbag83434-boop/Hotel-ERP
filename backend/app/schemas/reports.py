@@ -242,3 +242,133 @@ class ReportExportResponse(BaseModel):
 
     class Config:
         populate_by_name = True
+
+# --- Outlet Dashboard Schemas ---
+class OutletDashboardInfo(BaseModel):
+    id: str
+    name: str
+    code: str
+    type: str
+    is_active: bool = Field(True, alias="isActive")
+    company_name: Optional[str] = Field(None, alias="companyName")
+
+    class Config:
+        populate_by_name = True
+
+class OutletTodaySalesSummary(BaseModel):
+    today_sales: Decimal = Field(Decimal("0.00"), alias="todaySales")
+    today_orders_count: int = Field(0, alias="todayOrdersCount")
+    today_net_sales: Decimal = Field(Decimal("0.00"), alias="todayNetSales")
+    active_tables_occupied: int = Field(0, alias="activeTablesOccupied")
+    total_dining_tables: int = Field(0, alias="totalDiningTables")
+    avg_order_value: Decimal = Field(Decimal("0.00"), alias="avgOrderValue")
+
+    class Config:
+        populate_by_name = True
+
+class LowStockAlertItem(BaseModel):
+    item_id: str = Field(..., alias="itemId")
+    name: str
+    code: str
+    category_name: str = Field("General", alias="categoryName")
+    current_stock: Decimal = Field(..., alias="currentStock")
+    min_stock_level: Decimal = Field(..., alias="minStockLevel")
+    unit_symbol: str = Field("units", alias="unitSymbol")
+    cost_price: Decimal = Field(Decimal("0.00"), alias="costPrice")
+
+    class Config:
+        populate_by_name = True
+
+class OutletStockSummary(BaseModel):
+    total_items_in_stock: int = Field(0, alias="totalItemsInStock")
+    total_stock_value: Decimal = Field(Decimal("0.00"), alias="totalStockValue")
+    low_stock_count: int = Field(0, alias="lowStockCount")
+    out_of_stock_count: int = Field(0, alias="outOfStockCount")
+    expiring_batches_count: int = Field(0, alias="expiringBatchesCount")
+    low_stock_items: List[LowStockAlertItem] = Field(default_factory=list, alias="lowStockItems")
+
+    class Config:
+        populate_by_name = True
+
+class OutletProcurementSummary(BaseModel):
+    pending_pr_count: int = Field(0, alias="pendingPrCount")
+    approved_pr_count: int = Field(0, alias="approvedPrCount")
+    direct_po_count: int = Field(0, alias="directPoCount")
+    pending_grn_count: int = Field(0, alias="pendingGrnCount")
+    month_po_spend: Decimal = Field(Decimal("0.00"), alias="monthPoSpend")
+
+    class Config:
+        populate_by_name = True
+
+class OutletProductionSummary(BaseModel):
+    active_recipes_count: int = Field(0, alias="activeRecipesCount")
+    today_production_batches: int = Field(0, alias="todayProductionBatches")
+    today_produced_qty: Decimal = Field(Decimal("0.00"), alias="todayProducedQty")
+
+    class Config:
+        populate_by_name = True
+
+class OutletTransfersSummary(BaseModel):
+    pending_inbound_transfers: int = Field(0, alias="pendingInboundTransfers")
+    pending_outbound_transfers: int = Field(0, alias="pendingOutboundTransfers")
+    today_completed_transfers: int = Field(0, alias="todayCompletedTransfers")
+
+    class Config:
+        populate_by_name = True
+
+class OutletWastageSummary(BaseModel):
+    today_wastage_cost: Decimal = Field(Decimal("0.00"), alias="todayWastageCost")
+    today_wastage_entries: int = Field(0, alias="todayWastageEntries")
+    period_wastage_cost: Decimal = Field(Decimal("0.00"), alias="periodWastageCost")
+    pending_wastage_approvals: int = Field(0, alias="pendingWastageApprovals")
+
+    class Config:
+        populate_by_name = True
+
+class OutletStaffSummary(BaseModel):
+    active_staff_count: int = Field(0, alias="activeStaffCount")
+    total_staff_count: int = Field(0, alias="totalStaffCount")
+
+    class Config:
+        populate_by_name = True
+
+class OutletClosingCycleInfo(BaseModel):
+    period_label: str = Field(..., alias="periodLabel")
+    period_type: str = Field(..., alias="periodType")
+    start_date: datetime = Field(..., alias="startDate")
+    end_date: datetime = Field(..., alias="endDate")
+    days_remaining: int = Field(..., alias="daysRemaining")
+    period_sales: Decimal = Field(Decimal("0.00"), alias="periodSales")
+    period_orders_count: int = Field(0, alias="periodOrdersCount")
+
+    class Config:
+        populate_by_name = True
+
+class OutletActivityItem(BaseModel):
+    id: str
+    type: str
+    title: str
+    description: str
+    timestamp: datetime
+    status: str
+    amount: Optional[Decimal] = None
+
+    class Config:
+        populate_by_name = True
+
+class OutletDashboardResponse(BaseModel):
+    outlet: OutletDashboardInfo
+    today_sales: OutletTodaySalesSummary = Field(..., alias="todaySales")
+    stock: OutletStockSummary
+    procurement: OutletProcurementSummary
+    production: OutletProductionSummary
+    transfers: OutletTransfersSummary
+    wastage: OutletWastageSummary
+    staff: OutletStaffSummary
+    closing_cycle: OutletClosingCycleInfo = Field(..., alias="closingCycle")
+    recent_activities: List[OutletActivityItem] = Field(default_factory=list, alias="recentActivities")
+    allowed_modules: List[str] = Field(default_factory=list, alias="allowedModules")
+
+    class Config:
+        populate_by_name = True
+

@@ -30,6 +30,7 @@ import {
   Bot,
 } from 'lucide-react';
 import { Badge, Button, StatCard } from '@/components/ui';
+import OutletDashboard from '@/components/workspaces/OutletDashboard';
 
 interface DashboardOverviewProps {
   health: SystemHealth | null;
@@ -39,6 +40,35 @@ interface DashboardOverviewProps {
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, setActiveWorkspace }) => {
   const { activeOutlet, outlets, closingInfo, isHeadOffice } = useOutlet();
   const { isOnline } = usePWA();
+  const [viewMode, setViewMode] = React.useState<'outlet' | 'executive'>(() => {
+    return isHeadOffice && activeOutlet.id === 'all' ? 'executive' : 'outlet';
+  });
+
+  // If user is scoped to a specific outlet or non-head-office, default to Outlet Dashboard
+  if (!isHeadOffice || viewMode === 'outlet') {
+    return (
+      <div className="space-y-4">
+        {isHeadOffice && (
+          <div className="flex items-center justify-between p-3 rounded-2xl bg-[#17171b] border border-[#26262e] text-xs">
+            <div className="flex items-center gap-2 text-zinc-400">
+              <Building2 className="w-4 h-4 text-[#d4a437]" />
+              <span>Head Office Mode: Viewing single outlet operational cockpit</span>
+            </div>
+            <button
+              onClick={() => setViewMode('executive')}
+              className="px-3 py-1 rounded-lg bg-[#26262e] hover:bg-[#32323c] text-white font-medium text-xs transition-colors"
+            >
+              Switch to Group Executive View
+            </button>
+          </div>
+        )}
+        <OutletDashboard
+          branchId={activeOutlet.id !== 'all' ? activeOutlet.id : undefined}
+          setActiveWorkspace={setActiveWorkspace}
+        />
+      </div>
+    );
+  }
 
   const quickActions = [
     {
@@ -121,11 +151,20 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, se
             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-[#1C1C1C] font-['Outfit']">
               Executive Control Cockpit
             </h1>
-            <p className="text-xs sm:text-sm text-[#707070] flex flex-wrap items-center gap-1.5">
-              <span>Active Scope:</span>
-              <span className="text-[#1C1C1C] font-bold">{activeOutlet.name}</span>
-              <Badge variant="outlet">[{activeOutlet.code}]</Badge>
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs sm:text-sm text-[#707070] flex flex-wrap items-center gap-1.5">
+                <span>Active Scope:</span>
+                <span className="text-[#1C1C1C] font-bold">{activeOutlet.name}</span>
+                <Badge variant="outlet">[{activeOutlet.code}]</Badge>
+              </p>
+              <button
+                onClick={() => setViewMode('outlet')}
+                className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#d4a437]/15 text-[#b8862d] hover:bg-[#d4a437]/25 border border-[#d4a437]/30 transition-all flex items-center gap-1"
+              >
+                <span>Open Outlet Cockpit</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-3">

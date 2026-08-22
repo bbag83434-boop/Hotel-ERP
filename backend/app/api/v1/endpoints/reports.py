@@ -12,10 +12,15 @@ from sqlalchemy import func, desc, and_, or_
 from app.core.database import get_db
 from app.api.v1.endpoints.auth import get_current_active_user
 from app.models.user import User, Role, UserBranch
-from app.models.organization import Branch, Warehouse
-from app.models.inventory import Item, Category, Unit, StockBalance, StockLedger, StockMovementType
-from app.models.restaurant import RestaurantOrder, OrderItem, Menu, MenuCategory, MenuItem, OrderStatus
-from app.models.procurement import PurchaseOrder, POStatus, Supplier
+from app.models.organization import Branch, Warehouse, Company
+from app.models.hr import Staff
+from app.models.inventory import (
+    Item, Category, Unit, StockBalance, StockBatch, StockLedger,
+    StockMovementType, StockTransfer, TransferStatus
+)
+from app.models.restaurant import RestaurantOrder, OrderItem, Menu, MenuCategory, MenuItem, DiningTable, OrderStatus
+from app.models.procurement import PurchaseRequest, PurchaseOrder, POStatus, PRStatus, Supplier
+from app.models.recipe import Recipe, ProductionOrder
 from app.models.wastage import WastageEntry, WastageItem, WastageStatus
 from app.models.closing import OutletClosingRecord, FoodCostCalculation
 from app.models.report import ReportSnapshot, ReportSchedule, ReportType
@@ -39,6 +44,18 @@ from app.schemas.reports import (
     ReportExportResponse,
     ReportSnapshotCreate,
     ReportSnapshotResponse,
+    OutletDashboardResponse,
+    OutletDashboardInfo,
+    OutletTodaySalesSummary,
+    LowStockAlertItem,
+    OutletStockSummary,
+    OutletProcurementSummary,
+    OutletProductionSummary,
+    OutletTransfersSummary,
+    OutletWastageSummary,
+    OutletStaffSummary,
+    OutletClosingCycleInfo,
+    OutletActivityItem,
 )
 
 router = APIRouter()
@@ -909,3 +926,500 @@ def create_report_snapshot(
     db.commit()
     db.refresh(snapshot)
     return snapshot
+
+# ==============================================================================
+# 9. OUTLET OPERATIONAL DASHBOARD (Single-Outlet Command Cockpit)
+# ==============================================================================
+@router.get("/outlet-dashboard", response_model=OutletDashboardResponse)
+def get_outlet_dashboard(
+    branch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Production-ready Single-Outlet Operational Dashboard API.
+    Strictly isolated per tenant and authorized branch access.
+    """
+    # 1. Determine and validate target branch
+    is_super_or_admin = False
+    if current_user.role_id:
+        role_obj = db.query(Role).filter(Role.id == current_user.role_id).first()
+        if role_obj:
+            role_name = role_obj.name.upper()
+            if any(r in role_name for r in ["ADMIN", "SUPER", "DIRECTOR", "OWNER", "HQ", "GENERAL_MANAGER", "AREA", "CENTRAL"]):
+                is_super_or_admin = True
+
+    target_branch_id = branch_id
+
+    if is_super_or_admin:
+        if target_branch_id:
+            branch = db.query(Branch).filter(
+                Branch.id == target_branch_id,
+                Branch.company_id == current_user.company_id
+            ).first()
+            if not branch:
+                raise HTTPException(status_code=404, detail="Branch not found in company.")
+        else:
+            branch = db.query(Branch).filter(
+                Branch.company_id == current_user.company_id,
+                Branch.is_active == True
+            ).first()
+            if not branch:
+                raise HTTPException(status_code=404, detail="No active branches found.")
+            target_branch_id = branch.id
+    else:
+        # Restricted outlet user
+        user_branches = db.query(UserBranch.branch_id).filter(UserBranch.user_id == current_user.id).all()
+        accessible_ids = [ub[0] for ub in user_branches]
+        if not accessible_ids:
+            raise HTTPException(status_code=403, detail="No outlet assigned to this user account.")
+        
+        if target_branch_id:
+            if target_branch_id not in accessible_ids:
+                raise HTTPException(status_code=403, detail="Access denied: You do not have permission for this outlet.")
+            branch = db.query(Branch).filter(
+                Branch.id == target_branch_id,
+                Branch.company_id == current_user.company_id
+            ).first()
+            if not branch:
+                raise HTTPException(status_code=404, detail="Branch not found.")
+        else:
+            target_branch_id = accessible_ids[0]
+            branch = db.query(Branch).filter(
+                Branch.id == target_branch_id,
+                Branch.company_id == current_user.company_id
+            ).first()
+            if not branch:
+                raise HTTPException(status_code=404, detail="Assigned branch not found.")
+
+    company = db.query(Company).filter(Company.id == current_user.company_id).first()
+
+    # 2. Timing & Bi-Monthly Closing Cycle Calculations
+    now = datetime.utcnow()
+    today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
+    today_end = datetime(now.year, now.month, now.day, 23, 59, 59, 999999)
+
+    day = now.day
+    is_first_half = day <= 15
+    period_type = "FIRST_HALF" if is_first_half else "SECOND_HALF"
+    start_day = 1 if is_first_half else 16
+    if now.month == 12:
+        last_day = 15 if is_first_half else 31
+    else:
+        next_month = datetime(now.year, now.month + 1, 1)
+        last_day = 15 if is_first_half else (next_month - timedelta(days=1)).day
+    
+    period_start = datetime(now.year, now.month, start_day, 0, 0, 0)
+    period_end = datetime(now.year, now.month, last_day, 23, 59, 59, 999999)
+    days_remaining = max(0, last_day - day)
+
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    period_label = f"{month_names[now.month - 1]} {now.year} - {'1st Half (1–15)' if is_first_half else '2nd Half (16–End)'}"
+
+    # 3. Today's POS Sales & Orders
+    today_orders = db.query(
+        func.count(RestaurantOrder.id).label("order_count"),
+        func.sum(RestaurantOrder.total_amount).label("total_sales"),
+        func.sum(RestaurantOrder.sub_total).label("net_sales")
+    ).filter(
+        RestaurantOrder.company_id == current_user.company_id,
+        RestaurantOrder.branch_id == target_branch_id,
+        RestaurantOrder.created_at >= today_start,
+        RestaurantOrder.created_at <= today_end,
+        RestaurantOrder.status != OrderStatus.CANCELLED
+    ).first()
+
+    today_sales_val = Decimal(str(today_orders.total_sales or 0)) if today_orders else Decimal("0.00")
+    today_net_val = Decimal(str(today_orders.net_sales or 0)) if today_orders else Decimal("0.00")
+    today_count_val = int(today_orders.order_count or 0) if today_orders else 0
+    avg_order_val = (today_sales_val / Decimal(str(today_count_val))) if today_count_val > 0 else Decimal("0.00")
+
+    # Period sales for closing cycle
+    period_orders = db.query(
+        func.count(RestaurantOrder.id).label("order_count"),
+        func.sum(RestaurantOrder.total_amount).label("total_sales")
+    ).filter(
+        RestaurantOrder.company_id == current_user.company_id,
+        RestaurantOrder.branch_id == target_branch_id,
+        RestaurantOrder.created_at >= period_start,
+        RestaurantOrder.created_at <= period_end,
+        RestaurantOrder.status != OrderStatus.CANCELLED
+    ).first()
+
+    period_sales_val = Decimal(str(period_orders.total_sales or 0)) if period_orders else Decimal("0.00")
+    period_count_val = int(period_orders.order_count or 0) if period_orders else 0
+
+    # Tables occupied
+    total_tables = db.query(func.count(DiningTable.id)).filter(
+        DiningTable.branch_id == target_branch_id,
+        DiningTable.is_active == True
+    ).scalar() or 0
+
+    active_occupied_tables = db.query(func.count(DiningTable.id)).filter(
+        DiningTable.branch_id == target_branch_id,
+        DiningTable.status == "OCCUPIED"
+    ).scalar() or 0
+
+    today_sales_summary = OutletTodaySalesSummary(
+        today_sales=round(today_sales_val, 2),
+        today_orders_count=today_count_val,
+        today_net_sales=round(today_net_val, 2),
+        active_tables_occupied=active_occupied_tables,
+        total_dining_tables=total_tables,
+        avg_order_value=round(avg_order_val, 2)
+    )
+
+    # 4. Stock & Inventory Summary
+    branch_warehouses = db.query(Warehouse.id).filter(
+        Warehouse.branch_id == target_branch_id,
+        Warehouse.is_active == True
+    ).all()
+    warehouse_ids = [w[0] for w in branch_warehouses]
+
+    total_items_in_stock = 0
+    total_stock_value = Decimal("0.00")
+    low_stock_count = 0
+    out_of_stock_count = 0
+    low_stock_items: List[LowStockAlertItem] = []
+
+    if warehouse_ids:
+        # Stock balance query
+        stock_query = db.query(
+            StockBalance,
+            Item,
+            Category.name.label("category_name"),
+            Unit.symbol.label("unit_symbol")
+        ).join(Item, Item.id == StockBalance.item_id)\
+         .outerjoin(Category, Category.id == Item.category_id)\
+         .outerjoin(Unit, Unit.id == Item.unit_id)\
+         .filter(StockBalance.warehouse_id.in_(warehouse_ids)).all()
+
+        for sb, itm, cat_name, u_sym in stock_query:
+            qty = Decimal(str(sb.quantity or 0))
+            cost = Decimal(str(itm.cost_price or 0))
+            min_lvl = Decimal(str(sb.min_stock_level if sb.min_stock_level is not None else (itm.min_stock_level or 0)))
+
+            if qty > 0:
+                total_items_in_stock += 1
+                total_stock_value += (qty * cost)
+
+            if qty <= 0:
+                out_of_stock_count += 1
+            elif qty <= min_lvl:
+                low_stock_count += 1
+                if len(low_stock_items) < 8:
+                    low_stock_items.append(LowStockAlertItem(
+                        item_id=str(itm.id),
+                        name=itm.name,
+                        code=itm.code,
+                        category_name=cat_name or "General",
+                        current_stock=round(qty, 2),
+                        min_stock_level=round(min_lvl, 2),
+                        unit_symbol=u_sym or "units",
+                        cost_price=round(cost, 2)
+                    ))
+
+    # Expiring batches in next 7 days
+    expiring_count = 0
+    if warehouse_ids:
+        exp_threshold = (now + timedelta(days=7)).date()
+        expiring_count = db.query(func.count(StockBatch.id)).filter(
+            StockBatch.warehouse_id.in_(warehouse_ids),
+            StockBatch.expiry_date.isnot(None),
+            StockBatch.expiry_date >= now.date(),
+            StockBatch.expiry_date <= exp_threshold,
+            StockBatch.quantity > 0,
+            StockBatch.is_active == True
+        ).scalar() or 0
+
+    stock_summary = OutletStockSummary(
+        total_items_in_stock=total_items_in_stock,
+        total_stock_value=round(total_stock_value, 2),
+        low_stock_count=low_stock_count,
+        out_of_stock_count=out_of_stock_count,
+        expiring_batches_count=expiring_count,
+        low_stock_items=low_stock_items
+    )
+
+    # 5. Procurement & Purchase Requests
+    pending_prs = db.query(func.count(PurchaseRequest.id)).filter(
+        PurchaseRequest.company_id == current_user.company_id,
+        PurchaseRequest.branch_id == target_branch_id,
+        PurchaseRequest.status.in_([PRStatus.DRAFT, PRStatus.PENDING_APPROVAL])
+    ).scalar() or 0
+
+    approved_prs = db.query(func.count(PurchaseRequest.id)).filter(
+        PurchaseRequest.company_id == current_user.company_id,
+        PurchaseRequest.branch_id == target_branch_id,
+        PurchaseRequest.status.in_([PRStatus.APPROVED, PRStatus.ORDERED])
+    ).scalar() or 0
+
+    direct_pos = db.query(func.count(PurchaseOrder.id)).filter(
+        PurchaseOrder.company_id == current_user.company_id,
+        PurchaseOrder.branch_id == target_branch_id
+    ).scalar() or 0
+
+    pending_grns = db.query(func.count(PurchaseOrder.id)).filter(
+        PurchaseOrder.company_id == current_user.company_id,
+        PurchaseOrder.branch_id == target_branch_id,
+        PurchaseOrder.status.in_([POStatus.APPROVED, POStatus.ISSUED, POStatus.PARTIALLY_RECEIVED])
+    ).scalar() or 0
+
+    # Month PO spend
+    month_start = datetime(now.year, now.month, 1, 0, 0, 0)
+    month_po_spend_val = db.query(func.sum(PurchaseOrder.total_amount)).filter(
+        PurchaseOrder.company_id == current_user.company_id,
+        PurchaseOrder.branch_id == target_branch_id,
+        PurchaseOrder.order_date >= month_start,
+        PurchaseOrder.status.in_([POStatus.APPROVED, POStatus.ISSUED, POStatus.RECEIVED, POStatus.PARTIALLY_RECEIVED])
+    ).scalar() or Decimal("0.00")
+
+    procurement_summary = OutletProcurementSummary(
+        pending_pr_count=pending_prs,
+        approved_pr_count=approved_prs,
+        direct_po_count=direct_pos,
+        pending_grn_count=pending_grns,
+        month_po_spend=round(Decimal(str(month_po_spend_val)), 2)
+    )
+
+    # 6. Production & Recipes
+    active_recipes = db.query(func.count(Recipe.id)).filter(
+        Recipe.company_id == current_user.company_id,
+        Recipe.is_active == True
+    ).scalar() or 0
+
+    today_prod = db.query(
+        func.count(ProductionOrder.id).label("batch_count"),
+        func.sum(ProductionOrder.actual_yield_qty).label("total_yield")
+    ).filter(
+        ProductionOrder.company_id == current_user.company_id,
+        ProductionOrder.branch_id == target_branch_id,
+        ProductionOrder.created_at >= today_start,
+        ProductionOrder.created_at <= today_end
+    ).first()
+
+    prod_summary = OutletProductionSummary(
+        active_recipes_count=active_recipes,
+        today_production_batches=int(today_prod.batch_count or 0) if today_prod else 0,
+        today_produced_qty=round(Decimal(str(today_prod.total_yield or 0)), 2) if today_prod else Decimal("0.00")
+    )
+
+    # 7. Transfers
+    pending_inbound = 0
+    pending_outbound = 0
+    today_completed_transfers = 0
+    if warehouse_ids:
+        pending_inbound = db.query(func.count(StockTransfer.id)).filter(
+            StockTransfer.company_id == current_user.company_id,
+            StockTransfer.to_warehouse_id.in_(warehouse_ids),
+            StockTransfer.status == TransferStatus.PENDING
+        ).scalar() or 0
+
+        pending_outbound = db.query(func.count(StockTransfer.id)).filter(
+            StockTransfer.company_id == current_user.company_id,
+            StockTransfer.from_warehouse_id.in_(warehouse_ids),
+            StockTransfer.status == TransferStatus.PENDING
+        ).scalar() or 0
+
+        today_completed_transfers = db.query(func.count(StockTransfer.id)).filter(
+            StockTransfer.company_id == current_user.company_id,
+            or_(
+                StockTransfer.to_warehouse_id.in_(warehouse_ids),
+                StockTransfer.from_warehouse_id.in_(warehouse_ids)
+            ),
+            StockTransfer.status == TransferStatus.COMPLETED,
+            StockTransfer.updated_at >= today_start
+        ).scalar() or 0
+
+    transfers_summary = OutletTransfersSummary(
+        pending_inbound_transfers=pending_inbound,
+        pending_outbound_transfers=pending_outbound,
+        today_completed_transfers=today_completed_transfers
+    )
+
+    # 8. Wastage Summary
+    today_wastage = db.query(
+        func.count(WastageEntry.id).label("entry_count"),
+        func.sum(WastageEntry.total_cost).label("total_loss")
+    ).filter(
+        WastageEntry.company_id == current_user.company_id,
+        WastageEntry.branch_id == target_branch_id,
+        WastageEntry.entry_date >= today_start,
+        WastageEntry.entry_date <= today_end
+    ).first()
+
+    period_wastage_loss = db.query(func.sum(WastageEntry.total_cost)).filter(
+        WastageEntry.company_id == current_user.company_id,
+        WastageEntry.branch_id == target_branch_id,
+        WastageEntry.entry_date >= period_start,
+        WastageEntry.entry_date <= period_end,
+        WastageEntry.status == WastageStatus.APPROVED
+    ).scalar() or Decimal("0.00")
+
+    pending_wastage = db.query(func.count(WastageEntry.id)).filter(
+        WastageEntry.company_id == current_user.company_id,
+        WastageEntry.branch_id == target_branch_id,
+        WastageEntry.status == WastageStatus.PENDING_APPROVAL
+    ).scalar() or 0
+
+    wastage_summary = OutletWastageSummary(
+        today_wastage_cost=round(Decimal(str(today_wastage.total_loss or 0)), 2) if today_wastage else Decimal("0.00"),
+        today_wastage_entries=int(today_wastage.entry_count or 0) if today_wastage else 0,
+        period_wastage_cost=round(Decimal(str(period_wastage_loss)), 2),
+        pending_wastage_approvals=pending_wastage
+    )
+
+    # 9. Staff Summary
+    active_staff = db.query(func.count(Staff.id)).filter(
+        Staff.branch_id == target_branch_id,
+        Staff.is_active == True,
+        Staff.status == "ACTIVE"
+    ).scalar() or 0
+
+    total_staff = db.query(func.count(Staff.id)).filter(
+        Staff.branch_id == target_branch_id
+    ).scalar() or 0
+
+    staff_summary = OutletStaffSummary(
+        active_staff_count=active_staff,
+        total_staff_count=total_staff
+    )
+
+    # 10. Closing Cycle Info
+    closing_cycle_info = OutletClosingCycleInfo(
+        period_label=period_label,
+        period_type=period_type,
+        start_date=period_start,
+        end_date=period_end,
+        days_remaining=days_remaining,
+        period_sales=round(period_sales_val, 2),
+        period_orders_count=period_count_val
+    )
+
+    # 11. Recent Live Activities (Chronological real stream)
+    recent_activities: List[OutletActivityItem] = []
+
+    # Recent Orders
+    recent_orders = db.query(RestaurantOrder).filter(
+        RestaurantOrder.company_id == current_user.company_id,
+        RestaurantOrder.branch_id == target_branch_id
+    ).order_by(desc(RestaurantOrder.created_at)).limit(4).all()
+
+    for ro in recent_orders:
+        recent_activities.append(OutletActivityItem(
+            id=str(ro.id),
+            type="ORDER",
+            title=f"Order #{ro.order_number}",
+            description=f"Dining Order · {ro.guest_count} guests",
+            timestamp=ro.created_at,
+            status=str(ro.status),
+            amount=round(Decimal(str(ro.total_amount or 0)), 2)
+        ))
+
+    # Recent PRs
+    recent_pr_list = db.query(PurchaseRequest).filter(
+        PurchaseRequest.company_id == current_user.company_id,
+        PurchaseRequest.branch_id == target_branch_id
+    ).order_by(desc(PurchaseRequest.created_at)).limit(3).all()
+
+    for pr in recent_pr_list:
+        recent_activities.append(OutletActivityItem(
+            id=str(pr.id),
+            type="PURCHASE_REQUEST",
+            title=f"PR #{pr.request_number}",
+            description=f"Priority {pr.priority} · {pr.notes or 'Stock replenishment'}",
+            timestamp=pr.created_at,
+            status=str(pr.status.value if hasattr(pr.status, 'value') else pr.status),
+            amount=round(Decimal(str(pr.estimated_total or 0)), 2) if hasattr(pr, 'estimated_total') and pr.estimated_total else None
+        ))
+
+    # Recent Wastage
+    recent_wastage_list = db.query(WastageEntry).filter(
+        WastageEntry.company_id == current_user.company_id,
+        WastageEntry.branch_id == target_branch_id
+    ).order_by(desc(WastageEntry.entry_date)).limit(3).all()
+
+    for we in recent_wastage_list:
+        recent_activities.append(OutletActivityItem(
+            id=str(we.id),
+            type="WASTAGE",
+            title=f"Wastage #{we.entry_number}",
+            description=f"{we.total_items_count} items logged",
+            timestamp=we.entry_date,
+            status=str(we.status.value if hasattr(we.status, 'value') else we.status),
+            amount=round(Decimal(str(we.total_cost or 0)), 2)
+        ))
+
+    # Recent Transfers
+    if warehouse_ids:
+        recent_transfers_list = db.query(StockTransfer).filter(
+            StockTransfer.company_id == current_user.company_id,
+            or_(
+                StockTransfer.to_warehouse_id.in_(warehouse_ids),
+                StockTransfer.from_warehouse_id.in_(warehouse_ids)
+            )
+        ).order_by(desc(StockTransfer.created_at)).limit(3).all()
+
+        for st in recent_transfers_list:
+            is_in = st.to_warehouse_id in warehouse_ids
+            recent_activities.append(OutletActivityItem(
+                id=str(st.id),
+                type="TRANSFER",
+                title=f"Transfer #{st.transfer_number}",
+                description="Inbound Dispatch" if is_in else "Outbound Transfer",
+                timestamp=st.created_at,
+                status=str(st.status.value if hasattr(st.status, 'value') else st.status),
+                amount=None
+            ))
+
+    # Sort recent activities by timestamp descending
+    recent_activities.sort(key=lambda x: x.timestamp, reverse=True)
+    recent_activities = recent_activities[:10]
+
+    # 12. Allowed Modules Matrix
+    role_name = ""
+    if current_user.role:
+        role_name = current_user.role.name.upper()
+    elif current_user.role_id:
+        r_obj = db.query(Role).filter(Role.id == current_user.role_id).first()
+        if r_obj:
+            role_name = r_obj.name.upper()
+
+    if is_super_or_admin:
+        allowed_modules = ["inventory", "purchase", "production", "transfers", "wastage", "assistant", "organization", "hr", "closing", "reports", "telemetry"]
+    elif "MANAGER" in role_name:
+        allowed_modules = ["inventory", "purchase", "production", "transfers", "wastage", "assistant", "closing", "reports", "hr"]
+    elif "STORE" in role_name:
+        allowed_modules = ["inventory", "purchase", "transfers", "assistant"]
+    elif "PURCHASE" in role_name:
+        allowed_modules = ["purchase", "inventory", "assistant"]
+    elif "KITCHEN" in role_name or "CHEF" in role_name:
+        allowed_modules = ["production", "wastage", "inventory", "transfers", "assistant"]
+    elif "CASHIER" in role_name:
+        allowed_modules = ["assistant", "closing"]
+    else:
+        allowed_modules = ["inventory", "purchase", "production", "transfers", "wastage", "assistant"]
+
+    outlet_info = OutletDashboardInfo(
+        id=str(branch.id),
+        name=branch.name,
+        code=branch.code,
+        type=str(branch.type),
+        is_active=bool(branch.is_active),
+        company_name=company.name if company else None
+    )
+
+    return OutletDashboardResponse(
+        outlet=outlet_info,
+        today_sales=today_sales_summary,
+        stock=stock_summary,
+        procurement=procurement_summary,
+        production=prod_summary,
+        transfers=transfers_summary,
+        wastage=wastage_summary,
+        staff=staff_summary,
+        closing_cycle=closing_cycle_info,
+        recent_activities=recent_activities,
+        allowed_modules=allowed_modules
+    )
+
