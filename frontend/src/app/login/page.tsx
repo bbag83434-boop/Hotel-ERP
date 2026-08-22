@@ -9,7 +9,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, isAuthenticated, isLoading } = useAuth();
+  const { login, loginWithGoogle, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -29,6 +29,22 @@ export default function LoginPage() {
       router.push('/');
     } else {
       setError(result.error || 'Login failed');
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setError('');
+    setLoading(true);
+    // In a real implementation, you would use the Google Identity Services SDK here.
+    // For now, this triggers the flow with a placeholder to demonstrate integration.
+    const mockIdToken = 'mock-google-id-token'; 
+    const result = await loginWithGoogle(mockIdToken);
+    
+    if (result.success) {
+      router.push('/');
+    } else {
+      setError(result.error || 'Google login failed');
       setLoading(false);
     }
   };
@@ -75,6 +91,24 @@ export default function LoginPage() {
             {loading ? 'Logging in...' : 'Sign In'}
           </button>
         </form>
+
+        <div className="mt-6">
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-[#2D2D2D]/10"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-[#F5F3EE] text-[#707070]">Or continue with</span>
+            </div>
+          </div>
+          <button 
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="w-full mt-4 py-3 rounded-lg border border-[#2D2D2D]/10 font-semibold hover:bg-[#F1E4C5]/20 transition-colors"
+          >
+            Google
+          </button>
+        </div>
       </div>
     </div>
   );
