@@ -1,13 +1,13 @@
 {
-  "name": "APEX ERP — Autonomous Restaurant & Multi-Outlet Platform",
-  "short_name": "APEX ERP",
-  "description": "Enterprise Multi-Outlet Restaurant ERP, Central Kitchen, Central Purchase & Operational Intelligence",
+  "name": "CB Restaurant & Kitchen Management",
+  "short_name": "CB RKM",
+  "description": "CB Restaurant & Kitchen Management system with CB Automation Pro.",
   "start_url": "/",
   "id": "/",
   "display": "standalone",
   "display_override": ["standalone", "window-controls-overlay", "minimal-ui"],
-  "background_color": "#0c0c0e",
-  "theme_color": "#0c0c0e",
+  "background_color": "#F5F3EE",
+  "theme_color": "#F5F3EE",
   "orientation": "portrait-primary",
   "categories": ["business", "productivity", "utilities"],
   "icons": [

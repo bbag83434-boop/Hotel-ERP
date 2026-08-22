@@ -7,8 +7,8 @@ import OfflineBanner from '@/components/common/OfflineBanner';
 import PWAInstallBanner from '@/components/common/PWAInstallBanner';
 
 export const metadata: Metadata = {
-  title: 'APEX | Multi-Outlet Restaurant ERP & Central Purchase',
-  description: 'Enterprise Multi-Outlet Restaurant ERP with Central Purchase Control, Bi-Monthly Closing Engine, and Real-Time Inventory Control.',
+  title: 'CB RKM | Restaurant & Kitchen Management',
+  description: 'CB Restaurant & Kitchen Management system with CB Automation Pro.',
   manifest: '/manifest.webmanifest',
   icons: {
     icon: '/icons/icon-192.png',
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'APEX ERP',
+    title: 'CB RKM',
   },
 };
 
