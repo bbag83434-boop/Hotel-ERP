@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.database import get_db
-from app.core.auth import get_current_active_user, require_permission
+from app.core.auth import get_current_active_user, require_permission, require_outlet_scope
 from app.models.user import User
 from app.models.organization import Branch
 from app.models.hr import (
@@ -51,14 +51,15 @@ router = APIRouter()
 
 @router.get("/shifts", response_model=List[ShiftResponse])
 def get_shifts(
-    branch_id: Optional[str] = Query(None, description="Filter shifts by branch"),
+    outlet_id: str = Depends(require_outlet_scope),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """List work shifts for the company / branch."""
-    query = db.query(Shift).filter(Shift.company_id == current_user.company_id)
-    if branch_id:
-        query = query.filter((Shift.branch_id == branch_id) | (Shift.branch_id.is_(None)))
+    """List work shifts for the outlet."""
+    query = db.query(Shift).filter(
+        Shift.company_id == current_user.company_id,
+        (Shift.branch_id == outlet_id) | (Shift.branch_id.is_(None))
+    )
     return query.order_by(Shift.start_time.asc()).all()
 
 
