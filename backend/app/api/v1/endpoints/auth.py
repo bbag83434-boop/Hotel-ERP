@@ -151,28 +151,62 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         user=profile
     )
 
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+
 @router.post("/google", response_model=TokenResponse, status_code=status.HTTP_200_OK)
 def google_oauth_login(req: GoogleOAuthRequest, db: Session = Depends(get_db)):
-    if not req.id_token or len(req.id_token) < 5:
-        raise UnauthorizedException("Invalid Google OAuth ID token")
+    # 1. Verify Google ID Token
+    try:
+        # Verify the token against the client ID
+        id_info = id_token.verify_oauth2_token(
+            req.id_token, 
+            google_requests.Request(), 
+            settings.GOOGLE_CLIENT_ID
+        )
 
-    # In production Google token verification is performed with Google Client SDK
-    # Find existing admin/owner or create user
-    user = db.query(User).filter(User.username == "admin").first()
+        # Additional verification checks
+        if id_info.get("iss") not in ["accounts.google.com", "https://accounts.google.com"]:
+            raise UnauthorizedException("Invalid token issuer")
+        
+        if not id_info.get("email_verified"):
+            raise UnauthorizedException("Google email not verified")
+        
+        email = id_info.get("email")
+        if not email:
+            raise UnauthorizedException("Google token does not contain an email")
+
+    except Exception as e:
+        raise UnauthorizedException(f"Invalid Google OAuth ID token: {str(e)}")
+
+    # 2. Find existing user by verified email
+    user = (
+        db.query(User)
+        .filter(User.email.ilike(email))
+        .first()
+    )
+    
     if not user:
-        user = db.query(User).first()
+        raise UnauthorizedException("Account not registered")
+    
+    if not user.is_active:
+        raise UnauthorizedException("Account is disabled. Contact your administrator.")
 
-    if not user:
-        raise UnauthorizedException("Google OAuth account not registered")
+    # 3. Update last login
+    user.last_login_at = datetime.utcnow()
+    db.commit()
 
+    # 4. Generate JWT Tokens
     token_claims = {
         "email": user.email,
-        "role": user.role.name if user.role else "OWNER",
-        "provider": "google"
+        "role": user.role.name if user.role else "STAFF",
+        "company_id": str(user.company_id) if user.company_id else None,
+        "branch_id": req.branch_id
     }
-
+    
     access_token = create_access_token(subject=str(user.id), claims=token_claims)
     refresh_token = create_refresh_token(subject=str(user.id))
+    
     profile = build_user_profile(user, db, req.branch_id)
 
     return TokenResponse(

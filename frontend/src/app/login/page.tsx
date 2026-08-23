@@ -1,14 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import Script from 'next/script';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { loginWithGoogle, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  const googleButtonRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
@@ -16,31 +18,24 @@ export default function LoginPage() {
     }
   }, [isLoading, isAuthenticated, router]);
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleSuccess = async (response: any) => {
     setError('');
     setLoading(true);
     
-    // Detailed logging for debugging
-    console.log('[Auth] Initiating Google login flow...');
-
-    // Placeholder for real Google SDK integration.
-    // Ensure the token passed is at least 6 characters as required by the backend.
-    const realGoogleIdToken = 'valid_token_admin_123'; 
-    
     try {
-      console.log('[Auth] Sending token to backend...');
-      const result = await loginWithGoogle(realGoogleIdToken);
+      console.log('[Auth] Google login successful. Sending token to backend...');
+      const result = await loginWithGoogle(response.credential);
       
       if (result.success) {
-        console.log('[Auth] Google login successful');
+        console.log('[Auth] Backend authentication successful');
         router.push('/');
       } else {
-        console.error('[Auth] Google login error:', result.error);
+        console.error('[Auth] Backend authentication error:', result.error);
         setError(result.error || 'Google login failed');
         setLoading(false);
       }
     } catch (err) {
-      console.error('[Auth] Exception during Google login:', err);
+      console.error('[Auth] Exception during backend authentication:', err);
       setError('An unexpected error occurred during login');
       setLoading(false);
     }
@@ -52,6 +47,22 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F5F3EE] p-4">
+      <Script 
+        src="https://accounts.google.com/gsi/client" 
+        strategy="afterInteractive"
+        onLoad={() => {
+          if (googleButtonRef.current && window.google) {
+            window.google.accounts.id.initialize({
+              client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '', // Ensure this is set
+              callback: handleGoogleSuccess,
+            });
+            window.google.accounts.id.renderButton(
+              googleButtonRef.current,
+              { theme: 'outline', size: 'large', width: '360' }
+            );
+          }
+        }}
+      />
       <div className="w-full max-w-[360px] p-8 luxury-card flex flex-col items-center">
         <div className="text-center mb-8">
           <div className="w-16 h-16 mx-auto mb-4 bg-[#C79A3B] rounded-full flex items-center justify-center text-white font-bold text-2xl">CB</div>
@@ -59,13 +70,8 @@ export default function LoginPage() {
           <p className="text-[#707070] mt-2">Welcome back to Automation Pro</p>
         </div>
         
-        <button 
-          onClick={handleGoogleLogin}
-          disabled={loading}
-          className="w-full py-3 rounded-lg gold-gradient-bg font-semibold hover:opacity-90 transition-opacity"
-        >
-          {loading ? 'Authenticating...' : 'Continue with Google'}
-        </button>
+        <div ref={googleButtonRef} />
+
         {error && <p className="text-red-500 text-sm mt-4 text-center">{error}</p>}
       </div>
     </div>
