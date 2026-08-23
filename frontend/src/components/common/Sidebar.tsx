@@ -3,6 +3,7 @@
 import React from 'react';
 import { useOutlet } from '@/context/OutletContext';
 import { usePWA } from '@/context/PWAContext';
+import { useAuth } from '@/context/AuthContext';
 import {
   LayoutDashboard,
   Building2,
@@ -18,11 +19,13 @@ import {
   Sparkles,
   ChevronRight,
   ShieldCheck,
+  UserCog,
   X,
 } from 'lucide-react';
 
 export type WorkspaceId =
   | 'dashboard'
+  | 'users'
   | 'organization'
   | 'inventory'
   | 'purchase'
@@ -50,6 +53,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { activeOutlet, isHeadOffice } = useOutlet();
   const { isOnline } = usePWA();
+  const { user } = useAuth();
+
+  const userRole = typeof user?.role === 'object' ? user.role.name : (user?.role || '');
+  const isAdmin = ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN'].includes(
+    userRole.toUpperCase()
+  );
 
   const navGroups = [
     {
@@ -57,6 +66,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { id: 'dashboard' as WorkspaceId, label: 'Executive Dashboard', icon: LayoutDashboard, badge: null },
         { id: 'assistant' as WorkspaceId, label: 'AI Assistant', icon: Sparkles, badge: 'Smart' },
+        ...(isAdmin
+          ? [{ id: 'users' as WorkspaceId, label: 'User & Admin Mgmt', icon: UserCog, badge: 'RBAC' }]
+          : []),
         { id: 'organization' as WorkspaceId, label: '14+ Outlets & Master', icon: Building2, badge: '14 Units' },
         { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
         { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },

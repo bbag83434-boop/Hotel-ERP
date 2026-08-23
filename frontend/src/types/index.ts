@@ -66,3 +66,5 @@ export interface ClosingPeriod {
 
 export type SystemHealth = SystemHealthData;
 
+export * from './user.types';
+

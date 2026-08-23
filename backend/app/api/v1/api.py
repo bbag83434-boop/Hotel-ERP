@@ -1,8 +1,9 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, auth, organization, hr, inventory, recipe, procurement, wastage, reports, ai
+from app.api.v1.endpoints import health, auth, users, organization, hr, inventory, recipe, procurement, wastage, reports, ai
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication & RBAC"])
+api_router.include_router(users.router, prefix="/users", tags=["User & Admin Management"])
 api_router.include_router(organization.router, prefix="/organization", tags=["Organization, Branches & Staff"])
 api_router.include_router(hr.router, prefix="/hr", tags=["HR, Attendance & Payroll"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["Multi-Outlet Inventory & Central Commissary"])
