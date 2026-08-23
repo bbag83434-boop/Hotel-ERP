@@ -7,10 +7,23 @@ import Script from 'next/script';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
+  const [isWakingServer, setIsWakingServer] = useState(false);
   const [error, setError] = useState('');
   const { loginWithGoogle, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const googleButtonRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (loading || isLoading) {
+      timer = setTimeout(() => {
+        setIsWakingServer(true);
+      }, 4000);
+    } else {
+      setIsWakingServer(false);
+    }
+    return () => clearTimeout(timer);
+  }, [loading, isLoading]);
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
@@ -42,7 +55,13 @@ export default function LoginPage() {
   };
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-[#F5F3EE]">Loading...</div>;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#F5F3EE] p-4 text-center">
+        <p className="text-[#707070] text-sm">
+          {isWakingServer ? 'Waking up server, this may take up to a minute...' : 'Loading...'}
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -71,6 +90,14 @@ export default function LoginPage() {
         </div>
         
         <div ref={googleButtonRef} />
+
+        {loading && (
+          <p className="text-[#707070] text-sm mt-4 text-center animate-pulse">
+            {isWakingServer
+              ? 'Waking up server, this may take up to a minute...'
+              : 'Verifying credentials...'}
+          </p>
+        )}
 
         {error && <p className="text-red-500 text-sm mt-4 text-center">{error}</p>}
       </div>

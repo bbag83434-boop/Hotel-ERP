@@ -5,7 +5,7 @@ const API_BASE_URL = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000,
+  timeout: 60000,
   headers: {
     'Content-Type': 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
