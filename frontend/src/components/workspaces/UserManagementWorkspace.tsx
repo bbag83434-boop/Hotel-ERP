@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useOutlet } from '@/context/OutletContext';
-import { usersApi } from '@/api/users';
+import { userApi } from '@/api/users';
 import { organizationApi } from '@/api/organization';
 import {
   ManagedUser,
@@ -25,7 +25,7 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
-  XCircle,
+  AlertCircle,
   AlertTriangle,
   Building2,
   Mail,
@@ -59,62 +59,55 @@ export const UserManagementWorkspace: React.FC = () => {
   const [summary, setSummary] = useState<UserManagementSummary | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Filters State
+  // Filter States
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [roleFilter, setRoleFilter] = useState<string>('ALL');
-  const [branchFilter, setBranchFilter] = useState<string>('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('ALL');
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>('ALL');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
 
-  // Feedback Notification
-  const [notification, setNotification] = useState<{
-    type: 'success' | 'error' | 'info';
-    message: string;
-  } | null>(null);
-
-  // Modals State
-  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  // Modal States
+  const [createModalOpen, setCreateModalOpen] = useState<boolean>(false);
+  const [editModalOpen, setEditModalOpen] = useState<boolean>(false);
   const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
   const [deactivatingUser, setDeactivatingUser] = useState<ManagedUser | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
-  // Create Form State
-  const [createForm, setCreateForm] = useState<UserCreatePayload>({
-    email: '',
-    first_name: '',
-    last_name: '',
-    phone: '',
-    role_id: '',
-    branch_ids: [],
-    default_branch_id: '',
-    password: '',
-    is_active: true,
-  });
-  const [showPassword, setShowPassword] = useState<boolean>(false);
+  // Create User Form State
+  const [createEmail, setCreateEmail] = useState<string>('');
+  const [createFirstName, setCreateFirstName] = useState<string>('');
+  const [createLastName, setCreateLastName] = useState<string>('');
+  const [createUsername, setCreateUsername] = useState<string>('');
+  const [createPhone, setCreatePhone] = useState<string>('');
+  const [createRoleId, setCreateRoleId] = useState<string>('');
+  const [createSelectedBranchIds, setCreateSelectedBranchIds] = useState<string[]>([]);
+  const [createDefaultBranchId, setCreateDefaultBranchId] = useState<string>('');
+  const [createPassword, setCreatePassword] = useState<string>('');
+  const [createShowPassword, setCreateShowPassword] = useState<boolean>(false);
+  const [createIsActive, setCreateIsActive] = useState<boolean>(true);
 
-  // Edit Form State
-  const [editForm, setEditForm] = useState<{
-    first_name: string;
-    last_name: string;
-    phone: string;
-    role_id: string;
-    branch_ids: string[];
-    default_branch_id: string;
-    is_active: boolean;
-    password: string;
-  }>({
-    first_name: '',
-    last_name: '',
-    phone: '',
-    role_id: '',
-    branch_ids: [],
-    default_branch_id: '',
-    is_active: true,
-    password: '',
-  });
+  // Edit User Form State
+  const [editFirstName, setEditFirstName] = useState<string>('');
+  const [editLastName, setEditLastName] = useState<string>('');
+  const [editPhone, setEditPhone] = useState<string>('');
+  const [editRoleId, setEditRoleId] = useState<string>('');
+  const [editSelectedBranchIds, setEditSelectedBranchIds] = useState<string[]>([]);
+  const [editDefaultBranchId, setEditDefaultBranchId] = useState<string>('');
+  const [editPassword, setEditPassword] = useState<string>('');
+  const [editShowPassword, setEditShowPassword] = useState<boolean>(false);
+  const [editIsActive, setEditIsActive] = useState<boolean>(true);
 
-  // Fetch all users and metadata
-  const fetchData = useCallback(async () => {
+  // Auto-dismiss success feedback
+  useEffect(() => {
+    if (feedback?.type === 'success') {
+      const timer = setTimeout(() => setFeedback(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [feedback]);
+
+  // Load all initial dependencies
+  const loadData = useCallback(async () => {
     if (!isAuthorizedAdmin) {
       setLoading(false);
       return;
@@ -122,297 +115,348 @@ export const UserManagementWorkspace: React.FC = () => {
 
     try {
       setLoading(true);
-      const [usersData, rolesData, branchesData, summaryData] = await Promise.all([
-        usersApi.getUsers(),
-        usersApi.getRoles().catch(() => []),
-        organizationApi.getBranches().catch(() => []),
-        usersApi.getSummary().catch(() => null),
+      const [fetchedUsers, fetchedRoles, fetchedBranches, fetchedSummary] = await Promise.allSettled([
+        userApi.getUsers(),
+        userApi.getRoles(),
+        organizationApi.getBranches(),
+        userApi.getSummary(),
       ]);
 
-      setUsers(usersData);
-      setRoles(rolesData);
-      setAvailableBranches(branchesData);
-      if (summaryData) {
-        setSummary(summaryData);
+      if (fetchedUsers.status === 'fulfilled') {
+        setUsers(fetchedUsers.value || []);
+      }
+      if (fetchedRoles.status === 'fulfilled') {
+        setRoles(fetchedRoles.value || []);
+        if (fetchedRoles.value?.length > 0 && !createRoleId) {
+          const defaultRole = fetchedRoles.value.find((r) => r.name === 'OUTLET_MANAGER') || fetchedRoles.value[0];
+          setCreateRoleId(defaultRole.id);
+        }
+      }
+      if (fetchedBranches.status === 'fulfilled') {
+        setAvailableBranches(fetchedBranches.value || []);
+      }
+      if (fetchedSummary.status === 'fulfilled') {
+        setSummary(fetchedSummary.value);
       }
     } catch (err: any) {
-      console.error('[UserManagement] Failed to load data:', err);
-      setNotification({
+      console.error('Failed to load user management data:', err);
+      setFeedback({
         type: 'error',
-        message: err?.response?.data?.detail || 'Failed to load user management records from server.',
+        message: err?.response?.data?.detail || 'Failed to initialize user management data.',
       });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [isAuthorizedAdmin]);
+  }, [isAuthorizedAdmin, createRoleId]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    loadData();
+  }, [loadData]);
 
-  // Clear notification timer
-  useEffect(() => {
-    if (notification) {
-      const timer = setTimeout(() => setNotification(null), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [notification]);
-
-  const handleRefresh = () => {
+  const handleManualRefresh = () => {
     setRefreshing(true);
-    fetchData();
+    loadData();
   };
 
-  // Filtered Users computation
+  // Filtered Users List
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
-      // Search term
+      // Search Query
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchesName = `${u.first_name || ''} ${u.last_name || ''}`.toLowerCase().includes(q);
-        const matchesEmail = u.email.toLowerCase().includes(q);
-        const matchesUsername = u.username ? u.username.toLowerCase().includes(q) : false;
-        const matchesPhone = u.phone ? u.phone.includes(q) : false;
-        if (!matchesName && !matchesEmail && !matchesUsername && !matchesPhone) {
+        const query = searchQuery.toLowerCase();
+        const fullName = `${u.first_name || ''} ${u.last_name || ''}`.toLowerCase();
+        const email = (u.email || '').toLowerCase();
+        const username = (u.username || '').toLowerCase();
+        const phone = (u.phone || '').toLowerCase();
+        if (
+          !fullName.includes(query) &&
+          !email.includes(query) &&
+          !username.includes(query) &&
+          !phone.includes(query)
+        ) {
           return false;
         }
       }
 
       // Role Filter
-      if (roleFilter !== 'ALL' && u.role_id !== roleFilter) {
+      if (selectedRoleFilter !== 'ALL' && u.role_id !== selectedRoleFilter && u.role_name !== selectedRoleFilter) {
         return false;
       }
 
-      // Branch Filter
-      if (branchFilter !== 'ALL') {
-        const hasBranch = u.branches.some((b) => b.branch_id === branchFilter);
+      // Outlet/Branch Filter
+      if (selectedBranchFilter !== 'ALL') {
+        const hasBranch = (u.branches || []).some((b) => b.branch_id === selectedBranchFilter);
         if (!hasBranch) return false;
       }
 
       // Status Filter
-      if (statusFilter === 'ACTIVE' && !u.is_active) return false;
-      if (statusFilter === 'INACTIVE' && u.is_active) return false;
+      if (selectedStatusFilter === 'ACTIVE' && !u.is_active) return false;
+      if (selectedStatusFilter === 'INACTIVE' && u.is_active) return false;
 
       return true;
     });
-  }, [users, searchQuery, roleFilter, branchFilter, statusFilter]);
+  }, [users, searchQuery, selectedRoleFilter, selectedBranchFilter, selectedStatusFilter]);
 
-  // Open Create Modal
+  // Open Create User Modal
   const openCreateModal = () => {
-    const defaultRoleId = roles.find((r) => r.name === 'STAFF')?.id || roles[0]?.id || '';
-    const allBranchIds = availableBranches.map((b) => b.id);
-    const firstBranchId = allBranchIds[0] || '';
+    setCreateEmail('');
+    setCreateFirstName('');
+    setCreateLastName('');
+    setCreateUsername('');
+    setCreatePhone('');
+    setCreatePassword('');
+    setCreateShowPassword(false);
+    setCreateIsActive(true);
 
-    setCreateForm({
-      email: '',
-      first_name: '',
-      last_name: '',
-      phone: '',
-      role_id: defaultRoleId,
-      branch_ids: allBranchIds.length > 0 ? [firstBranchId] : [],
-      default_branch_id: firstBranchId,
-      password: '',
-      is_active: true,
-    });
-    setShowPassword(false);
-    setShowCreateModal(true);
+    if (roles.length > 0) {
+      const defaultRole = roles.find((r) => r.name === 'OUTLET_MANAGER') || roles[0];
+      setCreateRoleId(defaultRole.id);
+    }
+
+    if (availableBranches.length > 0) {
+      setCreateSelectedBranchIds([availableBranches[0].id]);
+      setCreateDefaultBranchId(availableBranches[0].id);
+    } else {
+      setCreateSelectedBranchIds([]);
+      setCreateDefaultBranchId('');
+    }
+
+    setCreateModalOpen(true);
   };
 
-  // Handle User Creation Submit
+  // Open Edit User Modal
+  const openEditModal = (targetUser: ManagedUser) => {
+    setEditingUser(targetUser);
+    setEditFirstName(targetUser.first_name || '');
+    setEditLastName(targetUser.last_name || '');
+    setEditPhone(targetUser.phone || '');
+    setEditRoleId(targetUser.role_id || '');
+    setEditIsActive(targetUser.is_active);
+    setEditPassword('');
+    setEditShowPassword(false);
+
+    const userBranchIds = (targetUser.branches || []).map((b) => b.branch_id);
+    const defBranch = (targetUser.branches || []).find((b) => b.is_default);
+    setEditSelectedBranchIds(userBranchIds);
+    setEditDefaultBranchId(defBranch ? defBranch.branch_id : userBranchIds[0] || '');
+
+    setEditModalOpen(true);
+  };
+
+  // Submit Create User
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createForm.email.trim() || !createForm.first_name.trim() || !createForm.role_id) {
-      setNotification({
-        type: 'error',
-        message: 'Please fill in all required fields (Email, First Name, and Role).',
-      });
+    if (!createEmail.trim()) {
+      setFeedback({ type: 'error', message: 'Email address is required.' });
+      return;
+    }
+    if (!createFirstName.trim()) {
+      setFeedback({ type: 'error', message: 'First name is required.' });
+      return;
+    }
+    if (!createRoleId) {
+      setFeedback({ type: 'error', message: 'Please select a system role.' });
       return;
     }
 
+    setSubmitting(true);
     try {
-      setSubmitting(true);
       const payload: UserCreatePayload = {
-        email: createForm.email.trim().toLowerCase(),
-        first_name: createForm.first_name.trim(),
-        last_name: createForm.last_name?.trim() || undefined,
-        phone: createForm.phone?.trim() || undefined,
-        role_id: createForm.role_id,
-        branch_ids: createForm.branch_ids,
-        default_branch_id: createForm.default_branch_id || undefined,
-        password: createForm.password?.trim() || undefined,
-        is_active: createForm.is_active,
+        email: createEmail.trim().toLowerCase(),
+        first_name: createFirstName.trim(),
+        last_name: createLastName.trim() || undefined,
+        username: createUsername.trim() || createEmail.trim().split('@')[0],
+        phone: createPhone.trim() || undefined,
+        role_id: createRoleId,
+        branch_ids: createSelectedBranchIds,
+        default_branch_id: createDefaultBranchId || createSelectedBranchIds[0] || undefined,
+        password: createPassword.trim() || undefined,
+        is_active: createIsActive,
       };
 
-      const newUser = await usersApi.createUser(payload);
-      setNotification({
+      const newUser = await userApi.createUser(payload);
+      setFeedback({
         type: 'success',
-        message: `User account '${newUser.email}' registered successfully with role '${newUser.role_name}'.`,
+        message: `User ${newUser.email} created successfully with role ${newUser.role_name}. Google OAuth login is active.`,
       });
-      setShowCreateModal(false);
-      fetchData();
+      setCreateModalOpen(false);
+      loadData();
     } catch (err: any) {
-      console.error('[UserManagement] Create Error:', err);
-      const detail = err?.response?.data?.detail || err?.response?.data?.message || 'Failed to create user.';
-      setNotification({ type: 'error', message: detail });
+      console.error('Failed to create user:', err);
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.detail || err?.message || 'Failed to create user account.',
+      });
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Open Edit Modal
-  const openEditModal = (user: ManagedUser) => {
-    setEditingUser(user);
-    setEditForm({
-      first_name: user.first_name || '',
-      last_name: user.last_name || '',
-      phone: user.phone || '',
-      role_id: user.role_id,
-      branch_ids: user.branches.map((b) => b.branch_id),
-      default_branch_id: user.branches.find((b) => b.is_default)?.branch_id || user.branches[0]?.branch_id || '',
-      is_active: user.is_active,
-      password: '',
-    });
-    setShowPassword(false);
-  };
-
-  // Handle Edit Submit
+  // Submit Edit User
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
-
-    if (!editForm.first_name.trim() || !editForm.role_id) {
-      setNotification({
-        type: 'error',
-        message: 'First name and role assignment are required.',
-      });
+    if (!editFirstName.trim()) {
+      setFeedback({ type: 'error', message: 'First name cannot be empty.' });
       return;
     }
 
+    setSubmitting(true);
     try {
-      setSubmitting(true);
       const payload: UserUpdatePayload = {
-        first_name: editForm.first_name.trim(),
-        last_name: editForm.last_name.trim() || undefined,
-        phone: editForm.phone.trim() || undefined,
-        role_id: editForm.role_id,
-        branch_ids: editForm.branch_ids,
-        default_branch_id: editForm.default_branch_id || undefined,
-        is_active: editForm.is_active,
-        password: editForm.password.trim() || undefined,
+        first_name: editFirstName.trim(),
+        last_name: editLastName.trim() || undefined,
+        phone: editPhone.trim() || undefined,
+        role_id: editRoleId || undefined,
+        branch_ids: editSelectedBranchIds,
+        default_branch_id: editDefaultBranchId || editSelectedBranchIds[0] || undefined,
+        is_active: editIsActive,
+        password: editPassword.trim() || undefined,
       };
 
-      const updated = await usersApi.updateUser(editingUser.id, payload);
-      setNotification({
+      await userApi.updateUser(editingUser.id, payload);
+      setFeedback({
         type: 'success',
-        message: `Account '${updated.email}' updated successfully.`,
+        message: `User ${editingUser.email} profile and permissions updated.`,
       });
+      setEditModalOpen(false);
       setEditingUser(null);
-      fetchData();
+      loadData();
     } catch (err: any) {
-      console.error('[UserManagement] Update Error:', err);
-      const detail = err?.response?.data?.detail || 'Failed to update user.';
-      setNotification({ type: 'error', message: detail });
+      console.error('Failed to update user:', err);
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.detail || err?.message || 'Failed to update user account.',
+      });
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Handle Deactivate Confirm
-  const handleDeactivateConfirm = async () => {
+  // Soft-Delete / Deactivate User
+  const handleConfirmDeactivate = async () => {
     if (!deactivatingUser) return;
-
+    setSubmitting(true);
     try {
-      setSubmitting(true);
-      await usersApi.deactivateUser(deactivatingUser.id);
-      setNotification({
+      await userApi.deactivateUser(deactivatingUser.id);
+      setFeedback({
         type: 'success',
-        message: `User account '${deactivatingUser.email}' has been deactivated (soft-deleted). All audit logs remain intact.`,
+        message: `User ${deactivatingUser.email} deactivated. Account is disabled while all audit logs and historical transactions remain intact.`,
       });
       setDeactivatingUser(null);
-      fetchData();
+      loadData();
     } catch (err: any) {
-      console.error('[UserManagement] Deactivate Error:', err);
-      const detail = err?.response?.data?.detail || 'Failed to deactivate user.';
-      setNotification({ type: 'error', message: detail });
+      console.error('Failed to deactivate user:', err);
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.detail || err?.message || 'Failed to deactivate user.',
+      });
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Handle Quick Reactivate
-  const handleReactivate = async (user: ManagedUser) => {
+  // One-click Reactivate
+  const handleReactivateUser = async (targetUser: ManagedUser) => {
     try {
-      setLoading(true);
-      await usersApi.updateUserStatus(user.id, true);
-      setNotification({
+      await userApi.toggleUserStatus(targetUser.id, true);
+      setFeedback({
         type: 'success',
-        message: `User account '${user.email}' reactivated successfully.`,
+        message: `User ${targetUser.email} has been reactivated successfully.`,
       });
-      fetchData();
+      loadData();
     } catch (err: any) {
-      console.error('[UserManagement] Reactivate Error:', err);
-      const detail = err?.response?.data?.detail || 'Failed to reactivate user.';
-      setNotification({ type: 'error', message: detail });
-    } finally {
-      setLoading(false);
+      console.error('Failed to reactivate user:', err);
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.detail || err?.message || 'Failed to reactivate user.',
+      });
     }
   };
 
-  // Helper for Role Badges
-  const renderRoleBadge = (roleName: string) => {
-    const r = roleName.toUpperCase();
-    if (r.includes('SUPER_ADMIN') || r.includes('SUPERADMIN') || r.includes('OWNER')) {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gradient-to-r from-[#d4a437]/25 to-amber-500/25 text-[#d4a437] border border-[#d4a437]/50 shadow-xs">
-          <Sparkles className="w-3 h-3 text-[#d4a437]" />
-          SUPER ADMIN
-        </span>
-      );
+  // Branch Selection Helpers
+  const toggleBranchSelection = (
+    branchId: string,
+    currentSelected: string[],
+    setSelected: (arr: string[]) => void,
+    defaultBranch: string,
+    setDefaultBranch: (id: string) => void
+  ) => {
+    if (currentSelected.includes(branchId)) {
+      const next = currentSelected.filter((id) => id !== branchId);
+      setSelected(next);
+      if (defaultBranch === branchId) {
+        setDefaultBranch(next[0] || '');
+      }
+    } else {
+      const next = [...currentSelected, branchId];
+      setSelected(next);
+      if (!defaultBranch) {
+        setDefaultBranch(branchId);
+      }
     }
-    if (r.includes('ADMIN') || r.includes('HQ')) {
+  };
+
+  const selectAllBranches = (
+    setSelected: (arr: string[]) => void,
+    setDefaultBranch: (id: string) => void
+  ) => {
+    const allIds = availableBranches.map((b) => b.id);
+    setSelected(allIds);
+    if (allIds.length > 0) {
+      setDefaultBranch(allIds[0]);
+    }
+  };
+
+  // Role Badge Formatter
+  const renderRoleBadge = (roleName: string) => {
+    const norm = roleName.toUpperCase();
+    if (norm.includes('SUPER') || norm.includes('OWNER')) {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30">
-          <ShieldCheck className="w-3 h-3 text-blue-400" />
+        <span className="font-bold px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30">
+          <Sparkles className="w-2.5 h-2.5" />
           {roleName}
         </span>
       );
     }
-    if (r.includes('MANAGER')) {
+    if (norm.includes('ADMIN') || norm.includes('HQ')) {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/15 text-purple-400 border border-purple-500/30">
-          <Building2 className="w-3 h-3 text-purple-400" />
+        <span className="font-bold px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 bg-blue-100 text-blue-700 border border-blue-200">
+          <ShieldCheck className="w-2.5 h-2.5" />
+          {roleName}
+        </span>
+      );
+    }
+    if (norm.includes('MANAGER')) {
+      return (
+        <span className="font-bold px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 bg-purple-100 text-purple-700 border border-purple-200">
+          <Building2 className="w-2.5 h-2.5" />
           {roleName}
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-300 border border-zinc-700">
-        <Users className="w-3 h-3 text-zinc-400" />
+      <span className="font-semibold px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 bg-gray-100 text-gray-700 border border-gray-200">
+        <Users className="w-2.5 h-2.5" />
         {roleName}
       </span>
     );
   };
 
-  // If user is not authorized, render access denied guard
+  // Unauthorized Access Guard
   if (!isAuthorizedAdmin) {
     return (
-      <div className="min-h-[70vh] flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-[#17171b] border border-rose-500/30 rounded-3xl p-8 text-center space-y-4 shadow-2xl">
-          <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto">
-            <Lock className="w-8 h-8" />
+      <div className="min-h-[60vh] flex items-center justify-center p-4">
+        <div className="bg-white border border-red-200 rounded-3xl p-8 max-w-md w-full text-center space-y-4 shadow-xl">
+          <div className="w-14 h-14 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center mx-auto text-red-600">
+            <Lock className="w-7 h-7" />
           </div>
           <div className="space-y-1">
-            <h2 className="text-xl font-bold text-white font-['Outfit']">Administrative Access Required</h2>
-            <p className="text-xs text-zinc-400">
-              Only Super Administrators and Head Office Admins are authorized to view or manage user accounts and RBAC permissions.
+            <h2 className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">Access Restricted</h2>
+            <p className="text-xs text-[#707070] leading-relaxed">
+              You must have <strong className="text-[#1C1C1C]">SUPER_ADMIN</strong> or <strong className="text-[#1C1C1C]">HQ_ADMIN</strong> privileges to manage user accounts and system roles.
             </p>
-          </div>
-          <div className="p-3 bg-[#1f1f24] rounded-xl text-[11px] text-zinc-400 font-mono text-left border border-[#26262e]">
-            <p className="text-zinc-300 font-bold mb-1">Your Current Session:</p>
-            <p>Account: {currentUser?.email || 'Unknown'}</p>
-            <p>Role: {currentUserRole || 'RESTRICTED_STAFF'}</p>
-            <p className="text-rose-400 mt-1">Status: Insufficient Privileges</p>
           </div>
         </div>
       </div>
@@ -420,254 +464,286 @@ export const UserManagementWorkspace: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#0c0c0e] text-[#f3f4f6] p-3 sm:p-5 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Top Banner / Feedback Alert */}
-      {notification && (
+    <div className="space-y-4 sm:space-y-6 w-full min-w-0">
+      {/* ========================================================================= */}
+      {/* 1. TOP WORKSPACE HEADER                                                   */}
+      {/* ========================================================================= */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 sm:p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
+              <Users className="w-5 h-5 text-[#C79A3B]" />
+              User & Admin Management
+            </h1>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
+              RBAC Scope
+            </span>
+          </div>
+          <p className="text-xs text-[#707070] mt-0.5">
+            Provision staff profiles, assign multi-outlet operational scopes, manage roles, and configure Google OAuth SSO access.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleManualRefresh}
+            disabled={loading || refreshing}
+            className="p-2.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] hover:bg-[#FAF8F5] text-[#707070] hover:text-[#1C1C1C] transition-all shadow-xs active:scale-[0.98] disabled:opacity-50"
+            title="Refresh Users"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-[#B8862D]' : ''}`} />
+          </button>
+
+          <button
+            onClick={openCreateModal}
+            className="px-4 py-2 rounded-xl bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-2 active:scale-[0.98]"
+          >
+            <UserPlus className="w-4 h-4 text-[#C79A3B]" />
+            <span>Add New User</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 2. FEEDBACK ALERT BANNER                                                  */}
+      {/* ========================================================================= */}
+      {feedback && (
         <div
-          className={`p-4 rounded-2xl flex items-center justify-between gap-3 text-xs font-semibold animate-in slide-in-from-top duration-200 shadow-lg ${
-            notification.type === 'success'
-              ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-              : notification.type === 'error'
-              ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
-              : 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+          className={`p-4 rounded-xl flex items-center justify-between gap-3 text-xs font-semibold shadow-xs ${
+            feedback.type === 'success'
+              ? 'bg-[#2E8B57]/10 text-[#2E8B57] border border-[#2E8B57]/20'
+              : 'bg-red-500/10 text-red-600 border border-red-500/20'
           }`}
         >
           <div className="flex items-center gap-2.5">
-            {notification.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-[#2E8B57]" />
             ) : (
-              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
             )}
-            <span>{notification.message}</span>
+            <span>{feedback.message}</span>
           </div>
           <button
-            onClick={() => setNotification(null)}
-            className="p-1 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white"
+            onClick={() => setFeedback(null)}
+            className="p-1 rounded-md hover:bg-black/5 text-[#707070] transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* Header Section */}
-      <div className="bg-[#17171b] border border-[#26262e] rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
-        {/* Subtle decorative gold glow */}
-        <div className="absolute top-0 right-0 w-80 h-80 bg-gradient-to-bl from-[#d4a437]/10 to-transparent pointer-events-none rounded-full blur-3xl" />
-
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#d4a437]/15 text-[#d4a437] border border-[#d4a437]/30 flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3" />
-                RBAC Security Engine
-              </span>
-              <span className="text-[11px] font-medium text-zinc-400 flex items-center gap-1">
-                <Globe className="w-3 h-3 text-zinc-500" />
-                Multi-Tenant Governance
-              </span>
+      {/* ========================================================================= */}
+      {/* 3. KPI SUMMARY STRIP (4 Stat Cards)                                       */}
+      {/* ========================================================================= */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+        {/* Metric 1: Total Users */}
+        <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] p-4 sm:p-5 shadow-xs hover:border-[#C79A3B]/40 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#707070]">Total Personnel</span>
+            <div className="p-2 rounded-xl bg-[#FAF8F5] text-[#B8862D] border border-[rgba(45,45,45,0.08)]">
+              <Users className="w-4 h-4" />
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight font-['Outfit'] flex items-center gap-2.5">
-              Staff & User Management
-            </h1>
-            <p className="text-xs text-zinc-400 max-w-2xl">
-              Create, configure, and audit user access across all 14+ outlets with deterministic RBAC role gating and Google OAuth Single Sign-On.
-            </p>
           </div>
-
-          <div className="flex items-center gap-2.5 shrink-0">
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing || loading}
-              className="p-2.5 sm:px-3 sm:py-2 rounded-xl bg-[#1f1f24] hover:bg-[#282830] text-zinc-300 border border-[#26262e] text-xs font-semibold flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-              title="Refresh users list"
-            >
-              <RefreshCw className={`w-4 h-4 text-[#d4a437] ${refreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
-
-            <button
-              onClick={openCreateModal}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#d4a437] to-[#b8862d] text-black font-bold text-xs flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-[#d4a437]/20"
-            >
-              <UserPlus className="w-4 h-4 stroke-[2.5]" />
-              <span>Add New User</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* KPI Stats Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Total Users */}
-        <div className="bg-[#17171b] border border-[#26262e] rounded-2xl p-4 sm:p-5 space-y-2 hover:border-[#d4a437]/40 transition-all shadow-md">
-          <div className="flex items-center justify-between text-zinc-400 text-xs">
-            <span className="font-medium">Total Registered</span>
-            <Users className="w-4 h-4 text-[#d4a437]" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-bold text-white font-['Outfit']">
+          <div className="text-2xl sm:text-3xl font-bold text-[#1C1C1C] font-['Outfit']">
             {summary?.total_users ?? users.length}
           </div>
-          <p className="text-[11px] text-zinc-400">All user accounts</p>
+          <div className="text-xs text-[#707070] mt-1">Company-wide registered accounts</div>
         </div>
 
-        {/* Active Accounts */}
-        <div className="bg-[#17171b] border border-[#26262e] rounded-2xl p-4 sm:p-5 space-y-2 hover:border-emerald-500/40 transition-all shadow-md">
-          <div className="flex items-center justify-between text-zinc-400 text-xs">
-            <span className="font-medium">Active Accounts</span>
-            <UserCheck className="w-4 h-4 text-emerald-400" />
+        {/* Metric 2: Active Accounts */}
+        <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] p-4 sm:p-5 shadow-xs hover:border-[#C79A3B]/40 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#707070]">Active Logins</span>
+            <div className="p-2 rounded-xl bg-[#2E8B57]/10 text-[#2E8B57] border border-[#2E8B57]/20">
+              <UserCheck className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-bold text-emerald-400 font-['Outfit']">
+          <div className="text-2xl sm:text-3xl font-bold text-[#1C1C1C] font-['Outfit']">
             {summary?.active_users ?? users.filter((u) => u.is_active).length}
           </div>
-          <p className="text-[11px] text-emerald-500/80 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Fully operational
-          </p>
+          <div className="text-xs text-[#2E8B57] font-medium mt-1">Operational SSO Access</div>
         </div>
 
-        {/* Inactive Accounts */}
-        <div className="bg-[#17171b] border border-[#26262e] rounded-2xl p-4 sm:p-5 space-y-2 hover:border-rose-500/40 transition-all shadow-md">
-          <div className="flex items-center justify-between text-zinc-400 text-xs">
-            <span className="font-medium">Inactive / Suspended</span>
-            <UserX className="w-4 h-4 text-rose-400" />
+        {/* Metric 3: Administrators */}
+        <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] p-4 sm:p-5 shadow-xs hover:border-[#C79A3B]/40 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#707070]">Super / HQ Admin</span>
+            <div className="p-2 rounded-xl bg-[#F1E4C5]/60 text-[#B8862D] border border-[#B8862D]/20">
+              <ShieldCheck className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-bold text-rose-400 font-['Outfit']">
-            {summary?.inactive_users ?? users.filter((u) => !u.is_active).length}
+          <div className="text-2xl sm:text-3xl font-bold text-[#1C1C1C] font-['Outfit']">
+            {(summary?.super_admins || 0) + (summary?.admins || 0)}
           </div>
-          <p className="text-[11px] text-zinc-400">Soft-deleted / disabled</p>
+          <div className="text-xs text-[#707070] mt-1">Executive Governance</div>
         </div>
 
-        {/* Super Admins & Managers */}
-        <div className="bg-[#17171b] border border-[#26262e] rounded-2xl p-4 sm:p-5 space-y-2 hover:border-purple-500/40 transition-all shadow-md">
-          <div className="flex items-center justify-between text-zinc-400 text-xs">
-            <span className="font-medium">Admin & Managers</span>
-            <ShieldCheck className="w-4 h-4 text-purple-400" />
+        {/* Metric 4: Outlet Managers & Staff */}
+        <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] p-4 sm:p-5 shadow-xs hover:border-[#C79A3B]/40 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#707070]">Managers & Staff</span>
+            <div className="p-2 rounded-xl bg-purple-50 text-purple-700 border border-purple-100">
+              <Building2 className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-bold text-purple-400 font-['Outfit']">
-            {(summary?.super_admins || 0) + (summary?.admins || 0) + (summary?.managers || 0) ||
-              users.filter((u) => u.role_name.includes('ADMIN') || u.role_name.includes('MANAGER')).length}
+          <div className="text-2xl sm:text-3xl font-bold text-[#1C1C1C] font-['Outfit']">
+            {(summary?.managers || 0) + (summary?.staff || 0)}
           </div>
-          <p className="text-[11px] text-zinc-400">
-            {summary?.super_admins || users.filter((u) => u.role_name.includes('SUPER_ADMIN')).length} Super Admins
-          </p>
+          <div className="text-xs text-[#707070] mt-1">Outlet Scoped Personnel</div>
         </div>
       </div>
 
-      {/* Search & Filter Toolbar */}
-      <div className="bg-[#17171b] border border-[#26262e] rounded-2xl p-3 sm:p-4 space-y-3 shadow-md">
-        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-          {/* Search Box */}
-          <div className="sm:col-span-5 relative">
-            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+      {/* ========================================================================= */}
+      {/* 4. SEARCH & FILTER TOOLBAR                                                */}
+      {/* ========================================================================= */}
+      <div className="bg-white border border-[rgba(45,45,45,0.08)] rounded-2xl p-4 sm:p-5 space-y-3 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Search Input */}
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-[#707070] absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, email, @username, or phone..."
-              className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#d4a437] focus:ring-1 focus:ring-[#d4a437]/30 transition-all"
+              placeholder="Search users by name, email, @username, or phone..."
+              className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium placeholder:text-[#707070]/60 focus:outline-none focus:border-[#C79A3B] focus:ring-1 focus:ring-[#C79A3B]/30 transition-all"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#707070] hover:text-[#1C1C1C]"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          {/* Role Filter */}
-          <div className="sm:col-span-3">
-            <select
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-[#d4a437] transition-all"
-            >
-              <option value="ALL">All Roles ({roles.length})</option>
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Filters Row */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Role Filter */}
+            <div className="flex items-center gap-1.5 min-w-[150px]">
+              <select
+                value={selectedRoleFilter}
+                onChange={(e) => setSelectedRoleFilter(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] transition-all"
+              >
+                <option value="ALL">All Roles</option>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* Branch Filter */}
-          <div className="sm:col-span-4">
-            <select
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-              className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-[#d4a437] transition-all"
-            >
-              <option value="ALL">All Assigned Outlets ({availableBranches.length})</option>
-              {availableBranches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  [{b.code}] {b.name}
-                </option>
-              ))}
-            </select>
+            {/* Outlet Filter */}
+            <div className="flex items-center gap-1.5 min-w-[160px]">
+              <select
+                value={selectedBranchFilter}
+                onChange={(e) => setSelectedBranchFilter(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] transition-all"
+              >
+                <option value="ALL">All Outlets Scope</option>
+                {availableBranches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    [{b.code}] {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Status Filter Chips */}
+            <div className="flex items-center gap-1 p-1 bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] rounded-xl">
+              <button
+                onClick={() => setSelectedStatusFilter('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  selectedStatusFilter === 'ALL'
+                    ? 'bg-white text-[#1C1C1C] shadow-xs'
+                    : 'text-[#707070] hover:text-[#1C1C1C]'
+                }`}
+              >
+                All ({users.length})
+              </button>
+              <button
+                onClick={() => setSelectedStatusFilter('ACTIVE')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  selectedStatusFilter === 'ACTIVE'
+                    ? 'bg-[#2E8B57]/15 text-[#2E8B57] shadow-xs'
+                    : 'text-[#707070] hover:text-[#1C1C1C]'
+                }`}
+              >
+                Active
+              </button>
+              <button
+                onClick={() => setSelectedStatusFilter('INACTIVE')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  selectedStatusFilter === 'INACTIVE'
+                    ? 'bg-red-100 text-red-700 shadow-xs'
+                    : 'text-[#707070] hover:text-[#1C1C1C]'
+                }`}
+              >
+                Inactive
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Status Filter Chips & Result Count */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#26262e]/60 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-zinc-500 text-[11px] font-semibold mr-1 flex items-center gap-1">
-              <Filter className="w-3 h-3" /> Status:
-            </span>
-            {(['ALL', 'ACTIVE', 'INACTIVE'] as const).map((st) => (
-              <button
-                key={st}
-                onClick={() => setStatusFilter(st)}
-                className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                  statusFilter === st
-                    ? 'bg-[#d4a437] text-black shadow-xs'
-                    : 'bg-[#1f1f24] text-zinc-400 hover:text-zinc-200 border border-[#26262e]'
-                }`}
-              >
-                {st === 'ALL' ? 'All' : st === 'ACTIVE' ? 'Active Only' : 'Inactive Only'}
-              </button>
-            ))}
-          </div>
-
-          <div className="text-zinc-400 text-[11px]">
-            Showing <span className="text-white font-bold">{filteredUsers.length}</span> of {users.length} accounts
-          </div>
+        {/* Filter Summary Results Note */}
+        <div className="flex items-center justify-between text-xs text-[#707070] pt-1">
+          <span>
+            Showing <strong className="text-[#1C1C1C]">{filteredUsers.length}</strong> of {users.length} users
+          </span>
+          {(searchQuery || selectedRoleFilter !== 'ALL' || selectedBranchFilter !== 'ALL' || selectedStatusFilter !== 'ALL') && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedRoleFilter('ALL');
+                setSelectedBranchFilter('ALL');
+                setSelectedStatusFilter('ALL');
+              }}
+              className="text-[#B8862D] hover:underline font-bold"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main Content Area: User Cards Grid & Responsive Table */}
+      {/* ========================================================================= */}
+      {/* 5. USER CARDS LIST / TABLE VIEW                                           */}
+      {/* ========================================================================= */}
       {loading ? (
         <div className="space-y-3">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="bg-[#17171b] border border-[#26262e] rounded-2xl p-5 animate-pulse space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[#26262e]" />
-                <div className="space-y-1.5 flex-1">
-                  <div className="h-4 w-48 bg-[#26262e] rounded" />
-                  <div className="h-3 w-32 bg-[#26262e] rounded" />
+          {[...Array(4)].map((_, i) => (
+            <div
+              key={i}
+              className="h-28 bg-white border border-[rgba(45,45,45,0.08)] rounded-2xl p-5 animate-pulse flex items-center justify-between shadow-xs"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-[#FAF8F5]" />
+                <div className="space-y-2">
+                  <div className="h-4 w-40 bg-[#FAF8F5] rounded" />
+                  <div className="h-3 w-60 bg-[#FAF8F5] rounded" />
                 </div>
               </div>
+              <div className="h-8 w-24 bg-[#FAF8F5] rounded-xl" />
             </div>
           ))}
         </div>
       ) : filteredUsers.length === 0 ? (
-        <div className="bg-[#17171b] border border-[#26262e] rounded-3xl p-12 text-center space-y-4">
-          <div className="w-14 h-14 rounded-full bg-[#1f1f24] border border-[#26262e] text-zinc-500 flex items-center justify-center mx-auto">
-            <Users className="w-7 h-7" />
+        <div className="p-12 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] space-y-3 shadow-xs">
+          <div className="w-12 h-12 rounded-2xl bg-[#FAF8F5] text-[#C79A3B] flex items-center justify-center mx-auto border border-[rgba(45,45,45,0.06)]">
+            <Users className="w-6 h-6" />
           </div>
-          <div className="space-y-1 max-w-sm mx-auto">
-            <h3 className="text-base font-bold text-white">No Users Found</h3>
-            <p className="text-xs text-zinc-400">
-              No user accounts match the current filter or search criteria. Try modifying your search or add a new user.
-            </p>
-          </div>
+          <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">No Personnel Found</h4>
+          <p className="text-xs text-[#707070] max-w-sm mx-auto">
+            There are no users matching your active filters. Clear search or click "+ Add New User" to register personnel.
+          </p>
           <button
             onClick={openCreateModal}
-            className="px-4 py-2 rounded-xl bg-[#d4a437] text-black font-bold text-xs inline-flex items-center gap-2 hover:brightness-110 transition-all"
+            className="px-4 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] transition-all shadow-xs"
           >
-            <UserPlus className="w-4 h-4" />
-            <span>Add User</span>
+            Add New User
           </button>
         </div>
       ) : (
@@ -679,56 +755,56 @@ export const UserManagementWorkspace: React.FC = () => {
             return (
               <div
                 key={user.id}
-                className={`bg-[#17171b] border rounded-2xl p-4 sm:p-5 transition-all shadow-md hover:border-[#d4a437]/30 ${
-                  !user.is_active ? 'opacity-65 border-rose-500/20 bg-[#141417]' : 'border-[#26262e]'
+                className={`bg-white border rounded-2xl p-4 sm:p-5 transition-all shadow-xs hover:border-[#C79A3B]/40 hover:shadow-md ${
+                  !user.is_active ? 'opacity-70 bg-[#FAF8F5]/80 border-red-200' : 'border-[rgba(45,45,45,0.08)]'
                 }`}
               >
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   {/* Left Side: Avatar + Details */}
                   <div className="flex items-start sm:items-center gap-3.5 min-w-0">
                     {/* User Avatar */}
-                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#1f1f24] to-[#282830] border border-[#d4a437]/40 flex items-center justify-center font-bold text-base text-[#d4a437] shadow-inner shrink-0">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#FAF8F5] to-[#F1E4C5]/40 border border-[#B8862D]/30 flex items-center justify-center font-bold text-base text-[#B8862D] shadow-xs shrink-0">
                       {userInitial}
                     </div>
 
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm text-white truncate font-['Outfit']">
+                        <span className="font-bold text-sm text-[#1C1C1C] truncate font-['Outfit']">
                           {user.first_name} {user.last_name || ''}
                         </span>
                         {isSelf && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-[#d4a437] border border-[#d4a437]/30">
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30">
                             YOU
                           </span>
                         )}
                         {renderRoleBadge(user.role_name)}
                         {user.is_active ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#2E8B57] px-2 py-0.5 rounded-full bg-[#2E8B57]/15 border border-[#2E8B57]/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#2E8B57]" />
                             Active
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-400 px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 px-2 py-0.5 rounded-full bg-red-100 border border-red-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
                             Inactive (Disabled)
                           </span>
                         )}
                       </div>
 
                       {/* Contact & Meta */}
-                      <div className="flex items-center gap-3 sm:gap-4 text-xs text-zinc-400 flex-wrap">
-                        <span className="flex items-center gap-1.5 text-zinc-300">
-                          <Mail className="w-3.5 h-3.5 text-zinc-500" />
+                      <div className="flex items-center gap-3 sm:gap-4 text-xs text-[#707070] flex-wrap">
+                        <span className="flex items-center gap-1.5 text-[#1C1C1C]">
+                          <Mail className="w-3.5 h-3.5 text-[#707070]" />
                           {user.email}
                         </span>
                         {user.phone && (
                           <span className="flex items-center gap-1.5">
-                            <Phone className="w-3.5 h-3.5 text-zinc-500" />
+                            <Phone className="w-3.5 h-3.5 text-[#707070]" />
                             {user.phone}
                           </span>
                         )}
                         {user.username && user.username !== user.email && (
-                          <span className="font-mono text-[11px] text-zinc-500">@{user.username}</span>
+                          <span className="font-mono text-[11px] text-[#707070]">@{user.username}</span>
                         )}
                       </div>
                     </div>
@@ -736,9 +812,9 @@ export const UserManagementWorkspace: React.FC = () => {
 
                   {/* Middle / Right: Assigned Branches Scopes */}
                   <div className="flex-1 lg:max-w-md space-y-1.5 lg:px-4">
-                    <div className="flex items-center justify-between text-[11px] text-zinc-500 font-semibold">
+                    <div className="flex items-center justify-between text-[11px] text-[#707070] font-semibold">
                       <span>Assigned Outlet Scope</span>
-                      <span className="text-zinc-400">{user.branches?.length || 0} Outlets</span>
+                      <span className="text-[#1C1C1C] font-bold">{user.branches?.length || 0} Outlets</span>
                     </div>
 
                     <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto">
@@ -748,28 +824,28 @@ export const UserManagementWorkspace: React.FC = () => {
                             key={ub.id || ub.branch_id}
                             className={`text-[10px] font-mono px-2 py-0.5 rounded-md flex items-center gap-1 border ${
                               ub.is_default
-                                ? 'bg-[#d4a437]/15 text-[#d4a437] border-[#d4a437]/40 font-bold'
-                                : 'bg-[#1f1f24] text-zinc-300 border-[#26262e]'
+                                ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/40 font-bold'
+                                : 'bg-[#FAF8F5] text-[#707070] border-[rgba(45,45,45,0.08)]'
                             }`}
                           >
                             <Building2 className="w-2.5 h-2.5" />
                             [{ub.branch_code}] {ub.branch_name}
-                            {ub.is_default && <span className="text-[9px] text-[#d4a437]">★</span>}
+                            {ub.is_default && <span className="text-[9px] text-[#B8862D]">★</span>}
                           </span>
                         ))
                       ) : (
-                        <span className="text-[11px] text-zinc-500 italic">No outlet assigned (HQ Global Scope)</span>
+                        <span className="text-[11px] text-[#707070] italic">No outlet assigned (HQ Global Scope)</span>
                       )}
                     </div>
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex items-center gap-2 shrink-0 border-t lg:border-t-0 border-[#26262e]/60 pt-3 lg:pt-0">
+                  <div className="flex items-center gap-2 shrink-0 border-t lg:border-t-0 border-[rgba(45,45,45,0.06)] pt-3 lg:pt-0">
                     <button
                       onClick={() => openEditModal(user)}
-                      className="flex-1 sm:flex-initial px-3 py-1.5 rounded-xl bg-[#1f1f24] hover:bg-[#282830] text-zinc-200 border border-[#26262e] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                      className="flex-1 sm:flex-initial px-3 py-1.5 rounded-xl bg-white hover:bg-[#FAF8F5] text-[#1C1C1C] border border-[rgba(45,45,45,0.15)] text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs active:scale-[0.98]"
                     >
-                      <Edit2 className="w-3.5 h-3.5 text-[#d4a437]" />
+                      <Edit2 className="w-3.5 h-3.5 text-[#B8862D]" />
                       <span>Edit</span>
                     </button>
 
@@ -777,10 +853,10 @@ export const UserManagementWorkspace: React.FC = () => {
                       <button
                         onClick={() => setDeactivatingUser(user)}
                         disabled={isSelf}
-                        className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
                           isSelf
-                            ? 'bg-zinc-800/40 text-zinc-600 border border-zinc-800 cursor-not-allowed'
-                            : 'bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25 active:scale-95'
+                            ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                            : 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 active:scale-[0.98]'
                         }`}
                         title={isSelf ? 'You cannot deactivate your own account' : 'Deactivate user (soft-delete)'}
                       >
@@ -789,8 +865,8 @@ export const UserManagementWorkspace: React.FC = () => {
                       </button>
                     ) : (
                       <button
-                        onClick={() => handleReactivate(user)}
-                        className="flex-1 sm:flex-initial px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                        onClick={() => handleReactivateUser(user)}
+                        className="flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all bg-[#2E8B57]/15 text-[#2E8B57] border border-[#2E8B57]/30 hover:bg-[#2E8B57]/25 active:scale-[0.98]"
                       >
                         <UserCheck className="w-3.5 h-3.5" />
                         <span>Reactivate</span>
@@ -804,103 +880,64 @@ export const UserManagementWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* CREATE NEW USER MODAL */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="bg-[#17171b] border border-[#26262e] rounded-3xl w-full max-w-lg p-5 sm:p-6 space-y-4 shadow-2xl my-auto text-white max-h-[92vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-[#26262e] pb-3">
-              <div className="space-y-0.5">
-                <h3 className="text-base font-bold text-white font-['Outfit'] flex items-center gap-2">
-                  <UserPlus className="w-5 h-5 text-[#d4a437]" />
-                  Register New User Account
-                </h3>
-                <p className="text-xs text-zinc-400">Configure credentials, system role, and multi-outlet scope</p>
-              </div>
+      {/* ========================================================================= */}
+      {/* 6. CREATE USER MODAL                                                      */}
+      {/* ========================================================================= */}
+      {createModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-xl w-full space-y-4 shadow-2xl border border-[rgba(45,45,45,0.1)] max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
+              <h3 className="text-base font-bold text-[#1C1C1C] flex items-center gap-2 font-['Outfit']">
+                <UserPlus className="w-5 h-5 text-[#C79A3B]" />
+                Add New Staff / Admin User
+              </h3>
               <button
-                onClick={() => setShowCreateModal(false)}
-                className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-[#1f1f24] transition-colors"
+                onClick={() => setCreateModalOpen(false)}
+                className="p-1 rounded-lg text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Google OAuth Banner */}
-            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#d4a437]/15 to-amber-500/10 border border-[#d4a437]/30 text-xs space-y-1">
-              <div className="flex items-center gap-1.5 font-bold text-[#d4a437]">
-                <Sparkles className="w-4 h-4" />
-                Google OAuth Enabled (Instant SSO)
+            {/* Google OAuth Help Banner */}
+            <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] flex items-start gap-3 text-xs">
+              <Sparkles className="w-4 h-4 text-[#B8862D] shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-[#1C1C1C]">Google OAuth Single Sign-On Supported</p>
+                <p className="text-[#707070] leading-relaxed">
+                  Enter the staff member's Google account email. Once created, they can immediately log in via <strong className="text-[#1C1C1C]">"Sign in with Google"</strong> without needing a manual password.
+                </p>
               </div>
-              <p className="text-zinc-300 text-[11px] leading-relaxed">
-                If the email is a Google account, the user can log in immediately via "Sign in with Google" without a manual password.
-              </p>
             </div>
 
+            {/* Form */}
             <form onSubmit={handleCreateSubmit} className="space-y-4 text-xs">
-              {/* Email Address */}
-              <div className="space-y-1">
-                <label className="text-zinc-300 font-semibold flex items-center gap-1">
-                  Email Address <span className="text-rose-400">*</span>
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={createForm.email}
-                  onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
-                  placeholder="e.g. chef.john@grandheritage.com or john@gmail.com"
-                  className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white placeholder-zinc-500 focus:outline-none focus:border-[#d4a437] transition-all"
-                />
-              </div>
-
-              {/* Name Row */}
+              {/* Email & Role */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-zinc-300 font-semibold flex items-center gap-1">
-                    First Name <span className="text-rose-400">*</span>
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    Email Address <span className="text-red-500">*</span>
                   </label>
                   <input
-                    type="text"
+                    type="email"
                     required
-                    value={createForm.first_name}
-                    onChange={(e) => setCreateForm({ ...createForm, first_name: e.target.value })}
-                    placeholder="e.g. Biswanath"
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white placeholder-zinc-500 focus:outline-none focus:border-[#d4a437] transition-all"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-zinc-300 font-semibold">Last Name</label>
-                  <input
-                    type="text"
-                    value={createForm.last_name}
-                    onChange={(e) => setCreateForm({ ...createForm, last_name: e.target.value })}
-                    placeholder="e.g. Bag"
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white placeholder-zinc-500 focus:outline-none focus:border-[#d4a437] transition-all"
-                  />
-                </div>
-              </div>
-
-              {/* Phone & Role */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-zinc-300 font-semibold">Phone Number</label>
-                  <input
-                    type="text"
-                    value={createForm.phone}
-                    onChange={(e) => setCreateForm({ ...createForm, phone: e.target.value })}
-                    placeholder="+91 98765 43210"
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white placeholder-zinc-500 focus:outline-none focus:border-[#d4a437] transition-all"
+                    value={createEmail}
+                    onChange={(e) => setCreateEmail(e.target.value)}
+                    placeholder="user@cbhotels.com"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium placeholder:text-[#707070]/60 focus:outline-none focus:border-[#C79A3B] focus:ring-1 focus:ring-[#C79A3B]/30 transition-all"
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-zinc-300 font-semibold flex items-center gap-1">
-                    System Role <span className="text-rose-400">*</span>
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    System Role <span className="text-red-500">*</span>
                   </label>
                   <select
                     required
-                    value={createForm.role_id}
-                    onChange={(e) => setCreateForm({ ...createForm, role_id: e.target.value })}
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#d4a437] transition-all"
+                    value={createRoleId}
+                    onChange={(e) => setCreateRoleId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] transition-all"
                   >
                     {roles.map((r) => (
                       <option key={r.id} value={r.id}>
@@ -911,106 +948,209 @@ export const UserManagementWorkspace: React.FC = () => {
                 </div>
               </div>
 
-              {/* Assigned Outlets Selection */}
-              <div className="space-y-2 pt-2 border-t border-[#26262e]">
-                <div className="flex items-center justify-between">
-                  <label className="text-zinc-300 font-semibold">Assigned Outlets Scope</label>
+              {/* Names */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    First Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={createFirstName}
+                    onChange={(e) => setCreateFirstName(e.target.value)}
+                    placeholder="John"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium placeholder:text-[#707070]/60 focus:outline-none focus:border-[#C79A3B] transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    Last Name
+                  </label>
+                  <input
+                    type="text"
+                    value={createLastName}
+                    onChange={(e) => setCreateLastName(e.target.value)}
+                    placeholder="Doe"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium placeholder:text-[#707070]/60 focus:outline-none focus:border-[#C79A3B] transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Username & Phone */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    Username (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={createUsername}
+                    onChange={(e) => setCreateUsername(e.target.value)}
+                    placeholder="johndoe"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium placeholder:text-[#707070]/60 focus:outline-none focus:border-[#C79A3B] transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    Phone Number (Optional)
+                  </label>
+                  <input
+                    type="tel"
+                    value={createPhone}
+                    onChange={(e) => setCreatePhone(e.target.value)}
+                    placeholder="+91 98765 43210"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium placeholder:text-[#707070]/60 focus:outline-none focus:border-[#C79A3B] transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Password (Optional for Local Auth) */}
+              <div>
+                <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                  Manual Password (Optional — Leave blank for Google OAuth login only)
+                </label>
+                <div className="relative">
+                  <input
+                    type={createShowPassword ? 'text' : 'password'}
+                    value={createPassword}
+                    onChange={(e) => setCreatePassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium placeholder:text-[#707070]/60 focus:outline-none focus:border-[#C79A3B] transition-all pr-10"
+                  />
                   <button
                     type="button"
-                    onClick={() => {
-                      const allIds = availableBranches.map((b) => b.id);
-                      const isAll = createForm.branch_ids?.length === allIds.length;
-                      setCreateForm({
-                        ...createForm,
-                        branch_ids: isAll ? [] : allIds,
-                        default_branch_id: isAll ? '' : allIds[0] || '',
-                      });
-                    }}
-                    className="text-[11px] text-[#d4a437] hover:underline font-semibold"
+                    onClick={() => setCreateShowPassword(!createShowPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#707070] hover:text-[#1C1C1C]"
                   >
-                    {createForm.branch_ids?.length === availableBranches.length ? 'Clear All' : 'Select All Outlets'}
+                    {createShowPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Multi-Outlet Assignment Section */}
+              <div className="space-y-2 border-t border-[rgba(45,45,45,0.06)] pt-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider block">
+                    Assigned Outlets Scope ({createSelectedBranchIds.length} Selected)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      selectAllBranches(setCreateSelectedBranchIds, setCreateDefaultBranchId)
+                    }
+                    className="text-[11px] text-[#B8862D] font-bold hover:underline"
+                  >
+                    Select All Outlets
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2.5 bg-[#1f1f24] border border-[#26262e] rounded-xl">
-                  {availableBranches.map((b) => {
-                    const isChecked = createForm.branch_ids?.includes(b.id);
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-y-auto p-2 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                  {availableBranches.map((branch) => {
+                    const isChecked = createSelectedBranchIds.includes(branch.id);
+                    const isDefault = createDefaultBranchId === branch.id;
+
                     return (
-                      <label
-                        key={b.id}
-                        className={`flex items-center gap-2 p-1.5 rounded-lg cursor-pointer transition-colors ${
-                          isChecked ? 'bg-[#d4a437]/10 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                      <div
+                        key={branch.id}
+                        onClick={() =>
+                          toggleBranchSelection(
+                            branch.id,
+                            createSelectedBranchIds,
+                            setCreateSelectedBranchIds,
+                            createDefaultBranchId,
+                            setCreateDefaultBranchId
+                          )
+                        }
+                        className={`p-2 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition-all ${
+                          isChecked
+                            ? 'bg-white border-[#B8862D]/50 text-[#1C1C1C] shadow-xs'
+                            : 'bg-white/50 border-[rgba(45,45,45,0.08)] text-[#707070] hover:bg-white'
                         }`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            let updated = [...(createForm.branch_ids || [])];
-                            if (e.target.checked) {
-                              updated.push(b.id);
-                            } else {
-                              updated = updated.filter((id) => id !== b.id);
-                            }
-                            setCreateForm({
-                              ...createForm,
-                              branch_ids: updated,
-                              default_branch_id:
-                                createForm.default_branch_id === b.id
-                                  ? updated[0] || ''
-                                  : createForm.default_branch_id || updated[0] || '',
-                            });
-                          }}
-                          className="rounded border-zinc-700 bg-zinc-800 text-[#d4a437] focus:ring-0"
-                        />
-                        <span className="truncate text-[11px]">
-                          <span className="font-mono text-[#d4a437]">[{b.code}]</span> {b.name}
-                        </span>
-                      </label>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className={`w-4 h-4 rounded flex items-center justify-center border ${
+                              isChecked
+                                ? 'bg-[#B8862D] border-[#B8862D] text-white'
+                                : 'border-gray-300 bg-white'
+                            }`}
+                          >
+                            {isChecked && <Check className="w-3 h-3" />}
+                          </div>
+                          <span className="truncate font-medium text-[11px]">
+                            [{branch.code}] {branch.name}
+                          </span>
+                        </div>
+
+                        {isChecked && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCreateDefaultBranchId(branch.id);
+                            }}
+                            className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition-all ${
+                              isDefault
+                                ? 'bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/40'
+                                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                            }`}
+                          >
+                            {isDefault ? 'Default ★' : 'Set Default'}
+                          </button>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Optional Password */}
-              <div className="space-y-1 pt-2 border-t border-[#26262e]">
-                <label className="text-zinc-300 font-semibold flex items-center justify-between">
-                  <span>Manual Password (Optional)</span>
-                  <span className="text-[10px] text-zinc-500">Leave empty for OAuth SSO</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={createForm.password}
-                    onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-                    placeholder="Set optional password (minimum 6 characters)"
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 pr-10 text-white placeholder-zinc-500 focus:outline-none focus:border-[#d4a437] transition-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+              {/* Status Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                <div className="space-y-0.5">
+                  <span className="font-bold text-[#1C1C1C] text-xs">Account Status</span>
+                  <p className="text-[11px] text-[#707070]">Allow immediate sign-in upon creation</p>
                 </div>
-              </div>
-
-              {/* Submit Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#26262e]">
                 <button
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 rounded-xl bg-[#1f1f24] hover:bg-[#282830] text-zinc-300 border border-[#26262e] font-semibold text-xs transition-colors"
+                  onClick={() => setCreateIsActive(!createIsActive)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    createIsActive
+                      ? 'bg-[#2E8B57]/15 text-[#2E8B57] border border-[#2E8B57]/30'
+                      : 'bg-red-100 text-red-700 border border-red-200'
+                  }`}
+                >
+                  {createIsActive ? 'Active' : 'Disabled'}
+                </button>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[rgba(45,45,45,0.06)]">
+                <button
+                  type="button"
+                  onClick={() => setCreateModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5] transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#d4a437] to-[#b8862d] text-black font-bold text-xs hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-[#d4a437]/20 disabled:opacity-50"
+                  className="px-5 py-2 rounded-xl bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white text-xs font-bold transition-all shadow-xs active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
                 >
-                  {submitting ? 'Creating...' : 'Register User'}
+                  {submitting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-3.5 h-3.5 text-[#C79A3B]" />
+                      <span>Create Account</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -1018,71 +1158,70 @@ export const UserManagementWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* EDIT USER MODAL */}
-      {editingUser && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="bg-[#17171b] border border-[#26262e] rounded-3xl w-full max-w-lg p-5 sm:p-6 space-y-4 shadow-2xl my-auto text-white max-h-[92vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-[#26262e] pb-3">
-              <div className="space-y-0.5">
-                <h3 className="text-base font-bold text-white font-['Outfit'] flex items-center gap-2">
-                  <Edit2 className="w-4 h-4 text-[#d4a437]" />
-                  Edit User Account: {editingUser.email}
+      {/* ========================================================================= */}
+      {/* 7. EDIT USER MODAL                                                        */}
+      {/* ========================================================================= */}
+      {editModalOpen && editingUser && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-xl w-full space-y-4 shadow-2xl border border-[rgba(45,45,45,0.1)] max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
+              <div>
+                <h3 className="text-base font-bold text-[#1C1C1C] flex items-center gap-2 font-['Outfit']">
+                  <Edit2 className="w-5 h-5 text-[#C79A3B]" />
+                  Edit User Profile & Permissions
                 </h3>
-                <p className="text-xs text-zinc-400">Update profile details, role assignment, and outlet scoping</p>
+                <p className="text-xs text-[#707070] mt-0.5">{editingUser.email}</p>
               </div>
               <button
-                onClick={() => setEditingUser(null)}
-                className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-[#1f1f24] transition-colors"
+                onClick={() => setEditModalOpen(false)}
+                className="p-1 rounded-lg text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+            {/* Form */}
             <form onSubmit={handleEditSubmit} className="space-y-4 text-xs">
-              {/* Name Row */}
+              {/* Names */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-zinc-300 font-semibold">First Name *</label>
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    First Name <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     required
-                    value={editForm.first_name}
-                    onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })}
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#d4a437] transition-all"
+                    value={editFirstName}
+                    onChange={(e) => setEditFirstName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] transition-all"
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-zinc-300 font-semibold">Last Name</label>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    Last Name
+                  </label>
                   <input
                     type="text"
-                    value={editForm.last_name}
-                    onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })}
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#d4a437] transition-all"
+                    value={editLastName}
+                    onChange={(e) => setEditLastName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] transition-all"
                   />
                 </div>
               </div>
 
-              {/* Phone & Role */}
+              {/* Role & Phone */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-zinc-300 font-semibold">Phone Number</label>
-                  <input
-                    type="text"
-                    value={editForm.phone}
-                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                    placeholder="+91 98765 43210"
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#d4a437] transition-all"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-zinc-300 font-semibold">System Role *</label>
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    System Role <span className="text-red-500">*</span>
+                  </label>
                   <select
                     required
-                    value={editForm.role_id}
-                    onChange={(e) => setEditForm({ ...editForm, role_id: e.target.value })}
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#d4a437] transition-all"
+                    value={editRoleId}
+                    onChange={(e) => setEditRoleId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] transition-all"
                   >
                     {roles.map((r) => (
                       <option key={r.id} value={r.id}>
@@ -1091,127 +1230,165 @@ export const UserManagementWorkspace: React.FC = () => {
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                    Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="+91 98765 43210"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] transition-all"
+                  />
+                </div>
               </div>
 
-              {/* Assigned Outlets Selection */}
-              <div className="space-y-2 pt-2 border-t border-[#26262e]">
-                <div className="flex items-center justify-between">
-                  <label className="text-zinc-300 font-semibold">Assigned Outlets Scope</label>
+              {/* Reset Password */}
+              <div>
+                <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
+                  Reset Password (Leave blank to keep current)
+                </label>
+                <div className="relative">
+                  <input
+                    type={editShowPassword ? 'text' : 'password'}
+                    value={editPassword}
+                    onChange={(e) => setEditPassword(e.target.value)}
+                    placeholder="Enter new password..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] transition-all pr-10"
+                  />
                   <button
                     type="button"
-                    onClick={() => {
-                      const allIds = availableBranches.map((b) => b.id);
-                      const isAll = editForm.branch_ids.length === allIds.length;
-                      setEditForm({
-                        ...editForm,
-                        branch_ids: isAll ? [] : allIds,
-                        default_branch_id: isAll ? '' : allIds[0] || '',
-                      });
-                    }}
-                    className="text-[11px] text-[#d4a437] hover:underline font-semibold"
+                    onClick={() => setEditShowPassword(!editShowPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#707070] hover:text-[#1C1C1C]"
                   >
-                    {editForm.branch_ids.length === availableBranches.length ? 'Clear All' : 'Select All Outlets'}
+                    {editShowPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Assigned Outlets */}
+              <div className="space-y-2 border-t border-[rgba(45,45,45,0.06)] pt-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider block">
+                    Assigned Outlets Scope ({editSelectedBranchIds.length} Selected)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      selectAllBranches(setEditSelectedBranchIds, setEditDefaultBranchId)
+                    }
+                    className="text-[11px] text-[#B8862D] font-bold hover:underline"
+                  >
+                    Select All Outlets
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2.5 bg-[#1f1f24] border border-[#26262e] rounded-xl">
-                  {availableBranches.map((b) => {
-                    const isChecked = editForm.branch_ids.includes(b.id);
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-y-auto p-2 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                  {availableBranches.map((branch) => {
+                    const isChecked = editSelectedBranchIds.includes(branch.id);
+                    const isDefault = editDefaultBranchId === branch.id;
+
                     return (
-                      <label
-                        key={b.id}
-                        className={`flex items-center gap-2 p-1.5 rounded-lg cursor-pointer transition-colors ${
-                          isChecked ? 'bg-[#d4a437]/10 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                      <div
+                        key={branch.id}
+                        onClick={() =>
+                          toggleBranchSelection(
+                            branch.id,
+                            editSelectedBranchIds,
+                            setEditSelectedBranchIds,
+                            editDefaultBranchId,
+                            setEditDefaultBranchId
+                          )
+                        }
+                        className={`p-2 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition-all ${
+                          isChecked
+                            ? 'bg-white border-[#B8862D]/50 text-[#1C1C1C] shadow-xs'
+                            : 'bg-white/50 border-[rgba(45,45,45,0.08)] text-[#707070] hover:bg-white'
                         }`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            let updated = [...editForm.branch_ids];
-                            if (e.target.checked) {
-                              updated.push(b.id);
-                            } else {
-                              updated = updated.filter((id) => id !== b.id);
-                            }
-                            setEditForm({
-                              ...editForm,
-                              branch_ids: updated,
-                              default_branch_id:
-                                editForm.default_branch_id === b.id
-                                  ? updated[0] || ''
-                                  : editForm.default_branch_id || updated[0] || '',
-                            });
-                          }}
-                          className="rounded border-zinc-700 bg-zinc-800 text-[#d4a437] focus:ring-0"
-                        />
-                        <span className="truncate text-[11px]">
-                          <span className="font-mono text-[#d4a437]">[{b.code}]</span> {b.name}
-                        </span>
-                      </label>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className={`w-4 h-4 rounded flex items-center justify-center border ${
+                              isChecked
+                                ? 'bg-[#B8862D] border-[#B8862D] text-white'
+                                : 'border-gray-300 bg-white'
+                            }`}
+                          >
+                            {isChecked && <Check className="w-3 h-3" />}
+                          </div>
+                          <span className="truncate font-medium text-[11px]">
+                            [{branch.code}] {branch.name}
+                          </span>
+                        </div>
+
+                        {isChecked && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditDefaultBranchId(branch.id);
+                            }}
+                            className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition-all ${
+                              isDefault
+                                ? 'bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/40'
+                                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                            }`}
+                          >
+                            {isDefault ? 'Default ★' : 'Set Default'}
+                          </button>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Status Switch */}
-              <div className="flex items-center justify-between p-3 bg-[#1f1f24] border border-[#26262e] rounded-xl">
-                <div>
-                  <p className="text-zinc-200 font-semibold">Account Status</p>
-                  <p className="text-[11px] text-zinc-500">Allow user to sign in to APEX ERP</p>
+              {/* Status Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                <div className="space-y-0.5">
+                  <span className="font-bold text-[#1C1C1C] text-xs">Account Status</span>
+                  <p className="text-[11px] text-[#707070]">Toggle active login permissions</p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setEditForm({ ...editForm, is_active: !editForm.is_active })}
+                  onClick={() => setEditIsActive(!editIsActive)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    editForm.is_active
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                      : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                    editIsActive
+                      ? 'bg-[#2E8B57]/15 text-[#2E8B57] border border-[#2E8B57]/30'
+                      : 'bg-red-100 text-red-700 border border-red-200'
                   }`}
                 >
-                  {editForm.is_active ? 'Active' : 'Disabled'}
+                  {editIsActive ? 'Active' : 'Disabled'}
                 </button>
               </div>
 
-              {/* Reset Password */}
-              <div className="space-y-1 pt-2 border-t border-[#26262e]">
-                <label className="text-zinc-300 font-semibold flex items-center justify-between">
-                  <span>Reset Password (Optional)</span>
-                  <span className="text-[10px] text-zinc-500">Leave blank to keep existing password / SSO</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={editForm.password}
-                    onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                    placeholder="Enter new password (min 6 characters)"
-                    className="w-full bg-[#1f1f24] border border-[#26262e] rounded-xl px-3.5 py-2.5 pr-10 text-white placeholder-zinc-500 focus:outline-none focus:border-[#d4a437] transition-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Submit Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#26262e]">
+              {/* Modal Footer */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[rgba(45,45,45,0.06)]">
                 <button
                   type="button"
-                  onClick={() => setEditingUser(null)}
-                  className="px-4 py-2 rounded-xl bg-[#1f1f24] hover:bg-[#282830] text-zinc-300 border border-[#26262e] font-semibold text-xs transition-colors"
+                  onClick={() => setEditModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5] transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#d4a437] to-[#b8862d] text-black font-bold text-xs hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-[#d4a437]/20 disabled:opacity-50"
+                  className="px-5 py-2 rounded-xl bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white text-xs font-bold transition-all shadow-xs active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
                 >
-                  {submitting ? 'Saving...' : 'Save Changes'}
+                  {submitting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-[#C79A3B]" />
+                      <span>Save Changes</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -1219,48 +1396,57 @@ export const UserManagementWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* DEACTIVATE CONFIRMATION MODAL */}
+      {/* ========================================================================= */}
+      {/* 8. DEACTIVATE CONFIRMATION MODAL (Soft-Delete)                             */}
+      {/* ========================================================================= */}
       {deactivatingUser && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
-          <div className="bg-[#17171b] border border-rose-500/30 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl text-white">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-red-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center mx-auto text-red-600">
               <AlertTriangle className="w-6 h-6" />
             </div>
 
-            <div className="text-center space-y-1.5">
-              <h3 className="text-base font-bold text-white font-['Outfit']">Deactivate User Account?</h3>
-              <p className="text-xs text-zinc-300">
-                Are you sure you want to deactivate{' '}
-                <span className="text-white font-bold">
-                  {deactivatingUser.first_name} {deactivatingUser.last_name || ''}
-                </span>{' '}
-                (<span className="font-mono text-zinc-400">{deactivatingUser.email}</span>)?
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-bold text-[#1C1C1C] font-['Outfit']">
+                Deactivate User Account?
+              </h3>
+              <p className="text-xs text-[#707070] leading-relaxed">
+                Are you sure you want to deactivate <strong className="text-[#1C1C1C]">{deactivatingUser.email}</strong>?
               </p>
             </div>
 
-            <div className="p-3 bg-[#1f1f24] rounded-xl border border-[#26262e] text-[11px] text-zinc-400 space-y-1">
-              <p className="font-semibold text-zinc-300">Soft-Delete Integrity:</p>
-              <p>
-                The user will be immediately blocked from signing in. All historical audit trails, purchase approvals,
-                and closing records will be safely preserved. You can reactivate this user at any time.
+            <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] text-[11px] text-[#707070] space-y-1">
+              <span className="font-bold text-[#1C1C1C] block">Soft-Delete & Audit Integrity:</span>
+              <p className="leading-relaxed">
+                This user will immediately be blocked from logging in. All historical transactions, purchase approvals, and audit logs created by this user are preserved in full compliance with ERP standards.
               </p>
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(45,45,45,0.06)]">
               <button
                 type="button"
                 onClick={() => setDeactivatingUser(null)}
-                className="px-4 py-2 rounded-xl bg-[#1f1f24] hover:bg-[#282830] text-zinc-300 border border-[#26262e] font-semibold text-xs transition-colors"
+                className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5] transition-all"
               >
                 Cancel
               </button>
               <button
                 type="button"
+                onClick={handleConfirmDeactivate}
                 disabled={submitting}
-                onClick={handleDeactivateConfirm}
-                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-all shadow-lg shadow-rose-600/20 active:scale-95 disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-xs active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
               >
-                {submitting ? 'Deactivating...' : 'Yes, Deactivate Account'}
+                {submitting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deactivating...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserX className="w-3.5 h-3.5" />
+                    <span>Confirm Deactivation</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

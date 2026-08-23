@@ -66,6 +66,14 @@ export const usersApi = {
   },
 
   /**
+   * Toggle user status alias
+   */
+  toggleUserStatus: async (id: string, is_active: boolean): Promise<ManagedUser> => {
+    const res = await apiClient.patch(`/users/${id}/status`, { is_active });
+    return res.data;
+  },
+
+  /**
    * Soft-delete / deactivate user (preserves audit trail)
    */
   deactivateUser: async (id: string): Promise<{ success: boolean; message: string; user_id: string; is_active: boolean }> => {
@@ -73,3 +81,5 @@ export const usersApi = {
     return res.data;
   },
 };
+
+export const userApi = usersApi;

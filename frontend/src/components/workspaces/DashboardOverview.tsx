@@ -49,14 +49,16 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, se
     return (
       <div className="space-y-4">
         {isHeadOffice && (
-          <div className="flex items-center justify-between p-3 rounded-2xl bg-[#17171b] border border-[#26262e] text-xs">
-            <div className="flex items-center gap-2 text-zinc-400">
-              <Building2 className="w-4 h-4 text-[#d4a437]" />
-              <span>Head Office Mode: Viewing single outlet operational cockpit</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] text-xs shadow-xs">
+            <div className="flex items-center gap-2 text-[#707070]">
+              <Building2 className="w-4 h-4 text-[#C79A3B] shrink-0" />
+              <span>
+                <strong className="text-[#1C1C1C]">Head Office Mode:</strong> Viewing single outlet operational command cockpit
+              </span>
             </div>
             <button
               onClick={() => setViewMode('executive')}
-              className="px-3 py-1 rounded-lg bg-[#26262e] hover:bg-[#32323c] text-white font-medium text-xs transition-colors"
+              className="px-3.5 py-1.5 rounded-xl bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white font-bold text-xs transition-all shadow-xs active:scale-[0.98] shrink-0 text-center"
             >
               Switch to Group Executive View
             </button>
