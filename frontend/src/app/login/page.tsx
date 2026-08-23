@@ -85,8 +85,8 @@ export default function LoginPage() {
       <div className="w-full max-w-[360px] p-8 luxury-card flex flex-col items-center">
         <div className="text-center mb-8">
           <div className="w-16 h-16 mx-auto mb-4 bg-[#C79A3B] rounded-full flex items-center justify-center text-white font-bold text-2xl">CB</div>
-          <h1 className="text-2xl font-bold text-[#1C1C1C]">CB RKM</h1>
-          <p className="text-[#707070] mt-2">Welcome back to Automation Pro</p>
+          <h1 className="text-2xl font-bold text-[#1C1C1C]">CB Hotel Management</h1>
+          <p className="text-[#707070] mt-2">Enterprise Multi-Outlet Hospitality ERP</p>
         </div>
         
         <div ref={googleButtonRef} />

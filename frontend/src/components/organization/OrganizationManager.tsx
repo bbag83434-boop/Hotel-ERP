@@ -324,10 +324,10 @@ export const OrganizationManager: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">
-                {company?.name || 'APEX Multi-Outlet Enterprise'}
+                {company?.name || 'CB Hotel Management'}
               </h2>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
-                {company?.code || 'APEX-CORP'}
+                {company?.code || 'CB-HOTEL'}
               </span>
             </div>
             <p className="text-xs text-[#707070] mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">

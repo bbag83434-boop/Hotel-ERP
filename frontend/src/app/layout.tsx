@@ -7,8 +7,8 @@ import OfflineBanner from '@/components/common/OfflineBanner';
 import PWAInstallBanner from '@/components/common/PWAInstallBanner';
 
 export const metadata: Metadata = {
-  title: 'CB RKM | Restaurant & Kitchen Management',
-  description: 'CB Restaurant & Kitchen Management system with CB Automation Pro.',
+  title: 'CB Hotel Management | Enterprise Hospitality ERP',
+  description: 'CB Hotel Management system with multi-outlet operations.',
   manifest: '/manifest.webmanifest',
   icons: {
     icon: '/icons/icon-192.png',
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'CB RKM',
+    title: 'CB Hotel Management',
   },
 };
 

@@ -23,7 +23,7 @@ export const PWAInstallBanner: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h4 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Install APEX ERP App</h4>
+              <h4 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Install CB Hotel Management App</h4>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#F1E4C5] text-[#B8862D] font-semibold border border-[#B8862D]/25">
                 PWA
               </span>

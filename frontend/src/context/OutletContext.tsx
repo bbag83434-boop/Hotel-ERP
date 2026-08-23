@@ -72,25 +72,9 @@ interface OutletContextType {
   refreshOutlets: () => Promise<void>;
 }
 
-// 14+ Baseline Multi-Outlet Topology using valid PostgreSQL UUIDs matching live database
+// Clean Baseline Multi-Outlet Topology matching fresh database state
 const DEFAULT_TOPOLOGY: Outlet[] = [
-  { id: 'fc4715cd-5a35-4d4c-9472-456356de0660', code: 'BR-HQ-01', name: 'Main HQ & Resort (Central Control)', type: 'HEAD_OFFICE', isActive: true },
-  { id: 'bd1f233e-fa09-45ba-bd1a-7247bd359dc0', code: 'HUB-0F0987', name: 'Apex Central Warehouse (CS-01)', type: 'CENTRAL_STORE', isActive: true },
-  { id: '5cb45b8e-a90c-45c9-84f3-c43db7121beb', code: 'SWEET-HUB-406C8A', name: 'Apex Central Bakery & Sweet Kitchen (DK-01)', type: 'DESSERT_KITCHEN', isActive: true },
-  { id: '1cc67b61-070a-49ac-8a19-8734f479e755', code: 'BR-BISTRO-01', name: '01. Royal Heritage Bistro & Lounge', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'c90e1dfd-0538-43bd-aab5-055f4714aa85', code: 'BR-HOTEL-01', name: '02. Grand Heritage Resort & Palace', type: 'HOTEL', isActive: true },
-  { id: '8cacf01e-c586-4efe-91c8-8759741bad34', code: 'BR-OUTLET-A', name: '03. Downtown Palace Fine Dine', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'e8715900-9b2e-441b-ac2c-e6be8fbd7325', code: 'BR-OUTLET-B', name: '04. Heritage Sweet & Bakery Shop', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: '6b093f72-c526-40c4-b49f-6babff145e0f', code: 'OUT-070BFD', name: '05. Apex Seaside Bistro Premium', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: '7f126117-cced-4649-93be-575361d555ed', code: 'OUT-117407', name: '06. Apex Fine Dining Lakeview', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: '770ddd92-9bfc-4adb-8e86-3c8fcc3349ed', code: 'OUT-3BBCD4', name: '07. Royal Banquet & Grill', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: '6025c3b5-7c4b-4ed4-a6e3-5b1f56b23197', code: 'OUT-4017CC', name: '08. Golden Palm Grand Cafe', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: '2d303c00-1961-41cc-a594-47a820f81886', code: 'OUT-425ACC', name: '09. Spice Route Express', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: '906ed86b-c7a2-409a-9f08-31f0eb1ddbb3', code: 'OUT-AAE4BA', name: '10. City Heights Rooftop Bar', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: '48494947-90d6-4d6a-b86c-41600aca7461', code: 'OUT-B6F404', name: '11. Emerald Bay Seafood Trattoria', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'e5a36cfe-d7dd-4e59-916d-dda136373a68', code: 'OUT-B88B0C', name: '12. Grand Pavilion Tavern', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'a439f316-4dc2-4092-87f8-4f1fdc43b3bd', code: 'OUT-D7DA36', name: '13. Silver Oak Coffee House', type: 'RESTAURANT_OUTLET', isActive: true },
-  { id: 'ee670ddf-aef9-4e62-b1e7-ebe563efc3c8', code: 'OUT-E2F690', name: '14. Velvet Crown & Anchor Pub', type: 'RESTAURANT_OUTLET', isActive: true },
+  { id: 'cb-main-hq', code: 'HQ-MAIN', name: 'CB Hotel Management (Main)', type: 'HEAD_OFFICE', isActive: true },
 ];
 
 const OutletContext = createContext<OutletContextType | undefined>(undefined);

@@ -148,7 +148,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, se
           <div className="space-y-1.5 sm:space-y-2">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-semibold bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30 shadow-xs">
               <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-              <span className="truncate">APEX ENTERPRISE ERP · MULTI-OUTLET CORE</span>
+              <span className="truncate">CB HOTEL MANAGEMENT · MULTI-OUTLET CORE</span>
             </div>
             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-[#1C1C1C] font-['Outfit']">
               Executive Control Cockpit

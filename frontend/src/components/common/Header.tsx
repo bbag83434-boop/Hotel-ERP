@@ -48,14 +48,14 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-sm sm:text-base md:text-lg tracking-tight text-[#1C1C1C] font-['Outfit'] truncate">
-                APEX ERP
+                CB Hotel Management
               </span>
               <span className="text-[9px] sm:text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.2 sm:py-0.5 rounded bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30 shrink-0">
                 v2.0
               </span>
             </div>
             <p className="text-[10px] sm:text-[11px] text-[#707070] hidden lg:block truncate">
-              Grand Heritage Resort & Multi-Outlet Enterprise
+              Enterprise Multi-Outlet Hospitality Management
             </p>
           </div>
         </div>

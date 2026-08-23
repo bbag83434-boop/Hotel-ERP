@@ -69,7 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ...(isAdmin
           ? [{ id: 'users' as WorkspaceId, label: 'User & Admin Mgmt', icon: UserCog, badge: 'RBAC' }]
           : []),
-        { id: 'organization' as WorkspaceId, label: '14+ Outlets & Master', icon: Building2, badge: '14 Units' },
+        { id: 'organization' as WorkspaceId, label: 'Outlets & Master Structure', icon: Building2, badge: null },
         { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
         { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },
         { id: 'production' as WorkspaceId, label: 'Recipes & Production', icon: ChefHat, badge: null },
@@ -104,7 +104,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div>
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-sm tracking-tight text-[#1C1C1C] font-['Outfit']">
-                APEX ERP
+                CB Hotel Management
               </span>
               <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30">
                 v2.0
