@@ -41,6 +41,55 @@ export interface Supplier {
   _count?: { purchaseOrders: number; grns: number };
 }
 
+export interface SupplierItem {
+  id: string;
+  company_id: string;
+  supplier_id: string;
+  item_id: string;
+  supplier_item_code?: string;
+  supplier_item_name?: string;
+  purchase_unit_id?: string;
+  purchase_price: number;
+  conversion_rate: number;
+  lead_time_days: number;
+  is_preferred: boolean;
+  is_active: boolean;
+  supplier_name?: string;
+  supplier_code?: string;
+  item_name?: string;
+  item_code?: string;
+  purchase_unit_name?: string;
+  purchase_unit_symbol?: string;
+  base_unit_symbol?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SupplierItemCreateInput {
+  supplier_id: string;
+  item_id: string;
+  supplier_item_code?: string;
+  supplier_item_name?: string;
+  purchase_unit_id?: string;
+  purchase_price?: number;
+  conversion_rate?: number;
+  lead_time_days?: number;
+  is_preferred?: boolean;
+  is_active?: boolean;
+}
+
+export interface SupplierItemUpdateInput {
+  supplier_item_code?: string;
+  supplier_item_name?: string;
+  purchase_unit_id?: string;
+  purchase_price?: number;
+  conversion_rate?: number;
+  lead_time_days?: number;
+  is_preferred?: boolean;
+  is_active?: boolean;
+}
+
+
 export interface SupplierLedgerEntry {
   id: string;
   supplierId: string;

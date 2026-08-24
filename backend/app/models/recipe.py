@@ -20,6 +20,10 @@ class Recipe(BaseModel):
     finished_item_id = Column("finishedItemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     code = Column(String(50), nullable=False, index=True)
+    version = Column(Integer, default=1, nullable=False)
+    effective_date = Column("effectiveDate", DateTime, default=datetime.utcnow, nullable=False)
+    effective_to = Column("effectiveTo", DateTime, nullable=True)
+    is_current = Column("isCurrent", Boolean, default=True, nullable=False)
     description = Column(String(500), nullable=True)
     yield_qty = Column("yieldQty", Numeric(14, 4), default=Decimal("1.0000"), nullable=False)
     preparation_minutes = Column("preparationMinutes", Integer, default=15, nullable=False)
@@ -28,6 +32,9 @@ class Recipe(BaseModel):
 
     companyId = synonym("company_id")
     finishedItemId = synonym("finished_item_id")
+    effectiveDate = synonym("effective_date")
+    effectiveTo = synonym("effective_to")
+    isCurrent = synonym("is_current")
     yieldQty = synonym("yield_qty")
     preparationMinutes = synonym("preparation_minutes")
     isActive = synonym("is_active")
@@ -37,7 +44,7 @@ class Recipe(BaseModel):
     production_orders = relationship("ProductionOrder", back_populates="recipe")
 
     __table_args__ = (
-        Index("idx_recipe_company_code", "companyId", "code", unique=True),
+        Index("idx_recipe_company_code_version", "companyId", "code", "version", unique=True),
     )
 
 class RecipeItem(Base):
@@ -48,12 +55,18 @@ class RecipeItem(Base):
     raw_item_id = Column("rawItemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
     unit_id = Column("unitId", String(36), ForeignKey("units.id"), nullable=True)
     quantity = Column(Numeric(14, 4), nullable=False)
+    gross_quantity = Column("grossQuantity", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    usable_yield = Column("usableYield", Numeric(5, 2), default=Decimal("100.00"), nullable=False)
+    waste_percentage = Column("wastePercentage", Numeric(5, 2), default=Decimal("0.00"), nullable=False)
     cost_contribution = Column("costContribution", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     notes = Column(String(255), nullable=True)
 
     recipeId = synonym("recipe_id")
     rawItemId = synonym("raw_item_id")
     unitId = synonym("unit_id")
+    grossQuantity = synonym("gross_quantity")
+    usableYield = synonym("usable_yield")
+    wastePercentage = synonym("waste_percentage")
     costContribution = synonym("cost_contribution")
 
     recipe = relationship("Recipe", back_populates="ingredients")

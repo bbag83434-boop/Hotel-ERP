@@ -80,6 +80,39 @@ export const usersApi = {
     const res = await apiClient.delete(`/users/${id}`);
     return res.data;
   },
+
+  /**
+   * Fetch all granular permissions
+   */
+  getPermissions: async (): Promise<any[]> => {
+    const res = await apiClient.get('/users/permissions');
+    return res.data;
+  },
+
+  /**
+   * Fetch permission codes assigned to a role
+   */
+  getRolePermissions: async (roleId: string): Promise<string[]> => {
+    const res = await apiClient.get(`/users/roles/${roleId}/permissions`);
+    return res.data;
+  },
+
+  /**
+   * Sync permission codes assigned to a role
+   */
+  updateRolePermissions: async (roleId: string, permission_codes: string[]): Promise<string[]> => {
+    const res = await apiClient.post(`/users/roles/${roleId}/permissions`, { permission_codes });
+    return res.data;
+  },
+
+  /**
+   * Fetch audit logs
+   */
+  getAuditLogs: async (params?: { entity?: string; action?: string; user_id?: string; skip?: number; limit?: number }): Promise<any[]> => {
+    const res = await apiClient.get('/users/audit-logs', { params });
+    return res.data;
+  },
 };
 
 export const userApi = usersApi;
+

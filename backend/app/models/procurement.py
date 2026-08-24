@@ -2,7 +2,7 @@ import uuid
 import enum
 from datetime import datetime, date
 from decimal import Decimal
-from sqlalchemy import Column, String, Boolean, ForeignKey, Numeric, DateTime, Date, Integer, Enum as SQLEnum, Text
+from sqlalchemy import Column, String, Boolean, ForeignKey, Numeric, DateTime, Date, Integer, Enum as SQLEnum, Text, UniqueConstraint, Index
 from sqlalchemy.orm import relationship, synonym
 from app.core.database import Base
 from app.models.base import BaseModel
@@ -176,6 +176,7 @@ class PurchaseOrderItem(Base):
     po_id = Column("poId", String(36), ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False, index=True)
     item_id = Column("itemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
     ordered_qty = Column("orderedQty", Numeric(14, 4), nullable=False)
+    approved_qty = Column("approvedQty", Numeric(14, 4), nullable=True)  # buyer-adjusted qty; keeps orderedQty immutable
     received_qty = Column("receivedQty", Numeric(14, 4), default=0, nullable=False)
     unit_price = Column("unitPrice", Numeric(14, 4), default=0, nullable=False)
     total_price = Column("totalPrice", Numeric(14, 4), default=0, nullable=False)
@@ -185,12 +186,14 @@ class PurchaseOrderItem(Base):
     poId = synonym("po_id")
     itemId = synonym("item_id")
     orderedQty = synonym("ordered_qty")
+    approvedQty = synonym("approved_qty")
     receivedQty = synonym("received_qty")
     unitPrice = synonym("unit_price")
     totalPrice = synonym("total_price")
 
     po = relationship("PurchaseOrder", back_populates="items")
     item = relationship("Item")
+
 
 class GoodsReceiveNote(BaseModel):
     __tablename__ = "goods_receive_notes"
@@ -203,10 +206,16 @@ class GoodsReceiveNote(BaseModel):
     grn_number = Column("grnNumber", String(50), unique=True, nullable=False, index=True)
     receive_date = Column("receiveDate", DateTime, default=datetime.utcnow, nullable=False)
     invoice_number = Column("invoiceNumber", String(100), nullable=True)
+    delivery_reference = Column("deliveryReference", String(100), nullable=True)  # vendor DC/challan number
     total_amount = Column("totalAmount", Numeric(14, 4), default=0, nullable=True)
+    damaged_qty = Column("damagedQty", Numeric(14, 4), default=0, nullable=False)  # GRN-level total damage
+    short_qty = Column("shortQty", Numeric(14, 4), default=0, nullable=False)      # GRN-level total shortage
     status = Column(String(50), default=GRNStatus.PENDING_APPROVAL.value, nullable=False)
     notes = Column(String(500), nullable=True)
     received_by_id = Column("receivedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id = Column("approvedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column("approvedAt", DateTime, nullable=True)
+    idempotency_key = Column("idempotencyKey", String(255), nullable=True, index=True)  # duplicate-receive guard
 
     companyId = synonym("company_id")
     branchId = synonym("branch_id")
@@ -216,15 +225,23 @@ class GoodsReceiveNote(BaseModel):
     grnNumber = synonym("grn_number")
     receiveDate = synonym("receive_date")
     invoiceNumber = synonym("invoice_number")
+    deliveryReference = synonym("delivery_reference")
     totalAmount = synonym("total_amount")
+    damagedQty = synonym("damaged_qty")
+    shortQty = synonym("short_qty")
     receivedById = synonym("received_by_id")
+    approvedById = synonym("approved_by_id")
+    approvedAt = synonym("approved_at")
+    idempotencyKey = synonym("idempotency_key")
 
     po = relationship("PurchaseOrder", back_populates="grns")
     branch = relationship("Branch")
     warehouse = relationship("Warehouse")
     supplier = relationship("Supplier")
     received_by = relationship("User", foreign_keys=[received_by_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
     items = relationship("GoodsReceiveItem", back_populates="grn", cascade="all, delete-orphan")
+
 
 class GoodsReceiveItem(Base):
     __tablename__ = "goods_receive_items"
@@ -233,9 +250,12 @@ class GoodsReceiveItem(Base):
     grn_id = Column("grnId", String(36), ForeignKey("goods_receive_notes.id", ondelete="CASCADE"), nullable=False, index=True)
     po_item_id = Column("poItemId", String(36), ForeignKey("purchase_order_items.id", ondelete="SET NULL"), nullable=True)
     item_id = Column("itemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
-    received_qty = Column("receivedQty", Numeric(14, 4), nullable=False)
-    accepted_qty = Column("acceptedQty", Numeric(14, 4), nullable=False)
-    rejected_qty = Column("rejectedQty", Numeric(14, 4), default=0, nullable=False)
+    received_qty = Column("receivedQty", Numeric(14, 4), nullable=False)       # total physically received
+    accepted_qty = Column("acceptedQty", Numeric(14, 4), nullable=False)       # accepted for stock
+    rejected_qty = Column("rejectedQty", Numeric(14, 4), default=0, nullable=False)  # QC rejected
+    damaged_qty = Column("damagedQty", Numeric(14, 4), default=0, nullable=False)    # physically damaged
+    short_qty = Column("shortQty", Numeric(14, 4), default=0, nullable=False)        # ordered but not delivered
+    shortage_reason_code = Column("shortageReasonCode", String(50), nullable=True)   # DAMAGED/SHORT/QUALITY_REJECT/OTHER
     unit_price = Column("unitPrice", Numeric(14, 4), nullable=False)
     total_price = Column("totalPrice", Numeric(14, 4), nullable=False)
     batch_number = Column("batchNumber", String(100), nullable=True)
@@ -249,6 +269,9 @@ class GoodsReceiveItem(Base):
     receivedQty = synonym("received_qty")
     acceptedQty = synonym("accepted_qty")
     rejectedQty = synonym("rejected_qty")
+    damagedQty = synonym("damaged_qty")
+    shortQty = synonym("short_qty")
+    shortageReasonCode = synonym("shortage_reason_code")
     unitPrice = synonym("unit_price")
     totalPrice = synonym("total_price")
     batchNumber = synonym("batch_number")
@@ -259,6 +282,7 @@ class GoodsReceiveItem(Base):
     grn = relationship("GoodsReceiveNote", back_populates="items")
     item = relationship("Item")
     po_item = relationship("PurchaseOrderItem")
+
 
 class BranchRequirementConfig(BaseModel):
     __tablename__ = "branch_requirement_configs"
@@ -351,4 +375,43 @@ class SmartRequirementItem(Base):
     draft = relationship("SmartRequirementDraft", back_populates="items")
     item = relationship("Item")
     supplier = relationship("Supplier")
+
+class SupplierItem(BaseModel):
+    __tablename__ = "supplier_items"
+
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    supplier_id = Column("supplierId", String(36), ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = Column("itemId", String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    supplier_item_code = Column("supplierItemCode", String(100), nullable=True)
+    supplier_item_name = Column("supplierItemName", String(255), nullable=True)
+    purchase_unit_id = Column("purchaseUnitId", String(36), ForeignKey("units.id", ondelete="SET NULL"), nullable=True)
+    purchase_price = Column("purchasePrice", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    conversion_rate = Column("conversionRate", Numeric(14, 4), default=Decimal("1.0000"), nullable=False)
+    lead_time_days = Column("leadTimeDays", Integer, default=1, nullable=False)
+    is_preferred = Column("isPreferred", Boolean, default=False, nullable=False)
+    is_active = Column("isActive", Boolean, default=True, nullable=False)
+
+    companyId = synonym("company_id")
+    supplierId = synonym("supplier_id")
+    itemId = synonym("item_id")
+    supplierItemCode = synonym("supplier_item_code")
+    supplierItemName = synonym("supplier_item_name")
+    purchaseUnitId = synonym("purchase_unit_id")
+    purchasePrice = synonym("purchase_price")
+    conversionRate = synonym("conversion_rate")
+    leadTimeDays = synonym("lead_time_days")
+    isPreferred = synonym("is_preferred")
+    isActive = synonym("is_active")
+
+    supplier = relationship("Supplier")
+    item = relationship("Item")
+    purchase_unit = relationship("Unit", foreign_keys=[purchase_unit_id])
+
+    __table_args__ = (
+        UniqueConstraint("companyId", "supplierId", "itemId", name="uq_company_supplier_item"),
+        Index("idx_supplier_item_supplier", "companyId", "supplierId"),
+        Index("idx_supplier_item_item", "companyId", "itemId"),
+        Index("idx_supplier_item_active", "companyId", "isActive"),
+    )
+
 

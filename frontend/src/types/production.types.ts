@@ -12,6 +12,9 @@ export interface RecipeIngredient {
     stockBalances?: Array<{ quantity: number | string; warehouse: { name: string } }>;
   };
   quantity: number | string;
+  grossQuantity?: number | string;
+  usableYield?: number | string;
+  wastePercentage?: number | string;
   unitId?: string;
   unit?: { symbol: string };
   notes?: string;
@@ -21,6 +24,10 @@ export interface Recipe {
   id: string;
   name: string;
   code: string;
+  version?: number;
+  effectiveDate?: string;
+  effectiveTo?: string;
+  isCurrent?: boolean;
   description?: string;
   finishedItemId: string;
   finishedItem: {

@@ -75,3 +75,26 @@ export interface UserFilterParams {
   branch_id?: string;
   is_active?: boolean;
 }
+
+export interface GranularPermission {
+  id: string;
+  code: string;
+  module: string;
+  action: string;
+  description?: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  user_id?: string;
+  user_name?: string;
+  user_email?: string;
+  action: string;
+  entity: string;
+  entity_id?: string;
+  details?: string;
+  ip_address?: string;
+  user_agent?: string;
+  created_at: string;
+}
+

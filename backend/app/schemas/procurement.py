@@ -45,6 +45,50 @@ class SupplierResponse(SupplierBase):
         from_attributes = True
 
 # ==========================================
+# Vendor-Item Mapping (SupplierItem) Schemas
+# ==========================================
+class SupplierItemBase(BaseModel):
+    supplier_id: str
+    item_id: str
+    supplier_item_code: Optional[str] = None
+    supplier_item_name: Optional[str] = None
+    purchase_unit_id: Optional[str] = None
+    purchase_price: Decimal = Field(default=Decimal("0.0000"), ge=0)
+    conversion_rate: Decimal = Field(default=Decimal("1.0000"), gt=0)
+    lead_time_days: int = Field(default=1, ge=0)
+    is_preferred: bool = False
+    is_active: bool = True
+
+class SupplierItemCreate(SupplierItemBase):
+    company_id: Optional[str] = None
+
+class SupplierItemUpdate(BaseModel):
+    supplier_item_code: Optional[str] = None
+    supplier_item_name: Optional[str] = None
+    purchase_unit_id: Optional[str] = None
+    purchase_price: Optional[Decimal] = Field(None, ge=0)
+    conversion_rate: Optional[Decimal] = Field(None, gt=0)
+    lead_time_days: Optional[int] = Field(None, ge=0)
+    is_preferred: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+class SupplierItemResponse(SupplierItemBase):
+    id: str
+    company_id: str
+    supplier_name: Optional[str] = None
+    supplier_code: Optional[str] = None
+    item_name: Optional[str] = None
+    item_code: Optional[str] = None
+    purchase_unit_name: Optional[str] = None
+    purchase_unit_symbol: Optional[str] = None
+    base_unit_symbol: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+# ==========================================
 # Purchase Request (Outlet Indent) Schemas
 # ==========================================
 class PurchaseRequestItemCreate(BaseModel):
@@ -215,6 +259,9 @@ class GoodsReceiveItemCreate(BaseModel):
     received_qty: Decimal = Field(..., gt=0)
     accepted_qty: Decimal = Field(..., ge=0)
     rejected_qty: Optional[Decimal] = Decimal("0.0000")
+    damaged_qty: Optional[Decimal] = Decimal("0.0000")     # physically damaged on delivery
+    short_qty: Optional[Decimal] = Decimal("0.0000")       # ordered but not delivered
+    shortage_reason_code: Optional[str] = None             # DAMAGED/SHORT/QUALITY_REJECT/OTHER
     unit_price: Decimal = Field(..., ge=0)
     batch_number: Optional[str] = None
     expiry_date: Optional[datetime] = None
@@ -229,9 +276,14 @@ class GoodsReceiveItemResponse(BaseModel):
     item_name: Optional[str] = None
     item_code: Optional[str] = None
     unit_symbol: Optional[str] = None
+    ordered_qty: Optional[Decimal] = None       # from linked PO item
     received_qty: Decimal
     accepted_qty: Decimal
     rejected_qty: Decimal
+    damaged_qty: Decimal = Decimal("0.0000")
+    short_qty: Decimal = Decimal("0.0000")
+    shortage_reason_code: Optional[str] = None
+    remaining_qty: Optional[Decimal] = None     # ordered_qty - cumulative accepted
     unit_price: Decimal
     total_price: Decimal
     batch_number: Optional[str] = None
@@ -248,6 +300,7 @@ class GoodsReceiveNoteCreate(BaseModel):
     supplier_id: Optional[str] = None
     po_id: Optional[str] = None
     receive_date: Optional[datetime] = None
+    delivery_reference: Optional[str] = None    # vendor delivery challan/DC number
     supplier_invoice_number: Optional[str] = None
     invoice_amount: Optional[Decimal] = None
     notes: Optional[str] = None
@@ -259,6 +312,7 @@ class GoodsReceiveFromPOCreate(BaseModel):
     po_id: str
     branch_id: Optional[str] = None
     warehouse_id: Optional[str] = None
+    delivery_reference: Optional[str] = None
     supplier_invoice_number: str = Field(..., min_length=1)
     invoice_amount: Optional[Decimal] = None
     invoice_file_name: Optional[str] = None
@@ -305,19 +359,26 @@ class GoodsReceiveNoteResponse(BaseModel):
     po_number: Optional[str] = None
     grn_number: str
     receive_date: datetime
+    delivery_reference: Optional[str] = None
     supplier_invoice_number: Optional[str] = None
     invoice_amount: Optional[Decimal] = None
     total_amount: Decimal
+    damaged_qty: Decimal = Decimal("0.0000")
+    short_qty: Decimal = Decimal("0.0000")
     status: str
     notes: Optional[str] = None
     received_by_id: Optional[str] = None
     received_by_name: Optional[str] = None
+    approved_by_id: Optional[str] = None
+    approved_at: Optional[datetime] = None
     items: List[GoodsReceiveItemResponse] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
 
 class ThreeWayMatchLine(BaseModel):
     item_id: str

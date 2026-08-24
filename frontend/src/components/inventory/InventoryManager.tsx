@@ -85,7 +85,7 @@ export const InventoryManager: React.FC = () => {
     warehouse_id: '',
     item_id: '',
     change_qty: 0,
-    reason: 'CYCLE_COUNT_ADJUSTMENT',
+    reason_code: 'CYCLE_COUNT_ADJUSTMENT',
     notes: '',
   });
 
@@ -552,7 +552,7 @@ export const InventoryManager: React.FC = () => {
                               warehouse_id: b.warehouse_id,
                               item_id: b.item_id,
                               change_qty: 0,
-                              reason: 'PHYSICAL_AUDIT_ADJUSTMENT',
+                              reason_code: 'CYCLE_COUNT_ADJUSTMENT',
                               notes: '',
                             });
                             setShowAdjustmentModal(true);
@@ -1038,15 +1038,22 @@ export const InventoryManager: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-[#707070] font-semibold mb-1">Reason / Justification *</label>
-                <input
+                <label className="block text-[#707070] font-semibold mb-1">Reason Code *</label>
+                <select
                   required
-                  type="text"
-                  placeholder="e.g. Opening balance audit / Spoilage write-off"
-                  value={adjustmentForm.reason}
-                  onChange={(e) => setAdjustmentForm({ ...adjustmentForm, reason: e.target.value })}
+                  value={adjustmentForm.reason_code}
+                  onChange={(e) => setAdjustmentForm({ ...adjustmentForm, reason_code: e.target.value })}
                   className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                />
+                >
+                  <option value="CYCLE_COUNT_ADJUSTMENT">Cycle Count Adjustment</option>
+                  <option value="OPENING_BALANCE">Opening Balance</option>
+                  <option value="SPOILAGE">Spoilage / Wastage</option>
+                  <option value="THEFT_LOSS">Theft / Loss</option>
+                  <option value="DAMAGE">Damage</option>
+                  <option value="SUPPLIER_RETURN">Supplier Return</option>
+                  <option value="INTERNAL_TRANSFER">Internal Transfer</option>
+                  <option value="OTHER">Other</option>
+                </select>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

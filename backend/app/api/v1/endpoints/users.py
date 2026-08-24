@@ -15,8 +15,9 @@ from app.core.exceptions import (
     NotFoundException,
     BadRequestException,
 )
-from app.models.user import User, Role, UserBranch
+from app.models.user import User, Role, Permission, RolePermission, UserBranch
 from app.models.organization import Company, Branch
+from app.models.audit import AuditLog
 from app.schemas.users import (
     RoleInfo,
     UserBranchDetail,
@@ -25,6 +26,9 @@ from app.schemas.users import (
     UserUpdateRequest,
     UserStatusUpdateRequest,
     UserManagementSummary,
+    PermissionResponse,
+    RolePermissionAssignRequest,
+    AuditLogResponse,
 )
 
 router = APIRouter()
@@ -124,6 +128,164 @@ def list_available_roles(
         )
         for r in roles
     ]
+
+
+@router.get("/permissions", response_model=List[PermissionResponse], status_code=status.HTTP_200_OK)
+def list_available_permissions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_admin)
+):
+    """List all available granular system permissions, auto-seeding if empty."""
+    perms = db.query(Permission).order_by(Permission.module.asc(), Permission.action.asc()).all()
+    if not perms:
+        default_permissions = [
+            ("organization:read", "organization", "read", "View enterprise organization and branch topology"),
+            ("organization:create", "organization", "create", "Create branches, departments and warehouses"),
+            ("organization:update", "organization", "update", "Update branches, departments and warehouses"),
+            ("organization:delete", "organization", "delete", "Deactivate organization nodes"),
+            ("users:read", "users", "read", "View user accounts, roles and permissions"),
+            ("users:create", "users", "create", "Create new system users and assign roles"),
+            ("users:update", "users", "update", "Update user accounts, roles and outlet scopes"),
+            ("users:delete", "users", "delete", "Deactivate user accounts"),
+            ("inventory:read", "inventory", "read", "View items, stock balances and warehouse ledgers"),
+            ("inventory:create", "inventory", "create", "Create catalog items, categories and units"),
+            ("inventory:update", "inventory", "update", "Update catalog items, prices and stock counts"),
+            ("inventory:delete", "inventory", "delete", "Deactivate catalog items"),
+            ("procurement:read", "procurement", "read", "View suppliers, indents, POs and GRNs"),
+            ("procurement:create", "procurement", "create", "Create suppliers, purchase requests and vendor mappings"),
+            ("procurement:update", "procurement", "update", "Update suppliers and vendor mappings"),
+            ("procurement:approve", "procurement", "approve", "Approve purchase requests and POs"),
+            ("production:read", "production", "read", "View recipes and production orders"),
+            ("production:create", "production", "create", "Create recipes and production batches"),
+            ("production:update", "production", "update", "Update recipes and finish production runs"),
+            ("wastage:read", "wastage", "read", "View wastage logs and food loss records"),
+            ("wastage:create", "wastage", "create", "Log kitchen and bar wastage"),
+            ("wastage:approve", "wastage", "approve", "Approve high-value wastage entries"),
+            ("closing:read", "closing", "read", "View bi-monthly closing audit records"),
+            ("closing:create", "closing", "create", "Initiate bi-monthly stock takes"),
+            ("closing:finalize", "closing", "finalize", "Finalize and lock bi-monthly closing periods"),
+            ("hr:read", "hr", "read", "View staff directory and attendance"),
+            ("hr:create", "hr", "create", "Create staff profiles and shifts"),
+            ("hr:update", "hr", "update", "Update staff records and process payroll"),
+            ("reports:read", "reports", "read", "View executive and variance reports"),
+            ("ai:query", "ai", "query", "Use AI assistant and automated invoice parser"),
+        ]
+        created = []
+        for code, module, action, desc in default_permissions:
+            p = Permission(
+                id=str(uuid.uuid4()),
+                code=code,
+                module=module,
+                action=action,
+                description=desc,
+            )
+            db.add(p)
+            created.append(p)
+        db.commit()
+        perms = db.query(Permission).order_by(Permission.module.asc(), Permission.action.asc()).all()
+
+    return perms
+
+
+@router.get("/roles/{role_id}/permissions", response_model=List[str], status_code=status.HTTP_200_OK)
+def get_role_permissions(
+    role_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_admin)
+):
+    """Retrieve list of permission codes assigned to a specific role."""
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise NotFoundException("Role", role_id)
+
+    # Super Admin wildcard
+    if role.name.upper() in ["SUPER_ADMIN", "SUPERADMIN", "OWNER"]:
+        return ["*:*"]
+
+    role_perms = (
+        db.query(Permission.code)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
+        .filter(RolePermission.role_id == role_id)
+        .all()
+    )
+    return [rp[0] for rp in role_perms]
+
+
+@router.post("/roles/{role_id}/permissions", response_model=List[str], status_code=status.HTTP_200_OK)
+def assign_role_permissions(
+    role_id: str,
+    payload: RolePermissionAssignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_admin)
+):
+    """Assign/sync permission codes to a role."""
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise NotFoundException("Role", role_id)
+
+    if role.name.upper() in ["SUPER_ADMIN", "SUPERADMIN", "OWNER"]:
+        raise BadRequestException("Cannot modify permissions for Super Admin role (wildcard access preserved)")
+
+    # Clear existing permissions for role
+    db.query(RolePermission).filter(RolePermission.role_id == role_id).delete()
+
+    assigned_codes = []
+    for code in payload.permission_codes:
+        perm = db.query(Permission).filter(Permission.code == code).first()
+        if perm:
+            rp = RolePermission(
+                id=str(uuid.uuid4()),
+                role_id=role_id,
+                permission_id=perm.id,
+            )
+            db.add(rp)
+            assigned_codes.append(code)
+
+    db.commit()
+    return assigned_codes
+
+
+@router.get("/audit-logs", response_model=List[AuditLogResponse], status_code=status.HTTP_200_OK)
+def get_audit_logs(
+    entity: Optional[str] = Query(None, description="Filter by entity type (e.g. Supplier, SupplierItem, User)"),
+    action: Optional[str] = Query(None, description="Filter by action code"),
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_admin)
+):
+    """Retrieve audit logs for master data changes and security events."""
+    query = db.query(AuditLog)
+    if entity:
+        query = query.filter(AuditLog.entity == entity)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if user_id:
+        query = query.filter(AuditLog.user_id == user_id)
+
+    logs = query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit).all()
+    
+    results = []
+    for l in logs:
+        u = db.query(User).filter(User.id == l.user_id).first() if l.user_id else None
+        results.append(
+            AuditLogResponse(
+                id=str(l.id),
+                user_id=str(l.user_id) if l.user_id else None,
+                user_name=f"{u.first_name} {u.last_name or ''}".strip() if u else None,
+                user_email=u.email if u else None,
+                action=l.action,
+                entity=l.entity,
+                entity_id=str(l.entity_id) if l.entity_id else None,
+                details=l.details,
+                ip_address=l.ip_address,
+                user_agent=l.user_agent,
+                created_at=l.created_at,
+            )
+        )
+    return results
+
 
 @router.get("/summary", response_model=UserManagementSummary, status_code=status.HTTP_200_OK)
 def get_user_management_summary(

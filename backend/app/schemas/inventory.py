@@ -180,12 +180,16 @@ class LowStockAlertResponse(BaseModel):
     unit_symbol: Optional[str] = None
 
 # -------------------------------------------------------------
-# Stock Ledger Schemas
+# Stock Ledger & Timeline Schemas
 # -------------------------------------------------------------
 class StockLedgerResponse(BaseModel):
     id: str
+    company_id: Optional[str] = None
+    branch_id: Optional[str] = None
     warehouse_id: str
     item_id: str
+    unit_id: Optional[str] = None
+    unit_symbol: Optional[str] = None
     batch_number: Optional[str] = None
     expiry_date: Optional[datetime] = None
     movement_type: str
@@ -195,14 +199,59 @@ class StockLedgerResponse(BaseModel):
     total_cost: Optional[Decimal] = None
     reference_type: Optional[str] = None
     reference_id: Optional[str] = None
+    reversal_reference_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    is_emergency_override: bool = False
     notes: Optional[str] = None
     created_by_id: Optional[str] = None
+    created_by_name: Optional[str] = None
     created_at: Optional[datetime] = None
     item_name: Optional[str] = None
     item_code: Optional[str] = None
     warehouse_name: Optional[str] = None
+    direction: Optional[str] = None
+    badge_color: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+class StockMovementTimelineEntry(BaseModel):
+    id: str
+    timestamp: datetime
+    movement_type: str
+    direction: str  # "IN", "OUT", "REVERSAL"
+    change_qty: Decimal
+    balance_qty: Decimal
+    unit_symbol: Optional[str] = None
+    unit_cost: Optional[Decimal] = None
+    total_cost: Optional[Decimal] = None
+    item_id: str
+    item_name: str
+    item_code: str
+    warehouse_id: str
+    warehouse_name: str
+    batch_number: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    reference_type: Optional[str] = None
+    reference_id: Optional[str] = None
+    reversal_reference_id: Optional[str] = None
+    is_emergency_override: bool = False
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    reason_code: Optional[str] = None
+    notes: Optional[str] = None
+    badge_color: str  # "emerald", "rose", "amber", "blue"
+
+class StockAdjustmentCreate(BaseModel):
+    warehouse_id: str
+    item_id: str
+    change_qty: Decimal  # Positive for IN, Negative for OUT
+    reason_code: str  # "STOCK_COUNT_DISCREPANCY", "SPOILAGE", "CORRECTION", "DONATION", "FOUND_STOCK", "OTHER"
+    batch_number: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    unit_cost: Optional[Decimal] = None
+    notes: Optional[str] = None
+    is_emergency_override: bool = False
+    override_reason: Optional[str] = None
 
 # -------------------------------------------------------------
 # Stock Transfer Schemas

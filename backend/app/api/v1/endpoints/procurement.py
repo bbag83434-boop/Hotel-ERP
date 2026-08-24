@@ -25,6 +25,7 @@ from app.models.organization import Company, Branch, Warehouse
 from app.models.inventory import Item, Unit, StockBalance, StockLedger, StockTransfer, StockMovementType, StockBatch
 from app.models.procurement import (
     Supplier,
+    SupplierItem,
     PurchaseRequest,
     PurchaseRequestItem,
     PurchaseOrder,
@@ -51,6 +52,9 @@ from app.schemas.procurement import (
     SupplierCreate,
     SupplierUpdate,
     SupplierResponse,
+    SupplierItemCreate,
+    SupplierItemUpdate,
+    SupplierItemResponse,
     PurchaseRequestCreate,
     PurchaseRequestUpdate,
     PurchaseRequestRejectRequest,
@@ -352,6 +356,251 @@ def update_supplier(
     )
     db.commit()
     return supplier
+
+
+# ==============================================================================
+# Vendor-Item Mapping (SupplierItem) Endpoints
+# ==============================================================================
+
+def format_supplier_item_response(si: SupplierItem, db: Session) -> SupplierItemResponse:
+    sup = si.supplier or db.query(Supplier).filter(Supplier.id == si.supplier_id).first()
+    it = si.item or db.query(Item).filter(Item.id == si.item_id).first()
+    pu = si.purchase_unit or (db.query(Unit).filter(Unit.id == si.purchase_unit_id).first() if si.purchase_unit_id else None)
+    base_unit = it.unit if it else None
+
+    return SupplierItemResponse(
+        id=si.id,
+        company_id=si.company_id,
+        supplier_id=si.supplier_id,
+        item_id=si.item_id,
+        supplier_item_code=si.supplier_item_code,
+        supplier_item_name=si.supplier_item_name,
+        purchase_unit_id=si.purchase_unit_id,
+        purchase_price=Decimal(str(si.purchase_price or 0)),
+        conversion_rate=Decimal(str(si.conversion_rate or 1)),
+        lead_time_days=si.lead_time_days or 1,
+        is_preferred=bool(si.is_preferred),
+        is_active=bool(si.is_active),
+        supplier_name=sup.name if sup else None,
+        supplier_code=sup.code if sup else None,
+        item_name=it.name if it else None,
+        item_code=it.code if it else None,
+        purchase_unit_name=pu.name if pu else None,
+        purchase_unit_symbol=pu.symbol if pu else None,
+        base_unit_symbol=base_unit.symbol if base_unit else None,
+        created_at=si.created_at,
+        updated_at=si.updated_at,
+    )
+
+
+@router.get("/vendor-items", response_model=List[SupplierItemResponse])
+def list_vendor_items(
+    supplier_id: Optional[str] = Query(None, description="Filter by Supplier ID"),
+    item_id: Optional[str] = Query(None, description="Filter by Item ID"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """List vendor-item catalog mappings with supplier and item details."""
+    query = db.query(SupplierItem)
+    if current_user.company_id:
+        query = query.filter(SupplierItem.company_id == current_user.company_id)
+    if supplier_id:
+        query = query.filter(SupplierItem.supplier_id == supplier_id)
+    if item_id:
+        query = query.filter(SupplierItem.item_id == item_id)
+    if is_active is not None:
+        query = query.filter(SupplierItem.is_active == is_active)
+
+    mappings = query.order_by(SupplierItem.created_at.desc()).all()
+    return [format_supplier_item_response(m, db) for m in mappings]
+
+
+@router.post("/vendor-items", response_model=SupplierItemResponse, status_code=status.HTTP_201_CREATED)
+def create_vendor_item(
+    payload: SupplierItemCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Create a new Vendor-to-Item mapping.
+    Blocks duplicate active mappings and inactive supplier/item links.
+    """
+    company_id = payload.company_id or current_user.company_id
+    if not company_id:
+        comp = db.query(Company).first()
+        company_id = comp.id if comp else "default-company"
+
+    # 1. Validate Supplier
+    supplier = db.query(Supplier).filter(Supplier.id == payload.supplier_id).first()
+    if not supplier:
+        raise NotFoundException(f"Supplier '{payload.supplier_id}' not found")
+    if not supplier.is_active:
+        raise BadRequestException(f"Cannot map to inactive supplier '{supplier.name}'")
+
+    # 2. Validate Item
+    item = db.query(Item).filter(Item.id == payload.item_id).first()
+    if not item:
+        raise NotFoundException(f"Item '{payload.item_id}' not found")
+    if not item.is_active:
+        raise BadRequestException(f"Cannot map to inactive item '{item.name}'")
+
+    # 3. Check for existing mapping
+    existing = db.query(SupplierItem).filter(
+        SupplierItem.company_id == company_id,
+        SupplierItem.supplier_id == payload.supplier_id,
+        SupplierItem.item_id == payload.item_id,
+    ).first()
+    if existing:
+        if existing.is_active:
+            raise ConflictException(
+                f"Active Vendor-Item mapping already exists between supplier '{supplier.name}' and item '{item.name}'"
+            )
+        else:
+            # Reactivate and update existing mapping
+            existing.is_active = True
+            existing.purchase_price = payload.purchase_price
+            existing.conversion_rate = payload.conversion_rate
+            existing.lead_time_days = payload.lead_time_days
+            existing.is_preferred = payload.is_preferred
+            existing.supplier_item_code = payload.supplier_item_code
+            existing.supplier_item_name = payload.supplier_item_name
+            existing.purchase_unit_id = payload.purchase_unit_id
+            db.commit()
+            db.refresh(existing)
+            return format_supplier_item_response(existing, db)
+
+    # 4. If preferred, un-mark previous preferred mappings for this item
+    if payload.is_preferred:
+        db.query(SupplierItem).filter(
+            SupplierItem.company_id == company_id,
+            SupplierItem.item_id == payload.item_id,
+            SupplierItem.is_preferred == True,
+        ).update({"is_preferred": False})
+
+    # 5. Create new mapping
+    new_mapping = SupplierItem(
+        id=str(uuid.uuid4()),
+        company_id=company_id,
+        supplier_id=payload.supplier_id,
+        item_id=payload.item_id,
+        supplier_item_code=payload.supplier_item_code,
+        supplier_item_name=payload.supplier_item_name,
+        purchase_unit_id=payload.purchase_unit_id,
+        purchase_price=payload.purchase_price,
+        conversion_rate=payload.conversion_rate,
+        lead_time_days=payload.lead_time_days,
+        is_preferred=payload.is_preferred,
+        is_active=payload.is_active,
+    )
+    db.add(new_mapping)
+    db.commit()
+    db.refresh(new_mapping)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="CREATE_VENDOR_ITEM_MAPPING",
+        entity_type="SupplierItem",
+        entity_id=new_mapping.id,
+        company_id=company_id,
+        new_values={
+            "supplier_id": payload.supplier_id,
+            "item_id": payload.item_id,
+            "purchase_price": str(payload.purchase_price),
+            "conversion_rate": str(payload.conversion_rate),
+            "is_preferred": payload.is_preferred,
+        },
+    )
+    db.commit()
+    return format_supplier_item_response(new_mapping, db)
+
+
+@router.get("/vendor-items/{mapping_id}", response_model=SupplierItemResponse)
+def get_vendor_item(
+    mapping_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Retrieve single vendor-item mapping details."""
+    mapping = db.query(SupplierItem).filter(SupplierItem.id == mapping_id).first()
+    if not mapping:
+        raise NotFoundException(f"Vendor-Item mapping '{mapping_id}' not found")
+    return format_supplier_item_response(mapping, db)
+
+
+@router.put("/vendor-items/{mapping_id}", response_model=SupplierItemResponse)
+def update_vendor_item(
+    mapping_id: str = Path(...),
+    payload: SupplierItemUpdate = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Update vendor-item mapping attributes, prices, or conversion rates."""
+    mapping = db.query(SupplierItem).filter(SupplierItem.id == mapping_id).first()
+    if not mapping:
+        raise NotFoundException(f"Vendor-Item mapping '{mapping_id}' not found")
+
+    old_values = {
+        "purchase_price": str(mapping.purchase_price),
+        "conversion_rate": str(mapping.conversion_rate),
+        "is_preferred": mapping.is_preferred,
+        "is_active": mapping.is_active,
+    }
+
+    # If setting to preferred, un-mark previous preferred mappings
+    if payload.is_preferred is True:
+        db.query(SupplierItem).filter(
+            SupplierItem.company_id == mapping.company_id,
+            SupplierItem.item_id == mapping.item_id,
+            SupplierItem.id != mapping.id,
+            SupplierItem.is_preferred == True,
+        ).update({"is_preferred": False})
+
+    update_dict = payload.dict(exclude_unset=True)
+    for k, v in update_dict.items():
+        setattr(mapping, k, v)
+
+    db.commit()
+    db.refresh(mapping)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="UPDATE_VENDOR_ITEM_MAPPING",
+        entity_type="SupplierItem",
+        entity_id=mapping.id,
+        old_values=old_values,
+        new_values=update_dict,
+    )
+    db.commit()
+    return format_supplier_item_response(mapping, db)
+
+
+@router.delete("/vendor-items/{mapping_id}")
+def delete_vendor_item(
+    mapping_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Soft-delete / deactivate vendor-item mapping."""
+    mapping = db.query(SupplierItem).filter(SupplierItem.id == mapping_id).first()
+    if not mapping:
+        raise NotFoundException(f"Vendor-Item mapping '{mapping_id}' not found")
+
+    mapping.is_active = False
+    db.commit()
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="DEACTIVATE_VENDOR_ITEM_MAPPING",
+        entity_type="SupplierItem",
+        entity_id=mapping.id,
+    )
+    db.commit()
+    return {"message": "Vendor-Item mapping deactivated successfully", "id": mapping_id}
+
 
 
 def format_pr_response(req: PurchaseRequest, db: Session) -> PurchaseRequestResponse:

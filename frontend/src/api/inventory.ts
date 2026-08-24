@@ -81,9 +81,19 @@ export const inventoryApi = {
     return res.data;
   },
 
+  // Stock Ledger & Timeline
+  getStockLedger: async (params?: { warehouse_id?: string; item_id?: string; movement_type?: string; limit?: number }) => {
+    const res = await apiClient.get('/inventory/stock-ledger', { params });
+    return res.data;
+  },
+  getMovementTimeline: async (params?: { item_id?: string; warehouse_id?: string; start_date?: string; end_date?: string; movement_type?: string; limit?: number }) => {
+    const res = await apiClient.get('/inventory/stock-ledger/timeline', { params });
+    return res.data;
+  },
+
   // Direct Stock Adjustments
-  adjustStock: async (payload: StockAdjustmentInput): Promise<StockAdjustmentResult> => {
-    const res = await apiClient.post<StockAdjustmentResult>('/inventory/adjustments', payload);
+  adjustStock: async (payload: { warehouse_id: string; item_id: string; change_qty: number; reason_code: string; batch_number?: string; expiry_date?: string; unit_cost?: number; notes?: string; is_emergency_override?: boolean; override_reason?: string }) => {
+    const res = await apiClient.post('/inventory/stock-adjustments', payload);
     return res.data;
   },
 

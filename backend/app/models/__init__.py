@@ -31,6 +31,7 @@ from app.models.inventory import (
 )
 from app.models.procurement import (
     Supplier,
+    SupplierItem,
     PurchaseRequest,
     PurchaseRequestItem,
     PurchaseOrder,
@@ -94,6 +95,7 @@ __all__ = [
     "TransferStatus",
     "StockCountStatus",
     "Supplier",
+    "SupplierItem",
     "PurchaseRequest",
     "PurchaseRequestItem",
     "PurchaseOrder",

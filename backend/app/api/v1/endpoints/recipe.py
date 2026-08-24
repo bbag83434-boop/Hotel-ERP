@@ -39,7 +39,7 @@ router = APIRouter()
 
 def _calculate_recipe_costs(recipe: Recipe, db: Session) -> tuple[Decimal, Decimal, List[RecipeItemResponse]]:
     """
-    Helper to calculate real-time theoretical ingredient costs and recursive sub-recipe rollups.
+    Helper to calculate real-time theoretical ingredient costs, gross requirements, and recursive sub-recipe rollups.
     """
     total_recipe_cost = Decimal("0.0000")
     ingredients_res = []
@@ -68,8 +68,17 @@ def _calculate_recipe_costs(recipe: Recipe, db: Session) -> tuple[Decimal, Decim
                 if sub_u_cost > 0:
                     unit_cost = sub_u_cost
 
-        qty = Decimal(str(ing.quantity))
-        item_cost = qty * unit_cost
+        qty = Decimal(str(ing.quantity or 1.0))
+        usable_yield = Decimal(str(getattr(ing, "usable_yield", 100.0) or 100.0))
+        waste_pct = Decimal(str(getattr(ing, "waste_percentage", 0.0) or 0.0))
+
+        # Compute gross quantity: Usable / (Yield% / 100)
+        yield_factor = usable_yield / Decimal("100.00") if usable_yield > 0 else Decimal("1.00")
+        gross_qty = getattr(ing, "gross_quantity", None)
+        if not gross_qty or gross_qty <= 0:
+            gross_qty = qty / yield_factor
+
+        item_cost = gross_qty * unit_cost
         total_recipe_cost += item_cost
 
         ingredients_res.append(
@@ -79,6 +88,9 @@ def _calculate_recipe_costs(recipe: Recipe, db: Session) -> tuple[Decimal, Decim
                 raw_item_id=ing.raw_item_id,
                 unit_id=ing.unit_id or (raw_item.unit_id if raw_item else None),
                 quantity=qty,
+                gross_quantity=gross_qty,
+                usable_yield=usable_yield,
+                waste_percentage=waste_pct,
                 cost_contribution=item_cost,
                 notes=ing.notes,
                 item_name=raw_item.name if raw_item else None,
@@ -111,6 +123,10 @@ def _format_recipe_response(recipe: Recipe, db: Session) -> RecipeResponse:
         finished_unit_symbol=finished_unit.symbol if finished_unit else None,
         name=recipe.name,
         code=recipe.code,
+        version=getattr(recipe, "version", 1) or 1,
+        effective_date=getattr(recipe, "effective_date", None) or recipe.created_at,
+        effective_to=getattr(recipe, "effective_to", None),
+        is_current=getattr(recipe, "is_current", True) if getattr(recipe, "is_current", True) is not None else True,
         description=recipe.description,
         yield_qty=Decimal(str(recipe.yield_qty)),
         preparation_minutes=recipe.preparation_minutes,

@@ -288,9 +288,17 @@ export const ProductionWorkspace: React.FC = () => {
                   <div className="space-y-2">
                     <div className="flex items-start justify-between">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{r.name}</h4>
                           <Badge variant="outlet">{r.code}</Badge>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#F1E4C5] text-[#B8862D]">
+                            v{r.version || 1}
+                          </span>
+                          {r.effectiveDate && (
+                            <span className="text-[10px] text-[#707070]">
+                              Eff: {new Date(r.effectiveDate).toLocaleDateString()}
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-[#707070] mt-0.5">
                           {r.description || 'Standard multi-outlet recipe BOM'}
@@ -327,12 +335,26 @@ export const ProductionWorkspace: React.FC = () => {
                               key={ing.id}
                               className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-white border border-[rgba(45,45,45,0.04)]"
                             >
-                              <span className="text-[#1C1C1C] font-medium">
-                                {ing.rawItem?.name || 'Raw Ingredient'}
-                              </span>
-                              <span className="font-mono text-[11px] text-[#707070]">
-                                {Number(ing.quantity).toFixed(2)} {ing.unit?.symbol || ing.rawItem?.unit?.symbol || ''}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[#1C1C1C] font-medium">
+                                  {ing.rawItem?.name || 'Raw Ingredient'}
+                                </span>
+                                {ing.usableYield && Number(ing.usableYield) < 100 && (
+                                  <span className="text-[10px] text-amber-600 bg-amber-50 px-1 rounded">
+                                    Yield: {Number(ing.usableYield).toFixed(0)}%
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <span className="font-mono text-[11px] font-semibold text-[#1C1C1C]">
+                                  {Number(ing.grossQuantity || ing.quantity).toFixed(2)} {ing.unit?.symbol || ing.rawItem?.unit?.symbol || ''}
+                                </span>
+                                {ing.grossQuantity && Number(ing.grossQuantity) !== Number(ing.quantity) && (
+                                  <span className="text-[10px] text-[#707070] block">
+                                    Net: {Number(ing.quantity).toFixed(2)}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -509,28 +531,70 @@ export const ProductionWorkspace: React.FC = () => {
                 <label className="text-xs font-semibold text-[#1C1C1C] block mb-1">
                   Planned Batch Quantity (Yield)
                 </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="1"
-                    value={plannedQty}
-                    onChange={(e) => {
-                      setPlannedQty(Number(e.target.value));
-                      setPreviewData(null);
-                    }}
-                    className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
-                  />
-                  <Button
-                    variant="primary"
-                    size="md"
-                    onClick={handlePreview}
-                    disabled={previewLoading || !selectedRecipeId || !selectedWarehouseId}
-                    loading={previewLoading}
-                    icon={<Search className="w-3.5 h-3.5 text-[#C79A3B]" />}
-                    className="whitespace-nowrap"
-                  >
-                    Check
-                  </Button>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlannedQty(Math.max(1, plannedQty - 1));
+                        setPreviewData(null);
+                      }}
+                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] text-[#1C1C1C] font-bold text-sm hover:bg-[#F1E4C5] active:scale-95 transition-all"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min="1"
+                      value={plannedQty}
+                      onChange={(e) => {
+                        setPlannedQty(Math.max(1, Number(e.target.value) || 1));
+                        setPreviewData(null);
+                      }}
+                      className="flex-1 px-3 py-2 text-xs font-mono font-bold text-center rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlannedQty(plannedQty + 1);
+                        setPreviewData(null);
+                      }}
+                      className="w-10 h-10 flex items-center justify-center rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] text-[#1C1C1C] font-bold text-sm hover:bg-[#F1E4C5] active:scale-95 transition-all"
+                    >
+                      +
+                    </button>
+                    <Button
+                      variant="primary"
+                      size="md"
+                      onClick={handlePreview}
+                      disabled={previewLoading || !selectedRecipeId || !selectedWarehouseId}
+                      loading={previewLoading}
+                      icon={<Search className="w-3.5 h-3.5 text-[#C79A3B]" />}
+                      className="whitespace-nowrap"
+                    >
+                      Check
+                    </Button>
+                  </div>
+                  {/* Preset Pills */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {[5, 10, 25, 50].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setPlannedQty(preset);
+                          setPreviewData(null);
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                          plannedQty === preset
+                            ? 'bg-[#B8862D] text-white border-[#B8862D]'
+                            : 'bg-white text-[#707070] border-[rgba(45,45,45,0.12)] hover:border-[#B8862D]'
+                        }`}
+                      >
+                        {preset} Units
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>

@@ -10,6 +10,9 @@ class RecipeItemBase(BaseModel):
     raw_item_id: str
     unit_id: Optional[str] = None
     quantity: Decimal = Field(default=Decimal("1.0000"), ge=Decimal("0.0001"))
+    gross_quantity: Optional[Decimal] = None
+    usable_yield: Decimal = Field(default=Decimal("100.00"), ge=Decimal("0.01"), le=Decimal("100.00"))
+    waste_percentage: Decimal = Field(default=Decimal("0.00"), ge=Decimal("0.00"), le=Decimal("99.99"))
     notes: Optional[str] = None
 
 class RecipeItemCreate(RecipeItemBase):
@@ -36,6 +39,10 @@ class RecipeBase(BaseModel):
     finished_item_id: str
     name: str
     code: str
+    version: int = 1
+    effective_date: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    is_current: bool = True
     description: Optional[str] = None
     yield_qty: Decimal = Field(default=Decimal("1.0000"), ge=Decimal("0.0001"))
     preparation_minutes: int = Field(default=15, ge=0)
@@ -48,6 +55,10 @@ class RecipeCreate(RecipeBase):
 class RecipeUpdate(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
+    version: Optional[int] = None
+    effective_date: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    is_current: Optional[bool] = None
     description: Optional[str] = None
     yield_qty: Optional[Decimal] = None
     preparation_minutes: Optional[int] = None

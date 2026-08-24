@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Union, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -78,3 +78,33 @@ class UserManagementSummary(BaseModel):
     managers: int = 0
     staff: int = 0
     roles: List[RoleInfo] = []
+
+class PermissionResponse(BaseModel):
+    id: str
+    code: str
+    module: str
+    action: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class RolePermissionAssignRequest(BaseModel):
+    permission_codes: List[str] = Field(..., description="List of permission codes to assign to role")
+
+class AuditLogResponse(BaseModel):
+    id: str
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+    action: str
+    entity: str
+    entity_id: Optional[str] = None
+    details: Optional[Union[str, Dict[str, Any], Any]] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+

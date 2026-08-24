@@ -54,6 +54,7 @@ from app.schemas.inventory import (
     StockCountItemResponse,
     StockAdjustmentCreate,
     StockAdjustmentResponse,
+    StockMovementTimelineEntry,
     StockBatchCreate,
     StockBatchUpdate,
     StockBatchResponse,
@@ -865,29 +866,267 @@ def get_stock_ledger(
     for entry in entries:
         it = db.query(Item).filter(Item.id == entry.item_id).first()
         wh = db.query(Warehouse).filter(Warehouse.id == entry.warehouse_id).first()
+        u = db.query(Unit).filter(Unit.id == entry.unit_id).first() if entry.unit_id else (
+            db.query(Unit).filter(Unit.id == it.unit_id).first() if it and it.unit_id else None
+        )
+        usr = db.query(User).filter(User.id == entry.created_by_id).first() if entry.created_by_id else None
+
+        mv_type_str = entry.movement_type.value if hasattr(entry.movement_type, "value") else str(entry.movement_type)
+        chg = Decimal(str(entry.change_qty))
+        
+        if mv_type_str in ["GRN", "PRODUCTION_IN", "TRANSFER_IN", "ADJUSTMENT_IN", "PURCHASE_RECEIVE"] or (mv_type_str == "ADJUSTMENT" and chg > 0):
+            direction = "IN"
+            badge_color = "emerald"
+        elif mv_type_str in ["POS_SALE", "PRODUCTION_OUT", "TRANSFER_OUT", "WASTAGE", "ADJUSTMENT_OUT"] or (mv_type_str == "ADJUSTMENT" and chg < 0):
+            direction = "OUT"
+            badge_color = "rose"
+        elif mv_type_str == "REVERSAL":
+            direction = "REVERSAL"
+            badge_color = "amber"
+        else:
+            direction = "IN" if chg >= 0 else "OUT"
+            badge_color = "emerald" if chg >= 0 else "rose"
+
         results.append(
             StockLedgerResponse(
                 id=entry.id,
+                company_id=getattr(entry, "company_id", None) or (it.company_id if it else None),
+                branch_id=getattr(entry, "branch_id", None) or (wh.branch_id if wh else None),
                 warehouse_id=entry.warehouse_id,
                 item_id=entry.item_id,
+                unit_id=entry.unit_id or (it.unit_id if it else None),
+                unit_symbol=u.symbol if u else None,
                 batch_number=entry.batch_number,
                 expiry_date=entry.expiry_date,
-                movement_type=entry.movement_type.value if hasattr(entry.movement_type, "value") else str(entry.movement_type),
-                change_qty=Decimal(str(entry.change_qty)),
+                movement_type=mv_type_str,
+                change_qty=chg,
                 balance_qty=Decimal(str(entry.balance_qty)),
                 unit_cost=Decimal(str(entry.unit_cost)) if entry.unit_cost is not None else None,
                 total_cost=Decimal(str(entry.total_cost)) if entry.total_cost is not None else None,
                 reference_type=entry.reference_type,
                 reference_id=entry.reference_id,
+                reversal_reference_id=getattr(entry, "reversal_reference_id", None),
+                idempotency_key=getattr(entry, "idempotency_key", None),
+                is_emergency_override=bool(getattr(entry, "is_emergency_override", False)),
                 notes=entry.notes,
                 created_by_id=entry.created_by_id,
+                created_by_name=usr.name if usr else None,
                 created_at=entry.created_at,
                 item_name=it.name if it else None,
                 item_code=it.code if it else None,
                 warehouse_name=wh.name if wh else None,
+                direction=direction,
+                badge_color=badge_color,
             )
         )
     return results
+
+
+@router.get("/stock-ledger/timeline", response_model=List[StockMovementTimelineEntry])
+def get_stock_movement_timeline(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    item_id: Optional[str] = None,
+    warehouse_id: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    movement_type: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=500),
+):
+    query = db.query(StockLedger).join(
+        Item, Item.id == StockLedger.item_id
+    ).filter(Item.company_id == current_user.company_id)
+
+    if item_id:
+        query = query.filter(StockLedger.item_id == item_id)
+    if warehouse_id:
+        query = query.filter(StockLedger.warehouse_id == warehouse_id)
+    if movement_type:
+        query = query.filter(StockLedger.movement_type == movement_type)
+    if start_date:
+        query = query.filter(StockLedger.created_at >= start_date)
+    if end_date:
+        query = query.filter(StockLedger.created_at <= end_date)
+
+    entries = query.order_by(StockLedger.created_at.desc()).limit(limit).all()
+    timeline = []
+    for entry in entries:
+        it = db.query(Item).filter(Item.id == entry.item_id).first()
+        wh = db.query(Warehouse).filter(Warehouse.id == entry.warehouse_id).first()
+        u = db.query(Unit).filter(Unit.id == entry.unit_id).first() if entry.unit_id else (
+            db.query(Unit).filter(Unit.id == it.unit_id).first() if it and it.unit_id else None
+        )
+        usr = db.query(User).filter(User.id == entry.created_by_id).first() if entry.created_by_id else None
+
+        mv_type_str = entry.movement_type.value if hasattr(entry.movement_type, "value") else str(entry.movement_type)
+        chg = Decimal(str(entry.change_qty))
+
+        if mv_type_str in ["GRN", "PRODUCTION_IN", "TRANSFER_IN", "ADJUSTMENT_IN", "PURCHASE_RECEIVE"] or (mv_type_str == "ADJUSTMENT" and chg > 0):
+            direction = "IN"
+            badge_color = "emerald"
+        elif mv_type_str in ["POS_SALE", "PRODUCTION_OUT", "TRANSFER_OUT", "WASTAGE", "ADJUSTMENT_OUT"] or (mv_type_str == "ADJUSTMENT" and chg < 0):
+            direction = "OUT"
+            badge_color = "rose"
+        elif mv_type_str == "REVERSAL":
+            direction = "REVERSAL"
+            badge_color = "amber"
+        else:
+            direction = "IN" if chg >= 0 else "OUT"
+            badge_color = "emerald" if chg >= 0 else "rose"
+
+        timeline.append(
+            StockMovementTimelineEntry(
+                id=entry.id,
+                timestamp=entry.created_at,
+                movement_type=mv_type_str,
+                direction=direction,
+                change_qty=chg,
+                balance_qty=Decimal(str(entry.balance_qty)),
+                unit_symbol=u.symbol if u else None,
+                unit_cost=Decimal(str(entry.unit_cost)) if entry.unit_cost is not None else None,
+                total_cost=Decimal(str(entry.total_cost)) if entry.total_cost is not None else None,
+                item_id=entry.item_id,
+                item_name=it.name if it else "Unknown Item",
+                item_code=it.code if it else "",
+                warehouse_id=entry.warehouse_id,
+                warehouse_name=wh.name if wh else "Unknown Warehouse",
+                batch_number=entry.batch_number,
+                expiry_date=entry.expiry_date,
+                reference_type=entry.reference_type,
+                reference_id=entry.reference_id,
+                reversal_reference_id=getattr(entry, "reversal_reference_id", None),
+                is_emergency_override=bool(getattr(entry, "is_emergency_override", False)),
+                user_id=entry.created_by_id,
+                user_name=usr.name if usr else None,
+                reason_code=getattr(entry, "notes", None),
+                notes=entry.notes,
+                badge_color=badge_color,
+            )
+        )
+    return timeline
+
+
+@router.post("/stock-adjustments", response_model=StockLedgerResponse, status_code=status.HTTP_201_CREATED)
+def create_stock_adjustment(
+    adjustment_in: StockAdjustmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Direct inventory adjustment with strict negative stock policy and reason code logging.
+    """
+    wh = db.query(Warehouse).filter(
+        Warehouse.id == adjustment_in.warehouse_id,
+        Warehouse.company_id == current_user.company_id,
+    ).first()
+    if not wh:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Warehouse not found")
+
+    item = db.query(Item).filter(
+        Item.id == adjustment_in.item_id,
+        Item.company_id == current_user.company_id,
+    ).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+
+    chg_qty = Decimal(str(adjustment_in.change_qty))
+    if chg_qty == Decimal("0.0000"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Adjustment quantity cannot be zero")
+
+    # Lock stock balance
+    bal = db.query(StockBalance).filter(
+        StockBalance.warehouse_id == adjustment_in.warehouse_id,
+        StockBalance.item_id == adjustment_in.item_id,
+    ).with_for_update().first()
+
+    current_qty = Decimal(str(bal.quantity if bal else 0))
+    new_qty = current_qty + chg_qty
+
+    # Negative stock policy check
+    if new_qty < Decimal("0.0000"):
+        if not adjustment_in.is_emergency_override:
+            shortage = abs(new_qty)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient stock for {item.name}: Available {current_qty}, Adjustment requires {abs(chg_qty)}. Shortage: {shortage}",
+            )
+        if not adjustment_in.override_reason:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Emergency negative stock override requires a valid justification note",
+            )
+
+    if not bal:
+        bal = StockBalance(
+            warehouse_id=adjustment_in.warehouse_id,
+            item_id=adjustment_in.item_id,
+            quantity=Decimal("0.0000"),
+        )
+        db.add(bal)
+        db.flush()
+
+    bal.quantity = new_qty
+
+    unit_cost = adjustment_in.unit_cost if adjustment_in.unit_cost is not None else Decimal(str(item.cost_price or 0))
+    total_cost = abs(chg_qty) * unit_cost
+    note_text = f"[{adjustment_in.reason_code}] {adjustment_in.notes or ''}".strip()
+    if adjustment_in.is_emergency_override:
+        note_text += f" | OVERRIDE: {adjustment_in.override_reason}"
+
+    ledger = StockLedger(
+        company_id=current_user.company_id,
+        branch_id=wh.branch_id,
+        warehouse_id=adjustment_in.warehouse_id,
+        item_id=adjustment_in.item_id,
+        unit_id=item.unit_id,
+        batch_number=adjustment_in.batch_number,
+        expiry_date=adjustment_in.expiry_date,
+        movement_type="ADJUSTMENT",
+        change_qty=chg_qty,
+        balance_qty=new_qty,
+        unit_cost=unit_cost,
+        total_cost=total_cost,
+        reference_type="STOCK_ADJUSTMENT",
+        reference_id=str(uuid.uuid4()),
+        is_emergency_override=adjustment_in.is_emergency_override,
+        notes=note_text,
+        created_by_id=current_user.id,
+    )
+    db.add(ledger)
+    db.commit()
+    db.refresh(ledger)
+
+    u = db.query(Unit).filter(Unit.id == item.unit_id).first() if item.unit_id else None
+    return StockLedgerResponse(
+        id=ledger.id,
+        company_id=ledger.company_id,
+        branch_id=ledger.branch_id,
+        warehouse_id=ledger.warehouse_id,
+        item_id=ledger.item_id,
+        unit_id=ledger.unit_id,
+        unit_symbol=u.symbol if u else None,
+        batch_number=ledger.batch_number,
+        expiry_date=ledger.expiry_date,
+        movement_type=ledger.movement_type,
+        change_qty=ledger.change_qty,
+        balance_qty=ledger.balance_qty,
+        unit_cost=ledger.unit_cost,
+        total_cost=ledger.total_cost,
+        reference_type=ledger.reference_type,
+        reference_id=ledger.reference_id,
+        reversal_reference_id=ledger.reversal_reference_id,
+        idempotency_key=ledger.idempotency_key,
+        is_emergency_override=ledger.is_emergency_override,
+        notes=ledger.notes,
+        created_by_id=ledger.created_by_id,
+        created_by_name=current_user.name,
+        created_at=ledger.created_at,
+        item_name=item.name,
+        item_code=item.code,
+        warehouse_name=wh.name,
+        direction="IN" if chg_qty > 0 else "OUT",
+        badge_color="emerald" if chg_qty > 0 else "rose",
+    )
 
 
 # =============================================================

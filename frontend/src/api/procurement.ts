@@ -1,6 +1,9 @@
 import { apiClient } from './client';
 import {
   Supplier,
+  SupplierItem,
+  SupplierItemCreateInput,
+  SupplierItemUpdateInput,
   PurchaseRequest,
   PurchaseOrder,
   GoodsReceiveNote,
@@ -20,7 +23,7 @@ import {
 
 export const procurementApi = {
   // 1. Supplier Master
-  getSuppliers: async (params?: { is_active?: boolean }): Promise<Supplier[]> => {
+  getSuppliers: async (params?: { is_active?: boolean; search?: string }): Promise<Supplier[]> => {
     const res = await apiClient.get<Supplier[]>('/procurement/suppliers', { params });
     return res.data;
   },
@@ -30,6 +33,28 @@ export const procurementApi = {
   },
   updateSupplier: async (id: string, payload: Partial<Supplier>): Promise<Supplier> => {
     const res = await apiClient.put<Supplier>(`/procurement/suppliers/${id}`, payload);
+    return res.data;
+  },
+
+  // 1.1 Vendor-Item Mappings
+  getVendorItems: async (params?: { supplier_id?: string; item_id?: string; is_active?: boolean }): Promise<SupplierItem[]> => {
+    const res = await apiClient.get<SupplierItem[]>('/procurement/vendor-items', { params });
+    return res.data;
+  },
+  getVendorItem: async (id: string): Promise<SupplierItem> => {
+    const res = await apiClient.get<SupplierItem>(`/procurement/vendor-items/${id}`);
+    return res.data;
+  },
+  createVendorItem: async (payload: SupplierItemCreateInput): Promise<SupplierItem> => {
+    const res = await apiClient.post<SupplierItem>('/procurement/vendor-items', payload);
+    return res.data;
+  },
+  updateVendorItem: async (id: string, payload: SupplierItemUpdateInput): Promise<SupplierItem> => {
+    const res = await apiClient.put<SupplierItem>(`/procurement/vendor-items/${id}`, payload);
+    return res.data;
+  },
+  deleteVendorItem: async (id: string): Promise<{ message: string; id: string }> => {
+    const res = await apiClient.delete<{ message: string; id: string }>(`/procurement/vendor-items/${id}`);
     return res.data;
   },
 

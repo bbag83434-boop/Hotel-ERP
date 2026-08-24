@@ -155,10 +155,13 @@ export interface StockAdjustmentInput {
   warehouse_id: string;
   item_id: string;
   change_qty: number;
-  reason: string;
-  movement_type?: string;
+  reason_code: string;
+  batch_number?: string;
+  expiry_date?: string;
   unit_cost?: number;
   notes?: string;
+  is_emergency_override?: boolean;
+  override_reason?: string;
 }
 
 export interface StockAdjustmentResult {
@@ -195,4 +198,63 @@ export interface InventoryValuation {
     total_value: number | string;
     items_count: number;
   }[];
+}
+
+export interface StockLedgerEntry {
+  id: string;
+  company_id?: string;
+  branch_id?: string;
+  warehouse_id: string;
+  item_id: string;
+  unit_id?: string;
+  unit_symbol?: string;
+  batch_number?: string;
+  expiry_date?: string;
+  movement_type: string;
+  change_qty: number | string;
+  balance_qty: number | string;
+  unit_cost?: number | string;
+  total_cost?: number | string;
+  reference_type?: string;
+  reference_id?: string;
+  reversal_reference_id?: string;
+  idempotency_key?: string;
+  is_emergency_override?: boolean;
+  notes?: string;
+  created_by_id?: string;
+  created_by_name?: string;
+  created_at?: string;
+  item_name?: string;
+  item_code?: string;
+  warehouse_name?: string;
+  direction?: 'IN' | 'OUT' | 'REVERSAL';
+  badge_color?: 'emerald' | 'rose' | 'amber' | 'blue';
+}
+
+export interface StockMovementTimelineEntry {
+  id: string;
+  timestamp: string;
+  movement_type: string;
+  direction: 'IN' | 'OUT' | 'REVERSAL';
+  change_qty: number | string;
+  balance_qty: number | string;
+  unit_symbol?: string;
+  unit_cost?: number | string;
+  total_cost?: number | string;
+  item_id: string;
+  item_name: string;
+  item_code: string;
+  warehouse_id: string;
+  warehouse_name: string;
+  batch_number?: string;
+  expiry_date?: string;
+  reference_type?: string;
+  reference_id?: string;
+  reversal_reference_id?: string;
+  is_emergency_override?: boolean;
+  user_id?: string;
+  user_name?: string;
+  reason_code?: string;
+  notes?: string;
+  badge_color: 'emerald' | 'rose' | 'amber' | 'blue';
 }

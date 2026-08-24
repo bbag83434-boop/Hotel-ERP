@@ -29,6 +29,7 @@ class StockMovementType(str, enum.Enum):
     RETURN = "RETURN"
     POS_SALE = "POS_SALE"
     WASTAGE = "WASTAGE"
+    REVERSAL = "REVERSAL"
 
 class StockCountStatus(str, enum.Enum):
     DRAFT = "DRAFT"
@@ -182,23 +183,32 @@ class StockLedger(Base):
     __tablename__ = "stock_ledgers"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
+    branch_id = Column("branchId", String(36), ForeignKey("branches.id", ondelete="CASCADE"), nullable=True, index=True)
     warehouse_id = Column("warehouseId", String(36), ForeignKey("warehouses.id", ondelete="CASCADE"), nullable=False, index=True)
     item_id = Column("itemId", String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    unit_id = Column("unitId", String(36), ForeignKey("units.id", ondelete="SET NULL"), nullable=True)
     batch_number = Column("batchNumber", String(100), nullable=True)
     expiry_date = Column("expiryDate", DateTime, nullable=True)
-    movement_type = Column("movementType", SQLEnum('GRN', 'PRODUCTION_IN', 'PRODUCTION_OUT', 'TRANSFER_IN', 'TRANSFER_OUT', 'ADJUSTMENT', 'RETURN', 'POS_SALE', 'WASTAGE', name='StockMovementType'), nullable=False)
+    movement_type = Column("movementType", String(50), nullable=False)
     change_qty = Column("changeQty", Numeric(14, 4), nullable=False)
     balance_qty = Column("balanceQty", Numeric(14, 4), nullable=False)
     unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=True)
     total_cost = Column("totalCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=True)
-    reference_type = Column("referenceType", String(50), nullable=False)
+    reference_type = Column("referenceType", String(100), nullable=False)
     reference_id = Column("referenceId", String(36), nullable=True)
+    reversal_reference_id = Column("reversalReferenceId", String(36), nullable=True, index=True)
+    idempotency_key = Column("idempotencyKey", String(255), nullable=True, index=True)
+    is_emergency_override = Column("isEmergencyOverride", Boolean, default=False, nullable=False)
     notes = Column(Text, nullable=True)
     created_by_id = Column("createdById", String(36), ForeignKey("users.id"), nullable=True)
     created_at = Column("createdAt", DateTime, default=datetime.utcnow, nullable=False)
 
+    companyId = synonym("company_id")
+    branchId = synonym("branch_id")
     warehouseId = synonym("warehouse_id")
     itemId = synonym("item_id")
+    unitId = synonym("unit_id")
     batchNumber = synonym("batch_number")
     expiryDate = synonym("expiry_date")
     movementType = synonym("movement_type")
@@ -208,15 +218,33 @@ class StockLedger(Base):
     totalCost = synonym("total_cost")
     referenceType = synonym("reference_type")
     referenceId = synonym("reference_id")
+    reversalReferenceId = synonym("reversal_reference_id")
+    idempotencyKey = synonym("idempotency_key")
+    isEmergencyOverride = synonym("is_emergency_override")
     createdById = synonym("created_by_id")
     createdAt = synonym("created_at")
 
     warehouse = relationship("Warehouse")
     item = relationship("Item")
+    unit = relationship("Unit", foreign_keys=[unit_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
 
     __table_args__ = (
         Index("idx_ledger_wh_item_date", "warehouseId", "itemId", "createdAt"),
+        Index("idx_ledger_company_branch", "companyId", "branchId"),
     )
+
+class TransferStatus(str, enum.Enum):
+    REQUESTED = "REQUESTED"
+    PENDING = "PENDING"        # kept for backward compat
+    APPROVED = "APPROVED"
+    DISPATCHED = "DISPATCHED"
+    IN_TRANSIT = "IN_TRANSIT"
+    PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED"
+    FULLY_RECEIVED = "FULLY_RECEIVED"
+    RECONCILED = "RECONCILED"
+    COMPLETED = "COMPLETED"    # kept for backward compat
+    CANCELLED = "CANCELLED"
 
 class StockTransfer(BaseModel):
     __tablename__ = "stock_transfers"
@@ -224,21 +252,60 @@ class StockTransfer(BaseModel):
     company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     from_warehouse_id = Column("fromWarehouseId", String(36), ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=False, index=True)
     to_warehouse_id = Column("toWarehouseId", String(36), ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=False, index=True)
+    source_branch_id = Column("sourceBranchId", String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
+    destination_branch_id = Column("destinationBranchId", String(36), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     transfer_number = Column("transferNumber", String(50), nullable=False, index=True)
-    status = Column(SQLEnum('PENDING', 'COMPLETED', 'CANCELLED', name='TransferStatus'), default='PENDING', nullable=False)
+    status = Column(String(50), default="REQUESTED", nullable=False, index=True)
     transfer_date = Column("transferDate", DateTime, nullable=False)
+    expected_delivery_date = Column("expectedDeliveryDate", DateTime, nullable=True)
     notes = Column(Text, nullable=True)
+    dispatch_notes = Column("dispatchNotes", Text, nullable=True)
+    rejection_reason = Column("rejectionReason", String(500), nullable=True)
+    idempotency_key = Column("idempotencyKey", String(255), nullable=True)
+    # Audit fields
     created_by_id = Column("createdById", String(36), ForeignKey("users.id"), nullable=True)
+    requested_by_id = Column("requestedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id = Column("approvedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column("approvedAt", DateTime, nullable=True)
+    dispatched_by_id = Column("dispatchedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    dispatched_at = Column("dispatchedAt", DateTime, nullable=True)
+    received_by_id = Column("receivedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    received_at = Column("receivedAt", DateTime, nullable=True)
+    reconciled_by_id = Column("reconciledById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reconciled_at = Column("reconciledAt", DateTime, nullable=True)
 
     companyId = synonym("company_id")
     fromWarehouseId = synonym("from_warehouse_id")
     toWarehouseId = synonym("to_warehouse_id")
+    sourceBranchId = synonym("source_branch_id")
+    destinationBranchId = synonym("destination_branch_id")
     transferNumber = synonym("transfer_number")
     transferDate = synonym("transfer_date")
+    expectedDeliveryDate = synonym("expected_delivery_date")
+    dispatchNotes = synonym("dispatch_notes")
+    rejectionReason = synonym("rejection_reason")
+    idempotencyKey = synonym("idempotency_key")
     createdById = synonym("created_by_id")
+    requestedById = synonym("requested_by_id")
+    approvedById = synonym("approved_by_id")
+    approvedAt = synonym("approved_at")
+    dispatchedById = synonym("dispatched_by_id")
+    dispatchedAt = synonym("dispatched_at")
+    receivedById = synonym("received_by_id")
+    receivedAt = synonym("received_at")
+    reconciledById = synonym("reconciled_by_id")
+    reconciledAt = synonym("reconciled_at")
 
     from_warehouse = relationship("Warehouse", foreign_keys=[from_warehouse_id])
     to_warehouse = relationship("Warehouse", foreign_keys=[to_warehouse_id])
+    source_branch = relationship("Branch", foreign_keys=[source_branch_id])
+    destination_branch = relationship("Branch", foreign_keys=[destination_branch_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    requested_by = relationship("User", foreign_keys=[requested_by_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
+    dispatched_by = relationship("User", foreign_keys=[dispatched_by_id])
+    received_by = relationship("User", foreign_keys=[received_by_id])
+    reconciled_by = relationship("User", foreign_keys=[reconciled_by_id])
     items = relationship("StockTransferItem", back_populates="transfer", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -251,16 +318,34 @@ class StockTransferItem(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     transfer_id = Column("transferId", String(36), ForeignKey("stock_transfers.id", ondelete="CASCADE"), nullable=False, index=True)
     item_id = Column("itemId", String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
-    quantity = Column(Numeric(14, 4), nullable=False)
+    requested_qty = Column("requestedQty", Numeric(14, 4), nullable=True)      # originally requested
+    quantity = Column(Numeric(14, 4), nullable=False)                          # approved/confirmed qty (alias: dispatched)
+    dispatched_qty = Column("dispatchedQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    accepted_qty = Column("acceptedQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    damaged_qty = Column("damagedQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    short_qty = Column("shortQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    shortage_reason_code = Column("shortageReasonCode", String(50), nullable=True)
     unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=True)
+    batch_number = Column("batchNumber", String(100), nullable=True)
+    expiry_date = Column("expiryDate", DateTime, nullable=True)
     notes = Column(Text, nullable=True)
 
     transferId = synonym("transfer_id")
     itemId = synonym("item_id")
+    requestedQty = synonym("requested_qty")
+    dispatchedQty = synonym("dispatched_qty")
+    acceptedQty = synonym("accepted_qty")
+    damagedQty = synonym("damaged_qty")
+    shortQty = synonym("short_qty")
+    shortageReasonCode = synonym("shortage_reason_code")
     unitCost = synonym("unit_cost")
+    batchNumber = synonym("batch_number")
+    expiryDate = synonym("expiry_date")
 
     transfer = relationship("StockTransfer", back_populates="items")
     item = relationship("Item")
+
+
 
 class StockCount(BaseModel):
     __tablename__ = "stock_counts"
