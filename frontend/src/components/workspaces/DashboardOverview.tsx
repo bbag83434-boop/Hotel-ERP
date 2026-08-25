@@ -41,9 +41,21 @@ interface DashboardOverviewProps {
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health, setActiveWorkspace }) => {
   const { activeOutlet, outlets, closingInfo, isHeadOffice } = useOutlet();
   const { isOnline } = usePWA();
-  const [viewMode, setViewMode] = React.useState<'outlet' | 'executive'>(() => {
-    return isHeadOffice ? 'executive' : 'outlet';
-  });
+  const [viewMode, setViewMode] = React.useState<'outlet' | 'executive'>('outlet');
+
+  // Hydration stability: `isHeadOffice` derives from OutletContext's activeOutlet,
+  // which reads localStorage ONLY on the browser (the server always sees the default
+  // HEAD_OFFICE). Branching on it inside the initializer made the server render the
+  // Executive dashboard while the client's first (hydration) render showed the Outlet
+  // cockpit whenever a non-HQ outlet was saved in localStorage. React's hydration
+  // mismatch then detached the delegated click handlers → dashboard/sidebar/quick-access
+  // appeared unresponsive. Fix: stay on the stable 'outlet' tree during hydration and
+  // default Head Office / admin users to the Executive dashboard AFTER hydration.
+  React.useEffect(() => {
+    if (isHeadOffice) {
+      setViewMode((prev) => (prev === 'outlet' ? 'executive' : prev));
+    }
+  }, [isHeadOffice]);
 
   // If user is scoped to a specific outlet or non-head-office, default to Outlet Dashboard
   if (!isHeadOffice || viewMode === 'outlet') {
