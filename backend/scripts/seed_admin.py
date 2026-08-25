@@ -140,7 +140,7 @@ def seed_super_admin():
         print(f"Role:       {super_admin_role.name}")
         print(f"Company:    {company.name} ({company.id})")
         print(f"Is Active:  {user.is_active}")
-        print(f"Branches:   {[b.name for b in all_branches]}")
+        print(f"Branches:   {[f'{b.name} (Type: {b.type}, Default: {b.id == branch.id})' for b in all_branches]}")
         print("-" * 60)
 
     except Exception as e:
