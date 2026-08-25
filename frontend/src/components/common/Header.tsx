@@ -79,7 +79,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
             {dropdownOpen && (
               <>
                 <div
-                  className="fixed inset-0 z-50 bg-black/30 backdrop-blur-2xs"
+                  className="fixed inset-0 z-20 bg-black/30 backdrop-blur-2xs"
                   onClick={() => setDropdownOpen(false)}
                 />
                 <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 w-auto sm:w-80 max-h-[80vh] sm:max-h-96 overflow-y-auto bg-white border border-[rgba(45,45,45,0.12)] rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
