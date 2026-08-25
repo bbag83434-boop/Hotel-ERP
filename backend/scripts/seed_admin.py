@@ -56,10 +56,12 @@ def seed_super_admin():
         else:
             print(f"[OK] Root company found: '{company.name}' (Code: {company.code}, ID: {company.id})")
 
-        # 3. Ensure Default Head Office / Branch exists
-        branch = db.query(Branch).filter(Branch.company_id == company.id).first()
-        if not branch:
-            branch = db.query(Branch).first()
+        # 3. Ensure Default Head Office Branch exists (must match type == HEAD_OFFICE,
+        # NOT just "the first branch found" -- old test outlets may already exist)
+        branch = db.query(Branch).filter(
+            Branch.company_id == company.id,
+            Branch.type == "HEAD_OFFICE",
+        ).first()
         if not branch:
             print("[+] Creating default Head Office branch...")
             branch = Branch(
@@ -104,14 +106,23 @@ def seed_super_admin():
             db.flush()
 
         # 5. Link User to all active branches
+        # First, clear any stale "is_default" flag from previous test data so the
+        # real HEAD_OFFICE branch always wins as the default.
+        db.query(UserBranch).filter(UserBranch.user_id == user.id).update(
+            {UserBranch.is_default: False}
+        )
+
         all_branches = db.query(Branch).filter(Branch.is_active == True).all()
         for b in all_branches:
             ub = db.query(UserBranch).filter(
                 UserBranch.user_id == user.id,
                 UserBranch.branch_id == b.id
             ).first()
+            is_default_branch = (b.id == branch.id)
+            if ub:
+                ub.is_default = is_default_branch
+                continue
             if not ub:
-                is_default_branch = (b.id == branch.id)
                 db.add(UserBranch(
                     id=str(uuid.uuid4()),
                     user_id=user.id,
