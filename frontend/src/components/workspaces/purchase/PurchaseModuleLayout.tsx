@@ -55,7 +55,7 @@ const PURCHASE_NAV_GROUPS: NavGroup[] = [
   {
     label: 'Head Office',
     items: [
-      { id: 'approvals', label: 'Approvals', icon: ShieldCheck, badge: 'Coming soon' },
+      { id: 'approvals', label: 'Approvals', icon: ShieldCheck },
       { id: 'orders', label: 'Orders', icon: Truck },
       { id: 'bills_payments', label: 'Bills & Payments', icon: Receipt, badge: 'Coming soon' },
       { id: 'needs_attention', label: 'Needs Attention', icon: AlertTriangle, badge: 'Coming soon' },

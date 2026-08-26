@@ -204,6 +204,7 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
       type: b.type as any,
       isActive: b.is_active,
     });
+    setActiveWorkspace('dashboard');
   };
 
 // --- Existing AI stock recommendations (reused from AIAssistantWorkspace pattern) ---

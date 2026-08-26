@@ -171,8 +171,8 @@ export const HRWorkspace: React.FC = () => {
 
         <StatCard
           title="Active Shifts"
-          value={shifts.length || '3 Shifts'}
-          subtitle="Morning, Evening, Night"
+          value={shifts.length}
+          subtitle={`${shifts.filter((s: any) => s.is_active !== false).length} Active Roster Shifts`}
           icon={<Clock className="w-4 h-4 text-[#3978B8]" />}
           iconBgColor="bg-blue-50 text-[#3978B8]"
         />
@@ -336,46 +336,34 @@ export const HRWorkspace: React.FC = () => {
               <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Standard Shift Rosters</h3>
               <p className="text-xs text-[#707070]">Automated clock-in, overtime calculation, and night allowance shifts</p>
             </div>
-            <Badge variant="info">3 Standard Rotations</Badge>
+            <Badge variant="info">{shifts.length} Shift{shifts.length === 1 ? '' : 's'} Configured</Badge>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-[#1C1C1C]">Morning Service</span>
-                <Badge variant="success">06:00 – 14:30</Badge>
-              </div>
-              <p className="text-xs text-[#707070]">Breakfast setup, morning prep, and lunch rush operations.</p>
-              <div className="text-[11px] text-[#707070] pt-2 border-t border-[rgba(45,45,45,0.06)] flex justify-between">
-                <span>Break Duration:</span>
-                <strong className="text-[#1C1C1C]">30 mins</strong>
-              </div>
+          {shifts.length === 0 ? (
+            <EmptyState
+              title="No Shifts Configured"
+              description={`No operational shifts have been created for ${activeOutlet.name}. Configure shifts in the backend or HR settings.`}
+              icon={<Clock className="w-6 h-6" />}
+            />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {shifts.map((s) => (
+                <div key={s.id || s.code} className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-[#1C1C1C]">{s.name}</span>
+                    <Badge variant="success">
+                      {String(s.start_time || s.startTime || '').slice(0, 5)} – {String(s.end_time || s.endTime || '').slice(0, 5)}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-[#707070] font-mono">Code: [{s.code}]</p>
+                  <div className="text-[11px] text-[#707070] pt-2 border-t border-[rgba(45,45,45,0.06)] flex justify-between">
+                    <span>Grace Period:</span>
+                    <strong className="text-[#1C1C1C]">{s.grace_period_mins || s.gracePeriodMins || 0} mins</strong>
+                  </div>
+                </div>
+              ))}
             </div>
-
-            <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-[#1C1C1C]">Evening Dinner</span>
-                <Badge variant="warning">14:00 – 22:30</Badge>
-              </div>
-              <p className="text-xs text-[#707070]">Dinner service, evening banquet dining, and kitchen closing.</p>
-              <div className="text-[11px] text-[#707070] pt-2 border-t border-[rgba(45,45,45,0.06)] flex justify-between">
-                <span>Break Duration:</span>
-                <strong className="text-[#1C1C1C]">30 mins</strong>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-[#1C1C1C]">Night Bakery Prep</span>
-                <Badge variant="purple">22:00 – 06:30</Badge>
-              </div>
-              <p className="text-xs text-[#707070]">Commissary bakery production, receiving prep, and sanitization.</p>
-              <div className="text-[11px] text-[#707070] pt-2 border-t border-[rgba(45,45,45,0.06)] flex justify-between">
-                <span>Night Differential:</span>
-                <strong className="text-[#2E8B57]">+15% Rate</strong>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       )}
 

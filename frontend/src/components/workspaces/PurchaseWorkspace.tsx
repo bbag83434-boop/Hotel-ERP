@@ -65,6 +65,7 @@ import {
   ArrowLeftRight,
 } from 'lucide-react';
 import PurchaseModuleLayout, { PurchaseSectionId } from './purchase/PurchaseModuleLayout';
+import ApprovalsSection from './purchase/ApprovalsSection';
 import SetupWorkspace from '@/components/workspaces/SetupWorkspace';
 
 export const PurchaseWorkspace: React.FC = () => {
@@ -1671,20 +1672,9 @@ export const PurchaseWorkspace: React.FC = () => {
           </div>
         )}
 
-        {/* SECTION 5: APPROVALS (STUB / COMING SOON) */}
+        {/* SECTION 5: APPROVALS (REAL QUEUE) */}
         {activeSection === 'approvals' && (
-          <div className="bg-white rounded-3xl border border-[rgba(45,45,45,0.08)] p-8 sm:p-12 text-center shadow-sm">
-            <div className="w-16 h-16 rounded-2xl bg-[#F1E4C5] text-[#B8862D] flex items-center justify-center mx-auto mb-4">
-              <ShieldCheck className="w-8 h-8" />
-            </div>
-            <h3 className="text-base font-bold text-[#1C1C1C] mb-1">Central Purchase Approvals Queue</h3>
-            <p className="text-xs text-[#707070] max-w-md mx-auto mb-6">
-              Multi-tier approval thresholds and automated escalation for high-value purchase requisitions and supplier contracts.
-            </p>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#FAF8F5] text-[#B8862D] border border-[#C79A3B]/30">
-              Coming soon in next module pass
-            </span>
-          </div>
+          <ApprovalsSection onActionCompleted={fetchData} />
         )}
 
         {/* SECTION 6: ORDERS (PURCHASE ORDERS & WHATSAPP DISPATCH + 3-WAY MATCH DRILLDOWN) */}

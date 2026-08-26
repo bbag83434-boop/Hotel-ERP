@@ -29,6 +29,7 @@ import {
   Sparkles,
   ShieldCheck,
   ChevronRight,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface OutletDashboardProps {
@@ -37,7 +38,7 @@ interface OutletDashboardProps {
 }
 
 export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setActiveWorkspace }) => {
-  const { activeOutlet, closingInfo, refreshOutlets } = useOutlet();
+  const { activeOutlet, outlets, setActiveOutlet, isHeadOffice, closingInfo, refreshOutlets } = useOutlet();
   const { user } = useAuth();
   const userRole = typeof user?.role === 'object' ? user.role.name : (user?.role || 'OUTLET_STAFF');
 
@@ -241,8 +242,52 @@ export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setA
   const cycleDaysRemaining = dashboardData?.closingCycle?.daysRemaining ?? closingInfo?.daysRemaining ?? 0;
   const cycleSales = dashboardData?.closingCycle?.periodSales ?? 0;
 
+  // Head Office Return Button Logic
+  const headOfficeBranch = outlets.find(
+    (o) => o.type === 'HEAD_OFFICE' || o.code.toUpperCase().includes('HQ')
+  );
+  const isHeadOfficeUser =
+    outlets.some((o) => o.type === 'HEAD_OFFICE') ||
+    ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN'].includes(
+      userRole.toUpperCase()
+    );
+  const isDrilledDown = isHeadOfficeUser && !isHeadOffice && Boolean(headOfficeBranch);
+
+  const handleBackToHeadOffice = () => {
+    if (headOfficeBranch) {
+      setActiveOutlet(headOfficeBranch);
+    }
+    setActiveWorkspace?.('dashboard');
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6 w-full min-w-0">
+      {/* Back to Head Office Drill-Up Action */}
+      {isDrilledDown && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl bg-white border border-[#C79A3B]/40 shadow-xs">
+          <div className="flex items-center gap-2.5 text-xs text-[#707070]">
+            <div className="w-8 h-8 rounded-xl bg-[#F1E4C5] flex items-center justify-center text-[#B8862D] shrink-0">
+              <Building2 className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-bold text-[#1C1C1C] block font-['Outfit']">
+                Drilled into {outlet?.name} [{outlet?.code}]
+              </span>
+              <span className="text-[11px] text-[#707070]">
+                Viewing outlet operational command cockpit from Head Office account
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={handleBackToHeadOffice}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#C79A3B] to-[#B8862D] hover:brightness-105 text-white font-bold text-xs shadow-md shadow-[#C79A3B]/20 active:scale-[0.98] transition-all shrink-0 cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Head Office</span>
+          </button>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* 1. HERO BANNER: ACTIVE SCOPE & BI-MONTHLY CYCLE                           */}
       {/* ========================================================================= */}

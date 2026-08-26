@@ -37,7 +37,7 @@ export const TelemetryWorkspace: React.FC<TelemetryWorkspaceProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const latency = health?.database?.latencyMs ?? 12;
+  const latency = health?.database?.latencyMs;
 
   return (
     <div className="space-y-6">
@@ -84,7 +84,7 @@ export const TelemetryWorkspace: React.FC<TelemetryWorkspaceProps> = ({
         <StatCard
           title="Database Cluster"
           value="Neon PostgreSQL"
-          subtitle={`${latency}ms round-trip latency`}
+          subtitle={latency !== undefined ? `${latency}ms round-trip latency` : 'Live cluster connected'}
           icon={<Database className="w-4 h-4 text-[#2E8B57]" />}
           iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
         />

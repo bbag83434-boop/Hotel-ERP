@@ -17,11 +17,14 @@ import {
   Check,
 } from 'lucide-react';
 
+import { WorkspaceId } from './Sidebar';
+
 interface HeaderProps {
   onMenuClick?: () => void;
+  setActiveWorkspace?: (id: WorkspaceId) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
+export const Header: React.FC<HeaderProps> = ({ onMenuClick, setActiveWorkspace }) => {
   const { outlets, activeOutlet, setActiveOutlet, isHeadOffice } = useOutlet();
   const { isInstallable, installPWA, isOnline, updateAvailable, applyUpdate } = usePWA();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -102,6 +105,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                           key={outlet.id}
                           onClick={() => {
                             setActiveOutlet(outlet);
+                            setActiveWorkspace?.('dashboard');
                             setDropdownOpen(false);
                           }}
                           className={`w-full text-left px-3 py-2.5 rounded-xl text-xs flex items-center justify-between transition-colors ${
