@@ -61,13 +61,18 @@ import {
   Sliders,
   History,
   Check,
+  Boxes,
+  ArrowLeftRight,
 } from 'lucide-react';
+import PurchaseModuleLayout, { PurchaseSectionId } from './purchase/PurchaseModuleLayout';
+import SetupWorkspace from '@/components/workspaces/SetupWorkspace';
 
 export const PurchaseWorkspace: React.FC = () => {
   const { currentOutlet, activeOutlet, isHeadOffice, outlets } = useOutlet();
 
-  // Active Tab
-  const [activeTab, setActiveTab] = useState<'queue' | 'orders' | 'grn' | 'matching' | 'smart' | 'suppliers' | 'closing'>('queue');
+  // Active Section & Smart Panel
+  const [activeSection, setActiveSection] = useState<PurchaseSectionId>('requisitions');
+  const [showSmartAssistant, setShowSmartAssistant] = useState<boolean>(false);
 
   // Loading & Feedback
   const [loading, setLoading] = useState<boolean>(false);
@@ -363,7 +368,7 @@ export const PurchaseWorkspace: React.FC = () => {
       });
       fetchSmartDraft();
       fetchData();
-      setActiveTab('queue');
+      setActiveSection('requisitions');
     } catch (err: any) {
       setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to confirm draft.' });
     } finally {
@@ -479,7 +484,7 @@ export const PurchaseWorkspace: React.FC = () => {
   // Handle 3-Way Match Drill Down
   const open3WayMatch = async (poId: string) => {
     setSelected3WayPOId(poId);
-    setActiveTab('matching');
+    setActiveSection('orders');
     setLoading3Way(true);
     try {
       const data = await procurementApi.getOrder3WayMatch(poId);
@@ -530,7 +535,7 @@ export const PurchaseWorkspace: React.FC = () => {
       setConsolidationModalOpen(false);
       setConsolidationNotes('');
       fetchData();
-      setActiveTab('orders');
+      setActiveSection('orders');
     } catch (err: any) {
       setFeedback({
         type: 'error',
@@ -688,7 +693,7 @@ export const PurchaseWorkspace: React.FC = () => {
       setNewPOLines([{ item_id: '', ordered_qty: 20, unit_price: 50 }]);
       setNewPONotes('');
       fetchData();
-      setActiveTab('orders');
+      setActiveSection('orders');
     } catch (err: any) {
       setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to create PO.' });
     } finally {
@@ -816,7 +821,7 @@ export const PurchaseWorkspace: React.FC = () => {
       setNewGRNNotes('');
       setNewGRNInvoiceFile(null);
       fetchData();
-      setActiveTab('grn');
+      setActiveSection('receiving');
     } catch (err: any) {
       setFeedback({ type: 'error', message: err?.response?.data?.message || err?.message || 'GRN submission failed.' });
     } finally {
@@ -969,794 +974,776 @@ export const PurchaseWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* Main Navigation Tabs */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-white border border-[rgba(45,45,45,0.08)] rounded-2xl shadow-xs overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('queue')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'queue'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
-              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <Layers className="w-4 h-4" />
-          Central PR Queue
-          {requests.filter((r) => r.status === 'PENDING_APPROVAL').length > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full bg-[#B8862D] text-white text-[10px]">
-              {requests.filter((r) => r.status === 'PENDING_APPROVAL').length}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('orders')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'orders'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
-              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <Truck className="w-4 h-4" />
-          Purchase Orders & WhatsApp
-          <span className="px-1.5 py-0.5 rounded-full bg-[rgba(45,45,45,0.08)] text-[#1C1C1C] text-[10px]">
-            {orders.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('grn')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'grn'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
-              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <PackageCheck className="w-4 h-4" />
-          Destination GRN Receiving
-          <span className="px-1.5 py-0.5 rounded-full bg-[rgba(45,45,45,0.08)] text-[#1C1C1C] text-[10px]">
-            {grns.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('matching')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'matching'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
-              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <Receipt className="w-4 h-4" />
-          3-Way Invoice Matching
-        </button>
-
-        <button
-          onClick={() => setActiveTab('smart')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'smart'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
-              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <Sparkles className="w-4 h-4 text-[#C79A3B]" />
-          Smart AI Indent & Assistant
-          {smartDraft && smartDraft.critical_count > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] animate-pulse">
-              {smartDraft.critical_count} Critical
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('suppliers')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'suppliers'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
-              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <Building2 className="w-4 h-4" />
-          Suppliers & Routing Rules
-        </button>
-
-        <button
-          onClick={() => setActiveTab('closing')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'closing'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
-              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          Bi-Monthly Closing Impact
-        </button>
-      </div>
-
-      {/* TAB 1: CENTRAL PURCHASE CONTROL QUEUE */}
-      {activeTab === 'queue' && (
-        <div className="space-y-4">
-          {/* Controls Bar */}
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 p-4 bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs">
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* Outlet Filter for HO */}
-              {isHeadOffice && (
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-[#707070]">
-                  <Building2 className="w-3.5 h-3.5 text-[#C79A3B]" />
-                  <select
-                    value={selectedBranchFilter}
-                    onChange={(e) => setSelectedBranchFilter(e.target.value)}
-                    className="p-1.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] rounded-lg text-xs text-[#1C1C1C] font-semibold focus:outline-none"
-                  >
-                    <option value="ALL">All Destinations (HO)</option>
-                    {outlets.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.name} ({o.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Status Filter */}
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#707070]">
-                <span>Status:</span>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="p-1.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] rounded-lg text-xs text-[#1C1C1C] font-semibold focus:outline-none"
-                >
-                  <option value="ALL">All Statuses</option>
-                  <option value="PENDING_APPROVAL">Pending Approval</option>
-                  <option value="APPROVED">Approved</option>
-                  <option value="ORDERED">Consolidated / Ordered</option>
-                  <option value="DRAFT">Draft</option>
-                  <option value="REJECTED">Rejected</option>
-                </select>
-              </div>
-
-              {/* Priority Filter */}
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#707070]">
-                <span>Priority:</span>
-                <select
-                  value={priorityFilter}
-                  onChange={(e) => setPriorityFilter(e.target.value)}
-                  className="p-1.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] rounded-lg text-xs text-[#1C1C1C] font-semibold focus:outline-none"
-                >
-                  <option value="ALL">All Priorities</option>
-                  <option value="CRITICAL">Critical</option>
-                  <option value="HIGH">High</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="LOW">Low</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Batch Consolidation Trigger */}
-            <div className="flex items-center gap-2">
+      {/* Nested Zing-style Purchase Module Layout */}
+      <PurchaseModuleLayout activeSection={activeSection} onSectionChange={setActiveSection}>
+        {/* SECTION 1: REQUISITIONS (PR QUEUE + SMART AI INDENT) */}
+        {activeSection === 'requisitions' && (
+          <div className="space-y-4">
+            {/* Quick Smart AI Assistant Toggle */}
+            <div className="flex items-center justify-between pb-1">
               <button
-                onClick={selectAllPendingPRs}
-                className="px-3 py-1.5 rounded-xl border border-[rgba(45,45,45,0.12)] text-xs text-[#707070] hover:bg-[#FAF8F5] font-semibold transition-all"
-              >
-                {selectedPRIds.length > 0 ? 'Deselect All' : 'Select All Ready'}
-              </button>
-
-              <button
-                onClick={() => setConsolidationModalOpen(true)}
-                disabled={selectedPRIds.length === 0}
-                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
-                  selectedPRIds.length > 0
-                    ? 'bg-[#B8862D] text-white hover:bg-[#9E7326]'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                onClick={() => setShowSmartAssistant(!showSmartAssistant)}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                  showSmartAssistant
+                    ? 'bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30'
+                    : 'bg-white border border-[rgba(45,45,45,0.12)] text-[#1C1C1C] hover:bg-[#FAF8F5]'
                 }`}
               >
-                <Layers className="w-3.5 h-3.5" />
-                Consolidate Selected ({selectedPRIds.length}) to PO
+                <Sparkles className="w-3.5 h-3.5 text-[#C79A3B]" />
+                <span>{showSmartAssistant ? 'Hide Smart AI Assistant' : 'Smart AI Indent Engine'}</span>
+                {smartDraft && smartDraft.critical_count > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] animate-pulse">
+                    {smartDraft.critical_count} Critical
+                  </span>
+                )}
               </button>
             </div>
-          </div>
 
-          {/* PR Queue Table */}
-          <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                    <th className="p-3.5 w-10 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedPRIds.length > 0 && selectedPRIds.length === requests.length}
-                        onChange={selectAllPendingPRs}
-                        className="rounded accent-[#B8862D]"
-                      />
-                    </th>
-                    <th className="p-3.5">PR Number</th>
-                    <th className="p-3.5">Destination</th>
-                    <th className="p-3.5">Purchase Type</th>
-                    <th className="p-3.5">Required By</th>
-                    <th className="p-3.5">Items Summary</th>
-                    <th className="p-3.5">Est. Value</th>
-                    <th className="p-3.5">Priority</th>
-                    <th className="p-3.5">Status</th>
-                    <th className="p-3.5 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(45,45,45,0.05)]">
-                  {requests.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="p-8 text-center text-gray-400">
-                        No purchase requests match the current filters.
-                      </td>
-                    </tr>
-                  ) : (
-                    requests.map((pr) => {
-                      const totalEst = (pr.items || []).reduce(
-                        (acc: number, it: any) => acc + Number(it.requested_qty || 0) * Number(it.estimated_price || 0),
-                        0
-                      );
-                      const isSelected = selectedPRIds.includes(pr.id);
+            {/* Collapsible Smart AI Indent Assistant */}
+            {showSmartAssistant && (
+              <div className="space-y-4 p-4 rounded-3xl bg-[#FAF8F5] border border-[#C79A3B]/30 shadow-xs mb-4">
+                {/* Outlet Scoping & Control Banner */}
+                <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-[#F1E4C5] text-[#B8862D]">
+                      <Sparkles className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-[#1C1C1C] flex items-center gap-2">
+                        Smart AI Requirement Engine
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-[#FAF8F5] text-[#B8862D] border border-[#C79A3B]/30">
+                          [{activeOutlet.code}] {activeOutlet.name}
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-[#707070]">
+                        Deterministic stock + run-rate + lead time & safety buffer calculations.
+                      </p>
+                    </div>
+                  </div>
 
-                      return (
-                        <tr key={pr.id} className={`hover:bg-[#FAF8F5]/60 transition-all ${isSelected ? 'bg-[#F1E4C5]/20' : ''}`}>
-                          <td className="p-3.5 text-center">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => togglePRSelection(pr.id)}
-                              className="rounded accent-[#B8862D]"
-                            />
-                          </td>
-                          <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">
-                            {pr.request_number}
-                          </td>
-                          <td className="p-3.5 font-semibold text-[#1C1C1C]">
-                            {pr.branch_name || 'Retail Outlet'}
-                          </td>
-                          <td className="p-3.5">
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.1)]">
-                              {pr.purchase_type || 'DIRECT_OUTLET_PURCHASE'}
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-[#707070]">
-                            {pr.required_date ? new Date(pr.required_date).toLocaleDateString() : 'Immediate'}
-                          </td>
-                          <td className="p-3.5 text-[#707070]">
-                            <div className="flex items-center gap-1 font-semibold">
-                              <span>{(pr.items || []).length} items</span>
-                              <span className="text-[10px] text-gray-400">
-                                ({(pr.items || []).slice(0, 2).map((i: any) => i.item_name).join(', ')}
-                                {(pr.items || []).length > 2 ? '...' : ''})
-                              </span>
-                            </div>
-                          </td>
-                          <td className="p-3.5 font-bold font-mono text-[#1C1C1C]">
-                            ${totalEst.toFixed(2)}
-                          </td>
-                          <td className="p-3.5">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                pr.priority === 'CRITICAL' || pr.priority === 'URGENT'
-                                  ? 'bg-red-100 text-red-700'
-                                  : pr.priority === 'HIGH'
-                                  ? 'bg-orange-100 text-orange-700'
-                                  : 'bg-gray-100 text-gray-700'
-                              }`}
-                            >
-                              {pr.priority}
-                            </span>
-                          </td>
-                          <td className="p-3.5">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                pr.status === 'APPROVED'
-                                  ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
-                                  : pr.status === 'PENDING_APPROVAL'
-                                  ? 'bg-[#C79A3B]/15 text-[#B8862D]'
-                                  : pr.status === 'ORDERED'
-                                  ? 'bg-blue-100 text-blue-700'
-                                  : pr.status === 'REJECTED'
-                                  ? 'bg-red-100 text-red-700'
-                                  : 'bg-gray-100 text-gray-600'
-                              }`}
-                            >
-                              {pr.status}
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-right space-x-1">
-                            <button
-                              onClick={() => setViewPRModal(pr)}
-                              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"
-                              title="View Indent Details"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                            </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => fetchSmartDraft(true)}
+                      disabled={smartDraftLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5] shadow-xs transition-all"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${smartDraftLoading ? 'animate-spin' : ''}`} />
+                      Regenerate
+                    </button>
+                    <button
+                      onClick={() => setSmartConfigModalOpen(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5] shadow-xs transition-all"
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-[#C79A3B]" />
+                      Schedule ({prepTime})
+                    </button>
+                  </div>
+                </div>
 
-                            {pr.status === 'PENDING_APPROVAL' && (
-                              <>
-                                <button
-                                  onClick={() => handleApprovePR(pr.id)}
-                                  className="p-1.5 rounded-lg text-[#2E8B57] hover:bg-[#2E8B57]/10"
-                                  title="Approve Indent"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    setActionReasonModal({
-                                      type: 'RETURN_PR',
-                                      id: pr.id,
-                                      title: `Return Indent ${pr.request_number} for Correction`,
-                                    })
-                                  }
-                                  className="p-1.5 rounded-lg text-orange-600 hover:bg-orange-50"
-                                  title="Return for Correction"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    setActionReasonModal({
-                                      type: 'REJECT_PR',
-                                      id: pr.id,
-                                      title: `Reject Indent ${pr.request_number}`,
-                                    })
-                                  }
-                                  className="p-1.5 rounded-lg text-red-600 hover:bg-red-50"
-                                  title="Reject Indent"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              </>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
+                {/* AI Assistant Question Box */}
+                <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={aiQuestion}
+                      onChange={(e) => setAiQuestion(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAskAI();
+                      }}
+                      placeholder={`Ask AI Assistant about stock, consumption, or replenishment for ${activeOutlet.name}...`}
+                      className="flex-1 px-3.5 py-2 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs focus:outline-none focus:border-[#C79A3B]"
+                    />
+                    <button
+                      onClick={() => handleAskAI()}
+                      disabled={aiAsking || !aiQuestion.trim()}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#B8862D] hover:bg-[#9E7326] text-white text-xs font-bold disabled:opacity-50 transition-all shadow-xs"
+                    >
+                      <Send className={`w-3.5 h-3.5 ${aiAsking ? 'animate-spin' : ''}`} />
+                      {aiAsking ? 'Analyzing...' : 'Ask'}
+                    </button>
+                  </div>
+
+                  {aiAnswer && (
+                    <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[#C79A3B]/30 text-xs text-[#1C1C1C] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#B8862D] text-[10px] uppercase">{aiAnswer.intent}</span>
+                        <button onClick={() => setAiAnswer(null)} className="text-gray-400 hover:text-gray-600">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <p className="whitespace-pre-line text-[11px] leading-relaxed">{aiAnswer.answer_text}</p>
+                    </div>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
+                </div>
 
-      {/* TAB 2: PURCHASE ORDERS & WHATSAPP DISPATCH */}
-      {activeTab === 'orders' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {orders.length === 0 ? (
-              <div className="col-span-full p-8 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] text-gray-400">
-                No purchase orders generated yet. Use the Central PR Queue to consolidate indents or create a Direct PO.
-              </div>
-            ) : (
-              orders.map((po) => {
-                const totalAmt = Number(po.net_amount || po.total_amount || 0);
-                const isConsolidated = !!po.allocations;
-
-                return (
-                  <div
-                    key={po.id}
-                    className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
-                  >
-                    <div className="space-y-3">
-                      {/* Header Badge */}
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-mono font-bold text-[#1C1C1C]">
-                          {po.po_number}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            po.status === 'RECEIVED'
-                              ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
-                              : po.status === 'PARTIALLY_RECEIVED'
-                              ? 'bg-blue-100 text-blue-700'
-                              : po.status === 'SENT_MANUALLY'
-                              ? 'bg-purple-100 text-purple-700'
-                              : po.status === 'WHATSAPP_OPENED'
-                              ? 'bg-green-100 text-green-700'
-                              : po.status === 'APPROVED'
-                              ? 'bg-[#F1E4C5] text-[#B8862D]'
-                              : 'bg-gray-100 text-gray-700'
-                          }`}
-                        >
-                          {po.status}
-                        </span>
-                      </div>
-
-                      {/* Supplier & Destination info */}
-                      <div className="space-y-1">
-                        <div className="text-sm font-bold text-[#1C1C1C] flex items-center gap-1.5">
-                          <Building2 className="w-4 h-4 text-[#C79A3B]" />
-                          <span>{po.supplier_name || 'Vendor'}</span>
-                        </div>
-                        <div className="text-xs text-[#707070]">
-                          Destination: <span className="font-semibold text-[#1C1C1C]">{po.branch_name || (isConsolidated ? 'Multi-Outlet' : 'Central Store')}</span>
-                        </div>
-                        <div className="text-[10px] text-gray-400">
-                          Ordered: {new Date(po.order_date).toLocaleDateString()}
-                        </div>
-                      </div>
-
-                      {/* Line Items Summary */}
-                      <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] space-y-1 text-xs">
-                        <div className="font-bold text-[#1C1C1C] flex justify-between">
-                          <span>{(po.items || []).length} Consolidated Items</span>
-                          <span className="font-mono text-[#B8862D]">${totalAmt.toFixed(2)}</span>
-                        </div>
-                        <div className="text-[11px] text-[#707070] line-clamp-2">
-                          {(po.items || []).map((i: any) => `${i.item_name} (${i.ordered_qty} ${i.unit_symbol || ''})`).join(', ')}
-                        </div>
-                      </div>
+                {/* Active Draft Confirmation Card */}
+                {smartDraft && smartDraft.items && smartDraft.items.length > 0 && (
+                  <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] flex items-center justify-between gap-3">
+                    <div className="text-xs">
+                      <span className="font-bold text-[#1C1C1C] block">
+                        Calculated {smartDraft.items.length} requirement items (${Number(smartDraft.estimated_total_order_value || 0).toFixed(2)})
+                      </span>
+                      <span className="text-[11px] text-[#707070]">
+                        {smartDraft.critical_count} critical, {smartDraft.high_priority_count} high priority.
+                      </span>
                     </div>
 
-                    {/* Actions */}
-                    <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] flex flex-wrap items-center justify-between gap-2">
-                      <button
-                        onClick={() => setViewPOModal(po)}
-                        className="px-2.5 py-1.5 rounded-lg bg-gray-100 text-[#1C1C1C] text-xs font-semibold hover:bg-gray-200 transition-all flex items-center gap-1"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> Details
-                      </button>
+                    <button
+                      onClick={handleConfirmSmartDraft}
+                      disabled={confirmingDraft || smartDraft.status === 'CONFIRMED'}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#2E8B57] hover:bg-[#257247] text-white text-xs font-bold disabled:opacity-50 shadow-xs transition-all"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      {confirmingDraft ? 'Submitting...' : smartDraft.status === 'CONFIRMED' ? 'Draft Confirmed' : 'Confirm & Convert to PR'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
-                      {po.status === 'PENDING_APPROVAL' && (
-                        <button
-                          onClick={() => handleApprovePO(po.id)}
-                          className="px-3 py-1.5 rounded-lg bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] transition-all flex items-center gap-1"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Approve PO
-                        </button>
-                      )}
+            {/* PR Controls Bar & Table */}
+            {(() => {
+              const filteredRequests = requests.filter((pr) => {
+                if (!searchQuery) return true;
+                const q = searchQuery.toLowerCase();
+                const reqNum = (pr.request_number || '').toLowerCase();
+                const dest = (pr.branch_name || '').toLowerCase();
+                const itemsText = (pr.items || []).map((i: any) => i.item_name || '').join(' ').toLowerCase();
+                return reqNum.includes(q) || dest.includes(q) || itemsText.includes(q);
+              });
 
-                      {(po.status === 'APPROVED' || po.status === 'WHATSAPP_OPENED') && (
+              const hasActiveFilters = searchQuery !== '' || statusFilter !== 'ALL' || priorityFilter !== 'ALL' || (isHeadOffice && selectedBranchFilter !== 'ALL');
+
+              return (
+                <div className="space-y-4">
+                  {/* Controls Bar */}
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                      {/* Search Input */}
+                      <div className="relative flex-1 min-w-[200px] max-w-md">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
+                        <input
+                          type="text"
+                          placeholder="Search PR number, destination..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full pl-8 pr-3 py-2 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C] shadow-xs"
+                        />
+                      </div>
+
+                      {/* Outlet Filter for HO */}
+                      {isHeadOffice && (
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => handleOpenWhatsApp(po.id)}
-                            className="px-3 py-1.5 rounded-lg bg-[#25D366] text-white text-xs font-bold hover:bg-[#1EBE5D] transition-all flex items-center gap-1 shadow-xs"
-                            title="Open WhatsApp with Pre-filled Order Text"
+                          <select
+                            value={selectedBranchFilter}
+                            onChange={(e) => setSelectedBranchFilter(e.target.value)}
+                            className="px-3 py-2 bg-white border border-[rgba(45,45,45,0.12)] rounded-xl text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] shadow-xs"
                           >
-                            <MessageCircle className="w-3.5 h-3.5" /> 1-Click WhatsApp
-                          </button>
-                          <button
-                            onClick={() => handleConfirmSent(po.id)}
-                            className="px-2.5 py-1.5 rounded-lg border border-[rgba(45,45,45,0.15)] text-[#1C1C1C] text-xs font-semibold hover:bg-[#FAF8F5]"
-                            title="Mark as Sent Manually"
-                          >
-                            Sent OK
-                          </button>
+                            <option value="ALL">All Destinations (HO)</option>
+                            {outlets.map((o) => (
+                              <option key={o.id} value={o.id}>
+                                {o.name} ({o.code})
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       )}
 
-                      {['APPROVED', 'WHATSAPP_OPENED', 'SENT_MANUALLY', 'ISSUED', 'PARTIALLY_RECEIVED'].includes(po.status) && (
-                        <button
-                          onClick={() => handleOpenReceiveForPO(po)}
-                          className="px-2.5 py-1.5 rounded-lg bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] transition-all flex items-center gap-1 shadow-xs"
-                          title="Record Goods Receiving for this PO"
-                        >
-                          <PackageCheck className="w-3.5 h-3.5" /> Receive Stock
-                        </button>
-                      )}
+                      {/* Status Filter */}
+                      <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className="px-3 py-2 bg-white border border-[rgba(45,45,45,0.12)] rounded-xl text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] shadow-xs"
+                      >
+                        <option value="ALL">All Statuses</option>
+                        <option value="PENDING_APPROVAL">Pending Approval</option>
+                        <option value="APPROVED">Approved</option>
+                        <option value="ORDERED">Consolidated / Ordered</option>
+                        <option value="DRAFT">Draft</option>
+                        <option value="REJECTED">Rejected</option>
+                      </select>
+
+                      {/* Priority Filter */}
+                      <select
+                        value={priorityFilter}
+                        onChange={(e) => setPriorityFilter(e.target.value)}
+                        className="px-3 py-2 bg-white border border-[rgba(45,45,45,0.12)] rounded-xl text-xs text-[#1C1C1C] font-medium focus:outline-none focus:border-[#C79A3B] shadow-xs"
+                      >
+                        <option value="ALL">All Priorities</option>
+                        <option value="CRITICAL">Critical</option>
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
+                      </select>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => setCreatePRModalOpen(true)}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-[#C79A3B] to-[#B8862D] text-white text-xs font-bold shadow-md shadow-[#C79A3B]/20 hover:brightness-105 active:scale-95 transition-all whitespace-nowrap"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ New Indent (PR)</span>
+                      </button>
 
                       <button
-                        onClick={() => open3WayMatch(po.id)}
-                        className="px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-[#B8862D]/30 text-[#B8862D] text-xs font-semibold hover:bg-[#F1E4C5]"
+                        onClick={selectAllPendingPRs}
+                        className="px-3 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs text-[#707070] bg-white hover:bg-[#FAF8F5] font-semibold transition-all shadow-xs"
                       >
-                        3-Way Match
+                        {selectedPRIds.length > 0 ? 'Deselect All' : 'Select All Ready'}
+                      </button>
+
+                      <button
+                        onClick={() => setConsolidationModalOpen(true)}
+                        disabled={selectedPRIds.length === 0}
+                        className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs whitespace-nowrap ${
+                          selectedPRIds.length > 0
+                            ? 'bg-[#1C1C1C] text-white hover:bg-[#2D2D2D] active:scale-95 shadow-md'
+                            : 'bg-gray-100 text-gray-400 border border-[rgba(45,45,45,0.08)] cursor-not-allowed'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5 text-[#C79A3B]" />
+                        Consolidate Selected ({selectedPRIds.length}) to PO
                       </button>
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
 
-      {/* TAB 3: GOODS RECEIVE NOTES (GRN) & DESTINATION RECEIVING */}
-      {activeTab === 'grn' && (
-        <div className="space-y-4">
-          {/* Sub-Tabs for GRN Status Workflow */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 bg-[#FAF8F5] p-1.5 rounded-2xl border border-[rgba(45,45,45,0.08)]">
-              <button
-                onClick={() => setGrnStatusTab('ALL')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  grnStatusTab === 'ALL' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
-                }`}
-              >
-                All Receiving ({grns.length})
-              </button>
-              <button
-                onClick={() => setGrnStatusTab('PENDING_APPROVAL')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  grnStatusTab === 'PENDING_APPROVAL' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
-                }`}
-              >
-                <Clock className="w-3.5 h-3.5 text-[#B8862D]" />
-                Pending HO Approval ({grns.filter((g) => g.status === 'PENDING_APPROVAL').length})
-              </button>
-              <button
-                onClick={() => setGrnStatusTab('APPROVED')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  grnStatusTab === 'APPROVED' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
-                }`}
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-[#2E8B57]" />
-                Approved & Stock Posted ({grns.filter((g) => g.status === 'APPROVED' || g.status === 'RECEIVED' || g.status === 'QC_PASSED').length})
-              </button>
-            </div>
+                  {/* Requisitions Count Line */}
+                  <div className="text-[11px] font-semibold text-[#707070]">
+                    {filteredRequests.length.toLocaleString()} purchase requisitions
+                  </div>
 
-            <button
-              onClick={() => {
-                setNewGRNPOId('');
-                setNewGRNLines([]);
-                setNewGRNInvoiceNum('');
-                setNewGRNInvoiceAmt(0);
-                setNewGRNNotes('');
-                setNewGRNInvoiceFile(null);
-                setCreateGRNModalOpen(true);
-              }}
-              className="px-4 py-2 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs flex items-center gap-1.5"
-            >
-              <PackageCheck className="w-4 h-4" /> Receive Delivery (GRN)
-            </button>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                    <th className="p-3.5">GRN Ref</th>
-                    <th className="p-3.5">Receive Date</th>
-                    <th className="p-3.5">Destination</th>
-                    <th className="p-3.5">Supplier & PO</th>
-                    <th className="p-3.5">Supplier Invoice #</th>
-                    <th className="p-3.5">Invoice Amount</th>
-                    <th className="p-3.5">Status</th>
-                    <th className="p-3.5 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(45,45,45,0.05)]">
-                  {grns.filter((g) => {
-                    if (grnStatusTab === 'PENDING_APPROVAL') return g.status === 'PENDING_APPROVAL';
-                    if (grnStatusTab === 'APPROVED') return ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
-                    return true;
-                  }).length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="p-8 text-center text-gray-400">
-                        {grnStatusTab === 'PENDING_APPROVAL'
-                          ? 'No goods receipts currently waiting for HO approval.'
-                          : 'No goods receipt notes found. Click "Receive Delivery (GRN)" to log arriving stock.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    grns
-                      .filter((g) => {
-                        if (grnStatusTab === 'PENDING_APPROVAL') return g.status === 'PENDING_APPROVAL';
-                        if (grnStatusTab === 'APPROVED') return ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
-                        return true;
-                      })
-                      .map((g) => {
-                        const isPending = g.status === 'PENDING_APPROVAL';
-                        const isApproved = ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
-                        const isRejected = g.status === 'REJECTED';
-                        const hasVariance = (g.notes || '').includes('INVOICE VARIANCE FLAGGED');
-
-                        return (
-                          <tr key={g.id} className="hover:bg-[#FAF8F5]/60 transition-all">
-                            <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">{g.grn_number}</td>
-                            <td className="p-3.5 text-[#707070]">{new Date(g.receive_date).toLocaleDateString()}</td>
-                            <td className="p-3.5">
-                              <div className="font-semibold text-[#1C1C1C]">{g.branch_name}</div>
-                              <div className="text-[11px] text-[#707070]">{g.warehouse_name || 'Main Store'}</div>
-                            </td>
-                            <td className="p-3.5">
-                              <div className="text-[#1C1C1C] font-semibold">{g.supplier_name || 'Direct Vendor'}</div>
-                              <div className="font-mono text-[#B8862D] text-[11px]">{g.po_number || 'Direct Delivery'}</div>
-                            </td>
-                            <td className="p-3.5 font-mono font-semibold text-gray-700">{g.supplier_invoice_number || '—'}</td>
-                            <td className="p-3.5">
-                              <div className="font-mono font-bold text-[#1C1C1C]">${Number(g.total_amount || 0).toFixed(2)}</div>
-                              {hasVariance && (
-                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200 mt-0.5">
-                                  <AlertTriangle className="w-3 h-3 text-amber-600" /> Variance Flagged
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3.5">
-                              <span
-                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                                  isApproved
-                                    ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
-                                    : isPending
-                                    ? 'bg-[#B8862D]/15 text-[#B8862D] animate-pulse'
-                                    : 'bg-red-100 text-red-700'
-                                }`}
-                              >
-                                {isPending ? 'PENDING APPROVAL' : g.status}
-                              </span>
-                            </td>
-                            <td className="p-3.5 text-right">
-                              {isPending ? (
-                                <div className="flex items-center justify-end gap-1.5">
-                                  <button
-                                    onClick={() => handleApproveGRN(g.id)}
-                                    disabled={loading}
-                                    className="px-3 py-1 rounded-lg bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] transition-all flex items-center gap-1 shadow-xs"
-                                    title="Approve Receiving & Post to Destination Stock"
-                                  >
-                                    <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Post Stock
-                                  </button>
-                                  <button
-                                    onClick={() => setRejectGRNModal({ open: true, grnId: g.id, grnNumber: g.grn_number })}
-                                    disabled={loading}
-                                    className="px-2.5 py-1 rounded-lg border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 transition-all"
-                                  >
-                                    Reject
-                                  </button>
-                                </div>
-                              ) : isApproved ? (
-                                <span className="text-[#2E8B57] font-semibold text-xs inline-flex items-center gap-1">
-                                  <CheckCircle2 className="w-3.5 h-3.5" /> Stock Posted
-                                </span>
-                              ) : (
-                                <span className="text-red-500 font-semibold text-xs inline-flex items-center gap-1">
-                                  <AlertCircle className="w-3.5 h-3.5" /> Rejected
-                                </span>
-                              )}
-                            </td>
+                  {/* PR Queue Table */}
+                  <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-[#FAF8F5]/80 border-b border-[rgba(45,45,45,0.08)] text-[#707070] uppercase font-bold text-[10px] tracking-wider">
+                            <th className="py-3 px-4 w-10 text-center">
+                              <input
+                                type="checkbox"
+                                checked={selectedPRIds.length > 0 && selectedPRIds.length === filteredRequests.length}
+                                onChange={selectAllPendingPRs}
+                                className="rounded accent-[#B8862D] cursor-pointer"
+                              />
+                            </th>
+                            <th className="py-3 px-4">PR NUMBER</th>
+                            <th className="py-3 px-4">DESTINATION</th>
+                            <th className="py-3 px-4">PURCHASE TYPE</th>
+                            <th className="py-3 px-4">REQUIRED BY</th>
+                            <th className="py-3 px-4">ITEMS SUMMARY</th>
+                            <th className="py-3 px-4">EST. VALUE</th>
+                            <th className="py-3 px-4">PRIORITY</th>
+                            <th className="py-3 px-4">STATUS</th>
+                            <th className="py-3 px-4 text-right">ACTIONS</th>
                           </tr>
-                        );
-                      })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                        </thead>
+                        <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                          {loading ? (
+                            Array.from({ length: 5 }).map((_, idx) => (
+                              <tr key={idx} className="animate-pulse">
+                                <td className="py-3.5 px-4 text-center">
+                                  <div className="h-4 w-4 bg-gray-200 rounded mx-auto"></div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="h-3 w-20 bg-gray-200 rounded"></div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="h-3 w-28 bg-gray-200 rounded"></div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="h-3 w-24 bg-gray-200 rounded"></div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="h-3 w-20 bg-gray-200 rounded"></div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="h-3 w-32 bg-gray-200 rounded"></div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="h-3 w-16 bg-gray-200 rounded"></div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="h-4 w-14 bg-gray-200 rounded-full"></div>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <div className="h-4 w-16 bg-gray-200 rounded-full"></div>
+                                </td>
+                                <td className="py-3.5 px-4 text-right">
+                                  <div className="h-4 w-12 bg-gray-200 rounded ml-auto"></div>
+                                </td>
+                              </tr>
+                            ))
+                          ) : filteredRequests.length === 0 ? (
+                            <tr>
+                              <td colSpan={10} className="py-12 text-center text-[#707070]">
+                                <div className="max-w-xs mx-auto space-y-2">
+                                  <ShoppingCart className="w-8 h-8 text-[#C79A3B]/50 mx-auto" />
+                                  <p className="font-bold text-[#1C1C1C]">No purchase requests found</p>
+                                  <p className="text-[11px]">
+                                    {hasActiveFilters
+                                      ? 'No indents match the active filters or search criteria.'
+                                      : 'There are no active purchase requisitions in the queue.'}
+                                  </p>
+                                  {hasActiveFilters && (
+                                    <button
+                                      onClick={() => {
+                                        setSearchQuery('');
+                                        setStatusFilter('ALL');
+                                        setPriorityFilter('ALL');
+                                        if (isHeadOffice) setSelectedBranchFilter('ALL');
+                                      }}
+                                      className="text-xs font-bold text-[#B8862D] underline pt-1 block mx-auto"
+                                    >
+                                      Clear filters
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredRequests.map((pr) => {
+                              const totalEst = (pr.items || []).reduce(
+                                (acc: number, it: any) => acc + Number(it.requested_qty || 0) * Number(it.estimated_price || 0),
+                                0
+                              );
+                              const isSelected = selectedPRIds.includes(pr.id);
+
+                              return (
+                                <tr
+                                  key={pr.id}
+                                  className={`hover:bg-[#FAF8F5]/60 transition-colors duration-100 ${
+                                    isSelected ? 'bg-[#F1E4C5]/20' : ''
+                                  }`}
+                                >
+                                  <td className="py-3 px-4 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => togglePRSelection(pr.id)}
+                                      className="rounded accent-[#B8862D] cursor-pointer"
+                                    />
+                                  </td>
+                                  <td className="py-3 px-4 font-mono font-bold text-[#B8862D]">
+                                    {pr.request_number}
+                                  </td>
+                                  <td className="py-3 px-4 font-bold text-[#1C1C1C]">
+                                    {pr.branch_name || 'Retail Outlet'}
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.08)]">
+                                      {pr.purchase_type || 'DIRECT_OUTLET_PURCHASE'}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 text-[#707070]">
+                                    {pr.required_date ? new Date(pr.required_date).toLocaleDateString() : 'Immediate'}
+                                  </td>
+                                  <td className="py-3 px-4 text-[#707070]">
+                                    <div className="flex items-center gap-1 font-semibold text-[#1C1C1C]">
+                                      <span>{(pr.items || []).length} items</span>
+                                      <span className="text-[10px] text-[#707070] font-normal">
+                                        ({(pr.items || []).slice(0, 2).map((i: any) => i.item_name).join(', ')}
+                                        {(pr.items || []).length > 2 ? '...' : ''})
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-4 font-bold font-mono text-[#1C1C1C]">
+                                    ${totalEst.toFixed(2)}
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    <span
+                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        pr.priority === 'CRITICAL' || pr.priority === 'URGENT'
+                                          ? 'bg-[#D9534F]/10 text-[#D9534F] border border-[#D9534F]/30'
+                                          : pr.priority === 'HIGH'
+                                          ? 'bg-[#D99625]/10 text-[#D99625] border border-[#D99625]/30'
+                                          : pr.priority === 'MEDIUM'
+                                          ? 'bg-[#3978B8]/10 text-[#3978B8] border border-[#3978B8]/30'
+                                          : 'bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.08)]'
+                                      }`}
+                                    >
+                                      {pr.priority}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    <span
+                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        pr.status === 'APPROVED'
+                                          ? 'bg-[#2E8B57]/10 text-[#2E8B57] border border-[#2E8B57]/30'
+                                          : pr.status === 'PENDING_APPROVAL'
+                                          ? 'bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30'
+                                          : pr.status === 'ORDERED'
+                                          ? 'bg-[#3978B8]/10 text-[#3978B8] border border-[#3978B8]/30'
+                                          : pr.status === 'REJECTED'
+                                          ? 'bg-[#D9534F]/10 text-[#D9534F] border border-[#D9534F]/30'
+                                          : 'bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.08)]'
+                                      }`}
+                                    >
+                                      {pr.status}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 text-right space-x-1">
+                                    <button
+                                      onClick={() => setViewPRModal(pr)}
+                                      className="p-1.5 rounded-lg text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5] transition-colors"
+                                      title="View Indent Details"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" />
+                                    </button>
+
+                                    {pr.status === 'PENDING_APPROVAL' && (
+                                      <>
+                                        <button
+                                          onClick={() => handleApprovePR(pr.id)}
+                                          className="p-1.5 rounded-lg text-[#2E8B57] hover:bg-[#2E8B57]/10 transition-colors"
+                                          title="Approve Indent"
+                                        >
+                                          <CheckCircle2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            setActionReasonModal({
+                                              type: 'RETURN_PR',
+                                              id: pr.id,
+                                              title: `Return Indent ${pr.request_number} for Correction`,
+                                            })
+                                          }
+                                          className="p-1.5 rounded-lg text-[#D99625] hover:bg-[#D99625]/10 transition-colors"
+                                          title="Return for Correction"
+                                        >
+                                          <RotateCcw className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            setActionReasonModal({
+                                              type: 'REJECT_PR',
+                                              id: pr.id,
+                                              title: `Reject Indent ${pr.request_number}`,
+                                            })
+                                          }
+                                          className="p-1.5 rounded-lg text-[#D9534F] hover:bg-[#D9534F]/10 transition-colors"
+                                          title="Reject Indent"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* TAB 4: 3-WAY INVOICE MATCHING DRILL-DOWN */}
-      {activeTab === 'matching' && (
-        <div className="space-y-6">
-          {/* PO Selector if not preselected */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-[#1C1C1C]">Select Purchase Order to Audit:</span>
-              <select
-                value={selected3WayPOId || ''}
-                onChange={(e) => {
-                  if (e.target.value) open3WayMatch(e.target.value);
-                }}
-                className="p-2 bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] rounded-xl text-xs font-semibold text-[#1C1C1C] focus:outline-none"
-              >
-                <option value="">-- Choose PO --</option>
-                {orders.map((po) => (
-                  <option key={po.id} value={po.id}>
-                    {po.po_number} - {po.supplier_name} (${Number(po.net_amount || po.total_amount).toFixed(2)})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {threeWayData && (
-              <div className="flex items-center gap-2">
-                <span
-                  className={`px-3 py-1 rounded-full text-xs font-bold ${
-                    threeWayData.overall_status === 'PERFECT_MATCH'
-                      ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
-                      : 'bg-amber-100 text-amber-800'
+        {/* SECTION 2: RECEIVING (DESTINATION GRN RECEIVING) */}
+        {activeSection === 'receiving' && (
+          <div className="space-y-4">
+            {/* Sub-Tabs for GRN Status Workflow */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 bg-[#FAF8F5] p-1.5 rounded-2xl border border-[rgba(45,45,45,0.08)]">
+                <button
+                  onClick={() => setGrnStatusTab('ALL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    grnStatusTab === 'ALL' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
                   }`}
                 >
-                  {threeWayData.overall_status.replace('_', ' ')}
-                </span>
+                  All Receiving ({grns.length})
+                </button>
+                <button
+                  onClick={() => setGrnStatusTab('PENDING_APPROVAL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    grnStatusTab === 'PENDING_APPROVAL' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5 text-[#B8862D]" />
+                  Pending HO ({grns.filter((g) => g.status === 'PENDING_APPROVAL').length})
+                </button>
+                <button
+                  onClick={() => setGrnStatusTab('APPROVED')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    grnStatusTab === 'APPROVED' ? 'bg-white text-[#1C1C1C] shadow-xs' : 'text-[#707070] hover:text-[#1C1C1C]'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#2E8B57]" />
+                  Stock Posted ({grns.filter((g) => ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status)).length})
+                </button>
               </div>
-            )}
+
+              <button
+                onClick={() => {
+                  setNewGRNPOId('');
+                  setNewGRNLines([]);
+                  setNewGRNInvoiceNum('');
+                  setNewGRNInvoiceAmt(0);
+                  setNewGRNNotes('');
+                  setNewGRNInvoiceFile(null);
+                  setCreateGRNModalOpen(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs flex items-center gap-1.5"
+              >
+                <PackageCheck className="w-4 h-4" /> Receive Delivery (GRN)
+              </button>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
+                      <th className="p-3.5">GRN Ref</th>
+                      <th className="p-3.5">Receive Date</th>
+                      <th className="p-3.5">Destination</th>
+                      <th className="p-3.5">Supplier & PO</th>
+                      <th className="p-3.5">Supplier Invoice #</th>
+                      <th className="p-3.5">Invoice Amount</th>
+                      <th className="p-3.5">Status</th>
+                      <th className="p-3.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[rgba(45,45,45,0.05)]">
+                    {grns.filter((g) => {
+                      if (grnStatusTab === 'PENDING_APPROVAL') return g.status === 'PENDING_APPROVAL';
+                      if (grnStatusTab === 'APPROVED') return ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
+                      return true;
+                    }).length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-8 text-center text-gray-400">
+                          {grnStatusTab === 'PENDING_APPROVAL'
+                            ? 'No goods receipts currently waiting for HO approval.'
+                            : 'No goods receipt notes found. Click "Receive Delivery (GRN)" to log arriving stock.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      grns
+                        .filter((g) => {
+                          if (grnStatusTab === 'PENDING_APPROVAL') return g.status === 'PENDING_APPROVAL';
+                          if (grnStatusTab === 'APPROVED') return ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
+                          return true;
+                        })
+                        .map((g) => {
+                          const isPending = g.status === 'PENDING_APPROVAL';
+                          const isApproved = ['APPROVED', 'RECEIVED', 'QC_PASSED'].includes(g.status);
+                          const hasVariance = (g.notes || '').includes('INVOICE VARIANCE FLAGGED');
+
+                          return (
+                            <tr key={g.id} className="hover:bg-[#FAF8F5]/60 transition-all">
+                              <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">{g.grn_number}</td>
+                              <td className="p-3.5 text-[#707070]">{new Date(g.receive_date).toLocaleDateString()}</td>
+                              <td className="p-3.5">
+                                <div className="font-semibold text-[#1C1C1C]">{g.branch_name}</div>
+                                <div className="text-[11px] text-[#707070]">{g.warehouse_name || 'Main Store'}</div>
+                              </td>
+                              <td className="p-3.5">
+                                <div className="text-[#1C1C1C] font-semibold">{g.supplier_name || 'Direct Vendor'}</div>
+                                <div className="font-mono text-[#B8862D] text-[11px]">{g.po_number || 'Direct Delivery'}</div>
+                              </td>
+                              <td className="p-3.5 font-mono font-semibold text-gray-700">{g.supplier_invoice_number || '—'}</td>
+                              <td className="p-3.5">
+                                <div className="font-mono font-bold text-[#1C1C1C]">${Number(g.total_amount || 0).toFixed(2)}</div>
+                                {hasVariance && (
+                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200 mt-0.5">
+                                    <AlertTriangle className="w-3 h-3 text-amber-600" /> Variance Flagged
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3.5">
+                                <span
+                                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                    isApproved
+                                      ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
+                                      : isPending
+                                      ? 'bg-[#B8862D]/15 text-[#B8862D] animate-pulse'
+                                      : 'bg-red-100 text-red-700'
+                                  }`}
+                                >
+                                  {isPending ? 'PENDING APPROVAL' : g.status}
+                                </span>
+                              </td>
+                              <td className="p-3.5 text-right">
+                                {isPending ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      onClick={() => handleApproveGRN(g.id)}
+                                      disabled={loading}
+                                      className="px-3 py-1 rounded-lg bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] transition-all flex items-center gap-1 shadow-xs"
+                                      title="Approve Receiving & Post to Destination Stock"
+                                    >
+                                      <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Post Stock
+                                    </button>
+                                    <button
+                                      onClick={() => setRejectGRNModal({ open: true, grnId: g.id, grnNumber: g.grn_number })}
+                                      disabled={loading}
+                                      className="px-2.5 py-1 rounded-lg border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 transition-all"
+                                    >
+                                      Reject
+                                    </button>
+                                  </div>
+                                ) : isApproved ? (
+                                  <span className="text-[#2E8B57] font-semibold text-xs inline-flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> Stock Posted
+                                  </span>
+                                ) : (
+                                  <span className="text-red-500 font-semibold text-xs inline-flex items-center gap-1">
+                                    <AlertCircle className="w-3.5 h-3.5" /> Rejected
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
+        )}
 
-          {loading3Way ? (
-            <div className="p-12 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)]">
-              <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B] mx-auto mb-2" />
-              <p className="text-xs text-[#707070]">Loading 3-way reconciliation audit ledger...</p>
+        {/* SECTION 3: UPLOAD BILLS (STUB / COMING SOON) */}
+        {activeSection === 'upload_bills' && (
+          <div className="bg-white rounded-3xl border border-[rgba(45,45,45,0.08)] p-8 sm:p-12 text-center shadow-sm">
+            <div className="w-16 h-16 rounded-2xl bg-[#F1E4C5] text-[#B8862D] flex items-center justify-center mx-auto mb-4">
+              <Upload className="w-8 h-8" />
             </div>
-          ) : !threeWayData ? (
-            <div className="p-12 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] text-gray-400">
-              Select a purchase order above to inspect the 3-way match comparison between PO ordered quantity, actual GRN received quantity, and supplier invoice amount.
+            <h3 className="text-base font-bold text-[#1C1C1C] mb-1">Direct Bill & Invoice Scanner</h3>
+            <p className="text-xs text-[#707070] max-w-md mx-auto mb-6">
+              Upload supplier tax invoices and delivery dockets. AI OCR will automatically extract vendor details, line items, and match against purchase orders.
+            </p>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#FAF8F5] text-[#B8862D] border border-[#C79A3B]/30">
+              Coming soon in next module pass
+            </span>
+          </div>
+        )}
+
+        {/* SECTION 4: STOCK OVERVIEW (LINK OUT / EMBED SUMMARY) */}
+        {activeSection === 'stock' && (
+          <div className="bg-white rounded-3xl border border-[rgba(45,45,45,0.08)] p-8 sm:p-12 text-center shadow-sm space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-[#F1E4C5] text-[#B8862D] flex items-center justify-center mx-auto mb-2">
+              <Boxes className="w-8 h-8" />
             </div>
-          ) : (
-            <div className="space-y-6">
-              {/* Financial KPI Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 shadow-sm">
-                  <span className="text-[10px] text-[#707070] uppercase font-semibold">1. PO Approved Amount</span>
-                  <p className="text-lg font-bold text-[#1C1C1C] font-mono">
-                    ${Number(threeWayData.total_ordered_amount).toFixed(2)}
-                  </p>
+            <div>
+              <h3 className="text-base font-bold text-[#1C1C1C] mb-1">Real-Time Inventory & Stock Balances</h3>
+              <p className="text-xs text-[#707070] max-w-md mx-auto">
+                Stock is actively synced across all {outlets.length} outlets. View warehouse ledgers, stock reconciliations, and reorder levels in the dedicated Inventory workspace.
+              </p>
+            </div>
+            <div className="pt-2">
+              <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold bg-[#FAF8F5] text-[#B8862D] border border-[#C79A3B]/30">
+                Accessible via main sidebar &ldquo;Inventory & Stock&rdquo;
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 5: APPROVALS (STUB / COMING SOON) */}
+        {activeSection === 'approvals' && (
+          <div className="bg-white rounded-3xl border border-[rgba(45,45,45,0.08)] p-8 sm:p-12 text-center shadow-sm">
+            <div className="w-16 h-16 rounded-2xl bg-[#F1E4C5] text-[#B8862D] flex items-center justify-center mx-auto mb-4">
+              <ShieldCheck className="w-8 h-8" />
+            </div>
+            <h3 className="text-base font-bold text-[#1C1C1C] mb-1">Central Purchase Approvals Queue</h3>
+            <p className="text-xs text-[#707070] max-w-md mx-auto mb-6">
+              Multi-tier approval thresholds and automated escalation for high-value purchase requisitions and supplier contracts.
+            </p>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#FAF8F5] text-[#B8862D] border border-[#C79A3B]/30">
+              Coming soon in next module pass
+            </span>
+          </div>
+        )}
+
+        {/* SECTION 6: ORDERS (PURCHASE ORDERS & WHATSAPP DISPATCH + 3-WAY MATCH DRILLDOWN) */}
+        {activeSection === 'orders' && (
+          <div className="space-y-4">
+            {/* 3-Way Match Drill Down (if inspecting a specific PO) */}
+            {selected3WayPOId && threeWayData && (
+              <div className="p-5 rounded-3xl bg-white border border-[#C79A3B]/40 shadow-md space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[rgba(45,45,45,0.08)]">
+                  <div className="flex items-center gap-2.5">
+                    <Receipt className="w-5 h-5 text-[#C79A3B]" />
+                    <div>
+                      <h4 className="text-sm font-bold text-[#1C1C1C]">
+                        3-Way Invoice Matching Audit &bull; PO {threeWayData.po_number}
+                      </h4>
+                      <p className="text-[11px] text-[#707070]">
+                        Matching Purchase Order vs GRN Receipts vs Supplier Invoices
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        threeWayData.overall_status === 'PERFECT_MATCH'
+                          ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {threeWayData.overall_status.replace('_', ' ')}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setSelected3WayPOId('');
+                        setThreeWayData(null);
+                      }}
+                      className="text-gray-400 hover:text-gray-600 p-1"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 shadow-sm">
-                  <span className="text-[10px] text-[#707070] uppercase font-semibold">2. Physical Stock Received</span>
-                  <p className="text-lg font-bold text-[#2E8B57] font-mono">
-                    ${Number(threeWayData.total_received_amount).toFixed(2)}
-                  </p>
+                {/* 3-Way Match Metrics */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[rgba(45,45,45,0.06)]">
+                    <span className="text-[#707070] block text-[10px] uppercase font-bold">1. PO Ordered Value</span>
+                    <span className="text-base font-bold text-[#1C1C1C] font-mono">
+                      ${Number(threeWayData.total_ordered_amount || threeWayData.po_total || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[rgba(45,45,45,0.06)]">
+                    <span className="text-[#707070] block text-[10px] uppercase font-bold">2. GRN Received Value</span>
+                    <span className="text-base font-bold text-[#1C1C1C] font-mono">
+                      ${Number(threeWayData.total_received_amount || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[rgba(45,45,45,0.06)]">
+                    <span className="text-[#707070] block text-[10px] uppercase font-bold">3. Invoice Billed Value</span>
+                    <span className="text-base font-bold text-[#1C1C1C] font-mono">
+                      ${Number(threeWayData.total_invoice_amount || 0).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 shadow-sm">
-                  <span className="text-[10px] text-[#707070] uppercase font-semibold">3. Supplier Invoice Amount</span>
-                  <p className="text-lg font-bold text-[#B8862D] font-mono">
-                    ${Number(threeWayData.total_invoice_amount).toFixed(2)}
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 shadow-sm">
-                  <span className="text-[10px] text-[#707070] uppercase font-semibold">4. Net Variance ($)</span>
-                  <p
-                    className={`text-lg font-bold font-mono ${
-                      Math.abs(Number(threeWayData.total_invoice_amount) - Number(threeWayData.total_ordered_amount)) > 0.01
-                        ? 'text-amber-600'
-                        : 'text-[#2E8B57]'
-                    }`}
-                  >
-                    ${(Number(threeWayData.total_invoice_amount) - Number(threeWayData.total_ordered_amount)).toFixed(2)}
-                  </p>
-                </div>
-              </div>
-
-              {/* 3-Way Line Items Comparison */}
-              <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
-                <div className="p-4 border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
-                  <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider">
-                    Line-by-Line 3-Way Audit Ledger ({threeWayData.po_number})
-                  </h3>
-                  <span className="text-xs text-[#707070]">
-                    Linked GRNs: {threeWayData.grn_count}
-                  </span>
-                </div>
-
+                {/* Line Items Audit Table */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead>
-                      <tr className="bg-white border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                        <th className="p-3.5">Item Name</th>
-                        <th className="p-3.5">PO Ordered</th>
-                        <th className="p-3.5">PO Rate</th>
-                        <th className="p-3.5">PO Total</th>
-                        <th className="p-3.5">GRN Accepted</th>
-                        <th className="p-3.5">Actual Rate</th>
-                        <th className="p-3.5">Actual Total</th>
-                        <th className="p-3.5">Qty Var</th>
-                        <th className="p-3.5">Rate Var</th>
-                        <th className="p-3.5">Status</th>
+                      <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
+                        <th className="p-2.5">Item</th>
+                        <th className="p-2.5 text-right">PO Ordered</th>
+                        <th className="p-2.5 text-right">GRN Received</th>
+                        <th className="p-2.5 text-right">Billed Qty</th>
+                        <th className="p-2.5 text-right">Status</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[rgba(45,45,45,0.05)] font-mono">
-                      {threeWayData.lines.map((ln) => (
-                        <tr key={ln.item_id} className="hover:bg-[#FAF8F5]/60 transition-all font-sans">
-                          <td className="p-3.5 font-bold text-[#1C1C1C]">
-                            {ln.item_name}
-                            <span className="block text-[10px] font-mono text-gray-400">{ln.item_code}</span>
-                          </td>
-                          <td className="p-3.5 font-mono">{ln.po_qty} {ln.unit_symbol}</td>
-                          <td className="p-3.5 font-mono">${Number(ln.po_rate).toFixed(2)}</td>
-                          <td className="p-3.5 font-mono font-bold">${Number(ln.po_total).toFixed(2)}</td>
-                          <td className="p-3.5 font-mono text-[#2E8B57] font-bold">{ln.accepted_qty} {ln.unit_symbol}</td>
-                          <td className="p-3.5 font-mono">${Number(ln.actual_rate).toFixed(2)}</td>
-                          <td className="p-3.5 font-mono font-bold text-[#2E8B57]">${Number(ln.actual_total).toFixed(2)}</td>
-                          <td className={`p-3.5 font-mono ${Number(ln.qty_variance) !== 0 ? 'text-amber-600 font-bold' : 'text-gray-400'}`}>
-                            {Number(ln.qty_variance) > 0 ? `+${ln.qty_variance}` : ln.qty_variance}
-                          </td>
-                          <td className={`p-3.5 font-mono ${Number(ln.rate_variance) !== 0 ? 'text-amber-600 font-bold' : 'text-gray-400'}`}>
-                            ${Number(ln.rate_variance).toFixed(2)}
-                          </td>
-                          <td className="p-3.5">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                ln.status === 'MATCHED'
-                                  ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
-                                  : ln.status === 'PENDING_DELIVERY'
-                                  ? 'bg-blue-100 text-blue-700'
-                                  : 'bg-amber-100 text-amber-800'
-                              }`}
-                            >
+                    <tbody className="divide-y divide-[rgba(45,45,45,0.05)]">
+                      {(threeWayData.lines || []).map((ln: any, i: number) => (
+                        <tr key={i} className="hover:bg-[#FAF8F5]/50">
+                          <td className="p-2.5 font-semibold text-[#1C1C1C]">{ln.item_name}</td>
+                          <td className="p-2.5 text-right font-mono">{ln.po_qty}</td>
+                          <td className="p-2.5 text-right font-mono">{ln.grn_qty}</td>
+                          <td className="p-2.5 text-right font-mono">{ln.invoice_qty}</td>
+                          <td className="p-2.5 text-right">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#2E8B57]/15 text-[#2E8B57]">
                               {ln.status}
                             </span>
                           </td>
@@ -1766,610 +1753,392 @@ export const PurchaseWorkspace: React.FC = () => {
                   </table>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB: SMART AI INDENT & ASSISTANT */}
-      {activeTab === 'smart' && (
-        <div className="space-y-6">
-          {/* Outlet Scoping & Control Banner */}
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-[#FAF8F5] via-white to-[#FAF8F5] border border-[#C79A3B]/30 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-[#F1E4C5] text-[#B8862D]">
-                  <Sparkles className="w-5 h-5" />
-                </span>
-                <div>
-                  <h3 className="text-base font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
-                    Outlet Smart AI Indent Engine & Assistant
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-white text-[#B8862D] border border-[#C79A3B]/30">
-                      [{activeOutlet.code}] {activeOutlet.name}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-[#707070] mt-0.5">
-                    Deterministic stock + sales consumption run-rate + lead time & safety buffer calculations scoped exclusively to this outlet.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => fetchSmartDraft(true)}
-                disabled={smartDraftLoading}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5] shadow-xs transition-all"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${smartDraftLoading ? 'animate-spin' : ''}`} />
-                Regenerate AI Draft
-              </button>
-
-              <button
-                onClick={() => setSmartConfigModalOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5] shadow-xs transition-all"
-              >
-                <Sliders className="w-3.5 h-3.5 text-[#C79A3B]" />
-                Schedule Settings ({prepTime})
-              </button>
-
-              <button
-                onClick={handleTriggerScheduledRun}
-                disabled={loading}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all"
-              >
-                <Clock className="w-3.5 h-3.5 text-[#C79A3B]" />
-                Run Schedules Now
-              </button>
-            </div>
-          </div>
-
-          {/* Interactive AI Assistant Q&A Panel */}
-          <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-[#F1E4C5] flex items-center justify-center text-[#B8862D]">
-                  <Bot className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-sm text-[#1C1C1C]">Outlet Inventory AI Assistant</h4>
-                  <p className="text-[11px] text-[#707070]">Ask instant stock, consumption, critical shortage & replenishment questions</p>
-                </div>
-              </div>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#2E8B57]/15 text-[#2E8B57]">
-                Active Scope: {activeOutlet.name}
-              </span>
-            </div>
-
-            {/* Quick Prompt Suggestions */}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-[#707070] font-semibold flex items-center gap-1">
-                <HelpCircle className="w-3.5 h-3.5 text-[#C79A3B]" /> Quick Questions:
-              </span>
-              {[
-                { label: '🔥 What is critical today?', q: 'What is critical today?' },
-                { label: '⚠️ What stock is low today?', q: 'What stock is low today?' },
-                { label: '📦 What do I need to order?', q: 'What do I need to order?' },
-                { label: '⏳ What is already pending?', q: 'What is already pending?' },
-                { label: '🔮 What do I need for tomorrow?', q: 'What do I need for tomorrow?' },
-              ].map((chip, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleAskAI(chip.q)}
-                  disabled={aiAsking}
-                  className="px-2.5 py-1 rounded-lg bg-[#FAF8F5] hover:bg-[#F1E4C5] text-[#1C1C1C] hover:text-[#B8862D] border border-[rgba(45,45,45,0.08)] text-[11px] font-semibold transition-all"
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Custom Question Input */}
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={aiQuestion}
-                onChange={(e) => setAiQuestion(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleAskAI();
-                }}
-                placeholder={`Ask AI Assistant about stock, min levels, or indents for ${activeOutlet.name}...`}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] text-xs focus:outline-none focus:border-[#C79A3B]"
-              />
-              <button
-                onClick={() => handleAskAI()}
-                disabled={aiAsking || !aiQuestion.trim()}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#B8862D] hover:bg-[#9E7326] text-white text-xs font-bold disabled:opacity-50 transition-all shadow-xs"
-              >
-                <Send className={`w-3.5 h-3.5 ${aiAsking ? 'animate-spin' : ''}`} />
-                {aiAsking ? 'Analyzing...' : 'Ask Assistant'}
-              </button>
-            </div>
-
-            {/* AI Assistant Answer Card */}
-            {aiAnswer && (
-              <div className="p-4 rounded-xl bg-gradient-to-br from-[#FAF8F5] to-white border border-[#C79A3B]/30 space-y-3 animate-fadeIn">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-[#B8862D] text-white">
-                      Intent: {aiAnswer.intent}
-                    </span>
-                    <span className="text-xs font-semibold text-[#1C1C1C]">
-                      &ldquo;{aiAnswer.question}&rdquo;
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setAiAnswer(null)}
-                    className="text-gray-400 hover:text-gray-600 text-xs font-bold"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Answer text */}
-                <div className="p-3 rounded-lg bg-white border border-[rgba(45,45,45,0.06)] text-xs text-[#1C1C1C] whitespace-pre-line leading-relaxed font-sans">
-                  {aiAnswer.answer_text}
-                </div>
-
-                {/* Metrics Chips */}
-                {aiAnswer.metrics && (
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
-                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                      <span className="text-[10px] text-[#707070] block">Monitored Items</span>
-                      <span className="font-bold text-[#1C1C1C]">{aiAnswer.metrics.total_monitored_items ?? 0}</span>
-                    </div>
-                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                      <span className="text-[10px] text-red-600 font-bold block">Critical</span>
-                      <span className="font-bold text-red-600">{aiAnswer.metrics.critical_count ?? 0}</span>
-                    </div>
-                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                      <span className="text-[10px] text-amber-700 block">Below Min</span>
-                      <span className="font-bold text-amber-700">{aiAnswer.metrics.low_stock_count ?? 0}</span>
-                    </div>
-                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                      <span className="text-[10px] text-blue-700 block">Need Order</span>
-                      <span className="font-bold text-blue-700">{aiAnswer.metrics.need_order_count ?? 0}</span>
-                    </div>
-                    <div className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)]">
-                      <span className="text-[10px] text-[#2E8B57] block">Pending Orders</span>
-                      <span className="font-bold text-[#2E8B57]">{aiAnswer.metrics.pending_items_count ?? 0}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Active Smart Requirement Draft Section */}
-          <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-sm overflow-hidden space-y-4 p-5">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[rgba(45,45,45,0.06)] pb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-bold text-[#1C1C1C] flex items-center gap-1.5">
-                    <ShoppingCart className="w-4 h-4 text-[#C79A3B]" />
-                    Active Smart Indent Draft ({smartDraft?.draft_date || 'Today'})
-                  </h4>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      smartDraft?.status === 'CONFIRMED'
-                        ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}
-                  >
-                    {smartDraft?.status || 'DRAFT'}
-                  </span>
-                  {smartDraft?.purchase_request_number && (
-                    <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-mono text-[10px] font-bold border border-blue-200">
-                      Linked PR: {smartDraft.purchase_request_number}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-[#707070] mt-0.5">
-                  Est Total Value: <span className="font-bold text-[#1C1C1C] font-mono">${Number(smartDraft?.estimated_total_order_value || 0).toFixed(2)}</span> | Critical Items: <span className="font-bold text-red-600">{smartDraft?.critical_count || 0}</span> | High: <span className="font-bold text-amber-600">{smartDraft?.high_priority_count || 0}</span>
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowAuditTrail(!showAuditTrail)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-[rgba(45,45,45,0.12)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5]"
-                >
-                  <History className="w-3.5 h-3.5 text-[#C79A3B]" />
-                  Audit Trail ({smartDraft?.audit_summary?.user_modifications?.length || 0})
-                </button>
-
-                <button
-                  onClick={() => setAddItemDraftModalOpen(true)}
-                  disabled={smartDraft?.status === 'CONFIRMED'}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5] disabled:opacity-50"
-                >
-                  <Plus className="w-3.5 h-3.5 text-[#C79A3B]" />
-                  Add Catalog Item
-                </button>
-
-                <button
-                  onClick={handleConfirmSmartDraft}
-                  disabled={confirmingDraft || smartDraft?.status === 'CONFIRMED' || !smartDraft?.items?.length}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-[#2E8B57] hover:bg-[#257247] text-white text-xs font-bold disabled:opacity-50 shadow-xs transition-all"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  {confirmingDraft ? 'Submitting...' : smartDraft?.status === 'CONFIRMED' ? 'Confirmed & Converted' : 'Confirm & Convert to PR'}
-                </button>
-              </div>
-            </div>
-
-            {/* Audit Trail Drawer */}
-            {showAuditTrail && smartDraft?.audit_summary && (
-              <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-[#1C1C1C] flex items-center gap-1.5">
-                    <History className="w-4 h-4 text-[#C79A3B]" /> Modification Audit Trail History
-                  </span>
-                  <span className="text-[10px] text-[#707070]">Generated: {smartDraft.generated_at}</span>
-                </div>
-                {smartDraft.audit_summary.user_modifications?.length ? (
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                    {smartDraft.audit_summary.user_modifications.map((mod: any, i: number) => (
-                      <div key={i} className="p-2 rounded-lg bg-white border border-[rgba(45,45,45,0.06)] flex items-center justify-between text-[11px]">
-                        <div>
-                          <span className="font-bold text-[#B8862D] uppercase mr-2">{mod.action}</span>
-                          <span className="font-semibold text-[#1C1C1C]">{mod.item_name}</span>
-                          {mod.action === 'EDIT_QUANTITY' && (
-                            <span className="text-[#707070] ml-2">
-                              (Original: {mod.original_suggested_qty} &rarr; Old: {mod.old_final_qty} &rarr; New: <strong className="text-[#1C1C1C]">{mod.new_final_qty}</strong>)
-                            </span>
-                          )}
-                          {mod.action === 'ADD_ITEM' && (
-                            <span className="text-[#2E8B57] ml-2 font-semibold">+{mod.added_qty}</span>
-                          )}
-                          {mod.action === 'REMOVE_ITEM' && (
-                            <span className="text-red-500 ml-2 font-semibold">Removed (-{mod.removed_qty})</span>
-                          )}
-                        </div>
-                        <span className="text-[10px] text-[#707070]">{mod.modified_by}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-[#707070] text-xs">No user edits made yet. Quantities match initial deterministic system calculations.</p>
-                )}
-              </div>
             )}
 
-            {/* Smart Requirement Items Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                    <th className="p-3.5">Item Name & Code</th>
-                    <th className="p-3.5">Supplier</th>
-                    <th className="p-3.5 text-right">Current Stock</th>
-                    <th className="p-3.5 text-right">Min / Target</th>
-                    <th className="p-3.5 text-right">Run-Rate / Pending</th>
-                    <th className="p-3.5 text-right">Deficit</th>
-                    <th className="p-3.5 text-right">Suggested</th>
-                    <th className="p-3.5 text-center">Final Order Qty</th>
-                    <th className="p-3.5">Priority</th>
-                    <th className="p-3.5">Audit Status</th>
-                    <th className="p-3.5 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
-                  {smartDraft?.items?.length ? (
-                    smartDraft.items.map((it) => (
-                      <tr key={it.item_id} className="hover:bg-[#FAF8F5]/60 transition-colors">
-                        <td className="p-3.5">
-                          <div className="font-bold text-[#1C1C1C]">{it.item_name}</div>
-                          <div className="text-[10px] font-mono text-[#707070]">{it.item_code}</div>
-                        </td>
-                        <td className="p-3.5">
-                          <span className="font-semibold text-[#1C1C1C]">{it.supplier_name || 'Mapped Vendor'}</span>
-                          {it.supplier_whatsapp && (
-                            <div className="text-[10px] font-mono text-[#2E8B57] flex items-center gap-0.5">
-                              <MessageCircle className="w-2.5 h-2.5" /> {it.supplier_whatsapp}
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-3.5 text-right font-mono font-semibold">
-                          <span className={Number(it.current_stock) <= 0 ? 'text-red-600 font-bold' : 'text-[#1C1C1C]'}>
-                            {Number(it.current_stock).toFixed(1)} {it.unit_symbol}
+            {/* PO Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {orders.length === 0 ? (
+                <div className="col-span-full p-8 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] text-gray-400">
+                  No purchase orders generated yet. Use Requisitions to consolidate indents or create a Direct PO.
+                </div>
+              ) : (
+                orders.map((po) => {
+                  const totalAmt = Number(po.net_amount || po.total_amount || 0);
+                  const isConsolidated = !!po.allocations;
+
+                  return (
+                    <div
+                      key={po.id}
+                      className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                    >
+                      <div className="space-y-3">
+                        {/* Header Badge */}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-mono font-bold text-[#1C1C1C]">
+                            {po.po_number}
                           </span>
-                        </td>
-                        <td className="p-3.5 text-right font-mono text-[#707070]">
-                          <div>Min: {Number(it.min_stock).toFixed(1)} {it.unit_symbol}</div>
-                          <div className="text-[10px] font-bold text-[#1C1C1C]">Target: {Number(it.target_stock).toFixed(1)} {it.unit_symbol}</div>
-                        </td>
-                        <td className="p-3.5 text-right font-mono text-[11px] text-[#707070]">
-                          <div>{Number(it.daily_consumption).toFixed(2)}/day</div>
-                          {Number(it.pending_incoming) > 0 && (
-                            <div className="text-[#2E8B57] font-bold">+{Number(it.pending_incoming).toFixed(1)} pending</div>
-                          )}
-                        </td>
-                        <td className="p-3.5 text-right font-mono font-bold text-red-600">
-                          {Number(it.short_qty) > 0 ? `${Number(it.short_qty).toFixed(1)} ${it.unit_symbol}` : '—'}
-                        </td>
-                        <td className="p-3.5 text-right font-mono font-semibold text-[#707070]">
-                          {Number(it.system_suggested_qty).toFixed(1)} {it.unit_symbol}
-                        </td>
-                        <td className="p-3.5 text-center">
-                          <input
-                            type="number"
-                            step="0.5"
-                            min="0"
-                            disabled={smartDraft?.status === 'CONFIRMED'}
-                            defaultValue={Number(it.final_order_qty)}
-                            onBlur={(e) => {
-                              const v = parseFloat(e.target.value);
-                              if (!isNaN(v) && v !== Number(it.final_order_qty)) {
-                                handleUpdateDraftItemQty(it.item_id, v);
-                              }
-                            }}
-                            className="w-20 p-1.5 text-center font-mono font-bold text-xs bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-lg focus:outline-none focus:border-[#C79A3B]"
-                          />
-                        </td>
-                        <td className="p-3.5">
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              it.priority === 'CRITICAL'
-                                ? 'bg-red-100 text-red-700'
-                                : it.priority === 'HIGH'
-                                ? 'bg-amber-100 text-amber-800'
-                                : it.priority === 'MEDIUM'
+                              po.status === 'RECEIVED'
+                                ? 'bg-[#2E8B57]/15 text-[#2E8B57]'
+                                : po.status === 'PARTIALLY_RECEIVED'
                                 ? 'bg-blue-100 text-blue-700'
+                                : po.status === 'SENT_MANUALLY'
+                                ? 'bg-purple-100 text-purple-700'
+                                : po.status === 'WHATSAPP_OPENED'
+                                ? 'bg-green-100 text-green-700'
+                                : po.status === 'APPROVED'
+                                ? 'bg-[#F1E4C5] text-[#B8862D]'
                                 : 'bg-gray-100 text-gray-700'
                             }`}
                           >
-                            {it.priority}
+                            {po.status}
                           </span>
-                        </td>
-                        <td className="p-3.5 text-[10px]">
-                          {it.is_manually_added ? (
-                            <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">
-                              Manually Added
-                            </span>
-                          ) : it.is_user_modified ? (
-                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">
-                              User Modified
-                            </span>
-                          ) : (
-                            <span className="text-[#707070]">System Auto</span>
-                          )}
-                        </td>
-                        <td className="p-3.5 text-right">
+                        </div>
+
+                        {/* Supplier & Destination info */}
+                        <div className="space-y-1">
+                          <div className="text-sm font-bold text-[#1C1C1C] flex items-center gap-1.5">
+                            <Building2 className="w-4 h-4 text-[#C79A3B]" />
+                            <span>{po.supplier_name || 'Vendor'}</span>
+                          </div>
+                          <div className="text-xs text-[#707070]">
+                            Destination: <span className="font-semibold text-[#1C1C1C]">{po.branch_name || (isConsolidated ? 'Multi-Outlet' : 'Central Store')}</span>
+                          </div>
+                          <div className="text-[10px] text-gray-400">
+                            Ordered: {new Date(po.order_date).toLocaleDateString()}
+                          </div>
+                        </div>
+
+                        {/* Line Items Summary */}
+                        <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] space-y-1 text-xs">
+                          <div className="font-bold text-[#1C1C1C] flex justify-between">
+                            <span>{(po.items || []).length} Consolidated Items</span>
+                            <span className="font-mono text-[#B8862D]">${totalAmt.toFixed(2)}</span>
+                          </div>
+                          <div className="text-[11px] text-[#707070] line-clamp-2">
+                            {(po.items || []).map((i: any) => `${i.item_name} (${i.ordered_qty} ${i.unit_symbol || ''})`).join(', ')}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] flex flex-wrap items-center justify-between gap-2">
+                        <button
+                          onClick={() => setViewPOModal(po)}
+                          className="px-2.5 py-1.5 rounded-lg bg-gray-100 text-[#1C1C1C] text-xs font-semibold hover:bg-gray-200 transition-all flex items-center gap-1"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Details
+                        </button>
+
+                        {po.status === 'PENDING_APPROVAL' && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleApprovePO(po.id)}
+                              disabled={loading}
+                              className="px-2.5 py-1.5 rounded-lg bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] transition-all flex items-center gap-1 shadow-xs"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                            </button>
+                            <button
+                              onClick={() =>
+                                setActionReasonModal({
+                                  type: 'CANCEL_PO',
+                                  id: po.id,
+                                  title: `Cancel PO ${po.po_number}`,
+                                })
+                              }
+                              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
+                              title="Cancel PO"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+
+                        {po.status === 'APPROVED' && (
                           <button
-                            onClick={() => handleRemoveDraftItem(it.item_id)}
-                            disabled={smartDraft?.status === 'CONFIRMED'}
-                            className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30"
-                            title="Remove Item from Draft"
+                            onClick={() => handleOpenWhatsApp(po.id)}
+                            disabled={loading}
+                            className="px-2.5 py-1.5 rounded-lg bg-[#25D366] text-white text-xs font-bold hover:bg-[#1EBE5D] transition-all flex items-center gap-1 shadow-xs"
+                            title="Dispatch PO via WhatsApp"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <MessageCircle className="w-3.5 h-3.5" /> Send WhatsApp
                           </button>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={11} className="p-8 text-center text-xs text-[#707070]">
-                        No requirement items calculated or draft is empty. Click &ldquo;Regenerate AI Draft&rdquo; to analyze stock.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                        )}
+
+                        {po.status === 'WHATSAPP_OPENED' && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleOpenWhatsApp(po.id)}
+                              className="p-1.5 rounded-lg bg-green-50 text-[#25D366] hover:bg-green-100"
+                              title="Reopen WhatsApp"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleConfirmSent(po.id)}
+                              disabled={loading}
+                              className="px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] text-[#1C1C1C] text-xs font-bold hover:bg-white transition-all shadow-xs"
+                              title="Mark as Sent Manually"
+                            >
+                              Sent OK
+                            </button>
+                          </div>
+                        )}
+
+                        {['APPROVED', 'WHATSAPP_OPENED', 'SENT_MANUALLY', 'ISSUED', 'PARTIALLY_RECEIVED'].includes(po.status) && (
+                          <button
+                            onClick={() => handleOpenReceiveForPO(po)}
+                            className="px-2.5 py-1.5 rounded-lg bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] transition-all flex items-center gap-1 shadow-xs"
+                            title="Record Goods Receiving for this PO"
+                          >
+                            <PackageCheck className="w-3.5 h-3.5" /> Receive Stock
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => open3WayMatch(po.id)}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-[#B8862D]/30 text-[#B8862D] text-xs font-semibold hover:bg-[#F1E4C5]"
+                        >
+                          3-Way Match
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* TAB 5: SUPPLIERS & ROUTING RULES */}
-      {activeTab === 'suppliers' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {suppliers.map((sup) => (
-              <div key={sup.id} className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-3 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-sm text-[#1C1C1C] flex items-center gap-2">
-                    <Building2 className="w-4 h-4 text-[#C79A3B]" />
-                    {sup.name}
+        {/* SECTION 7: BILLS & PAYMENTS (STUB / COMING SOON) */}
+        {activeSection === 'bills_payments' && (
+          <div className="bg-white rounded-3xl border border-[rgba(45,45,45,0.08)] p-8 sm:p-12 text-center shadow-sm">
+            <div className="w-16 h-16 rounded-2xl bg-[#F1E4C5] text-[#B8862D] flex items-center justify-center mx-auto mb-4">
+              <Receipt className="w-8 h-8" />
+            </div>
+            <h3 className="text-base font-bold text-[#1C1C1C] mb-1">Vendor Bills & Payment Schedules</h3>
+            <p className="text-xs text-[#707070] max-w-md mx-auto mb-6">
+              Three-way matched supplier invoices approved and queued for weekly disbursements, credit period monitoring, and bank exports.
+            </p>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#FAF8F5] text-[#B8862D] border border-[#C79A3B]/30">
+              Coming soon in next module pass
+            </span>
+          </div>
+        )}
+
+        {/* SECTION 8: NEEDS ATTENTION (STUB / COMING SOON) */}
+        {activeSection === 'needs_attention' && (
+          <div className="bg-white rounded-3xl border border-[rgba(45,45,45,0.08)] p-8 sm:p-12 text-center shadow-sm">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-4 border border-amber-200">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+            <h3 className="text-base font-bold text-[#1C1C1C] mb-1">Procurement Exceptions & Variances</h3>
+            <p className="text-xs text-[#707070] max-w-md mx-auto mb-6">
+              Automated anomaly detection for unit price inflation, partial delivery shortages, unmapped items, and delivery SLA breaches.
+            </p>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#FAF8F5] text-amber-700 border border-amber-300">
+              Coming soon in next module pass
+            </span>
+          </div>
+        )}
+
+        {/* SECTION 9: TRANSFERS (SUMMARY / LINK OUT) */}
+        {activeSection === 'transfers' && (
+          <div className="bg-white rounded-3xl border border-[rgba(45,45,45,0.08)] p-8 sm:p-12 text-center shadow-sm space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-[#F1E4C5] text-[#B8862D] flex items-center justify-center mx-auto mb-2">
+              <ArrowLeftRight className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-[#1C1C1C] mb-1">Inter-Outlet Store Transfers</h3>
+              <p className="text-xs text-[#707070] max-w-md mx-auto">
+                Issue and receive inter-branch transfers between central warehouse and outlet kitchens with in-transit tracking and driver manifest.
+              </p>
+            </div>
+            <div className="pt-2">
+              <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold bg-[#FAF8F5] text-[#B8862D] border border-[#C79A3B]/30">
+                Accessible via main sidebar &ldquo;Store Transfers&rdquo;
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 10: REPORTS (BI-MONTHLY CLOSING IMPACT) */}
+        {activeSection === 'reports' && (
+          <div className="space-y-6">
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-white via-[#FAF8F5] to-white border border-[rgba(45,45,45,0.08)] shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="space-y-1">
+                <span className="text-xs text-[#707070] font-semibold uppercase tracking-wider">Active Cycle</span>
+                <p className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">
+                  {closingDraft ? `${closingDraft.period_type === 'FIRST_HALF' ? '1st–15th' : '16th–MonthEnd'} (${closingDraft.year}-${closingDraft.month})` : 'Twice-Monthly Cycle'}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] text-center">
+                  <span className="text-[10px] text-[#707070] block">Days Remaining</span>
+                  <span className="text-xl font-bold text-[#B8862D] font-['Outfit']">{closingDraft?.days_remaining ?? 0}</span>
+                </div>
+                <div className="p-3 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] text-center">
+                  <span className="text-[10px] text-[#707070] block">Period Purchases</span>
+                  <span className="text-xl font-bold text-[#2E8B57] font-['Outfit'] font-mono">
+                    ${Number(closingDraft?.total_purchases || 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Physical Count Table */}
+            {closingDraft && (
+              <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
+                <div className="p-4 border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
+                  <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider">
+                    Physical Stock Count & Automated Valuation Ledger ({activeOutlet.name})
                   </h3>
-                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#FAF8F5] text-[#707070]">
-                    {sup.code}
-                  </span>
+                  <span className="text-xs text-[#707070]">Formula: Opening + Purchases - Closing = Actual Consumption</span>
                 </div>
 
-                <div className="text-xs text-[#707070] space-y-1">
-                  <div>Contact: <span className="text-[#1C1C1C] font-semibold">{sup.contactPerson || 'Sales Desk'}</span></div>
-                  <div>WhatsApp / Phone: <span className="text-[#1C1C1C] font-mono font-semibold">{sup.phone || '—'}</span></div>
-                  <div>Payment Terms: <span className="text-[#1C1C1C] font-semibold">{sup.paymentTerms || 'Net 15 Days'}</span></div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="bg-white border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
+                        <th className="p-3.5">Item Name</th>
+                        <th className="p-3.5">Unit Cost</th>
+                        <th className="p-3.5">Opening Qty</th>
+                        <th className="p-3.5">Received Qty</th>
+                        <th className="p-3.5">Theoretical Closing</th>
+                        <th className="p-3.5">Physical Count</th>
+                        <th className="p-3.5">Calculated Valuation</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[rgba(45,45,45,0.05)] font-mono">
+                      {closingDraft.items.map((ci) => {
+                        const countVal = closingPhysicalCounts[ci.item_id] ?? ci.physical_closing_qty ?? 0;
+                        const lineVal = countVal * ci.unit_cost;
+
+                        return (
+                          <tr key={ci.item_id} className="hover:bg-[#FAF8F5]/60 transition-all font-sans">
+                            <td className="p-3.5 font-bold text-[#1C1C1C]">
+                              {ci.item_name}
+                              <span className="block text-[10px] font-mono text-gray-400">{ci.item_code}</span>
+                            </td>
+                            <td className="p-3.5 font-mono">${Number(ci.unit_cost).toFixed(2)}</td>
+                            <td className="p-3.5 font-mono text-gray-600">{ci.opening_qty} {ci.unit_symbol}</td>
+                            <td className="p-3.5 font-mono text-[#2E8B57] font-bold">+{ci.received_qty} {ci.unit_symbol}</td>
+                            <td className="p-3.5 font-mono text-gray-600">{Number(ci.theoretical_closing_qty || 0).toFixed(1)} {ci.unit_symbol}</td>
+                            <td className="p-3.5">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={countVal}
+                                onChange={(e) =>
+                                  setClosingPhysicalCounts({
+                                    ...closingPhysicalCounts,
+                                    [ci.item_id]: parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                                className="w-24 p-1.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-lg text-xs font-mono font-bold text-[#1C1C1C]"
+                              />
+                            </td>
+                            <td className="p-3.5 font-mono font-bold text-[#B8862D]">${lineVal.toFixed(2)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
 
-                <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] flex items-center justify-between text-xs">
-                  <span className="text-[10px] text-[#2E8B57] font-semibold flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" /> Active Vendor
-                  </span>
+                <div className="p-4 border-t border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
+                  <input
+                    type="text"
+                    placeholder="Optional Closing Notes..."
+                    value={closingNotes}
+                    onChange={(e) => setClosingNotes(e.target.value)}
+                    className="w-1/2 p-2 bg-white border border-[rgba(45,45,45,0.15)] rounded-xl text-xs"
+                  />
                   <button
-                    onClick={() => {
-                      setNewPOSupplierId(sup.id);
-                      setCreatePOModalOpen(true);
-                    }}
-                    className="text-[#B8862D] font-bold hover:underline"
+                    onClick={handleSubmitClosing}
+                    disabled={closingSubmitting}
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all"
                   >
-                    Issue Direct PO &rarr;
+                    <CheckCircle2 className="w-4 h-4 text-[#C79A3B]" />
+                    {closingSubmitting ? 'Calculating...' : 'Submit Physical Closing Count'}
                   </button>
                 </div>
               </div>
-            ))}
+            )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* TAB 6: BI-MONTHLY CLOSING IMPACT */}
-      {activeTab === 'closing' && (
-        <div className="space-y-6">
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-white via-[#FAF8F5] to-white border border-[rgba(45,45,45,0.08)] shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="space-y-1">
-              <span className="text-xs text-[#707070] font-semibold uppercase tracking-wider">Active Cycle</span>
-              <p className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">
-                {closingDraft ? `${closingDraft.period_type === 'FIRST_HALF' ? '1st–15th' : '16th–MonthEnd'} (${closingDraft.year}-${closingDraft.month})` : 'Twice-Monthly Cycle'}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] text-center">
-                <span className="text-[10px] text-[#707070] block">Days Remaining</span>
-                <span className="text-xl font-bold text-[#B8862D] font-['Outfit']">{closingDraft?.days_remaining ?? 0}</span>
-              </div>
-              <div className="p-3 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] text-center">
-                <span className="text-[10px] text-[#707070] block">Period Purchases</span>
-                <span className="text-xl font-bold text-[#2E8B57] font-['Outfit'] font-mono">
-                  ${Number(closingDraft?.total_purchases || 0).toFixed(2)}
-                </span>
-              </div>
-            </div>
+        {/* SECTION 11: SETUP (ITEMS, VENDORS, CATEGORIES & UNITS) */}
+        {activeSection === 'setup' && (
+          <div className="w-full min-w-0">
+            <SetupWorkspace />
           </div>
-
-          {/* Physical Count Table */}
-          {closingDraft && (
-            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
-              <div className="p-4 border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
-                <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider">
-                  Physical Stock Count & Automated Valuation Ledger ({activeOutlet.name})
-                </h3>
-                <span className="text-xs text-[#707070]">Formula: Opening + Purchases - Closing = Actual Consumption</span>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="bg-white border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                      <th className="p-3.5">Item Name</th>
-                      <th className="p-3.5">Unit Cost</th>
-                      <th className="p-3.5">Opening Qty</th>
-                      <th className="p-3.5">Received Qty</th>
-                      <th className="p-3.5">Theoretical Closing</th>
-                      <th className="p-3.5">Physical Count</th>
-                      <th className="p-3.5">Calculated Valuation</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[rgba(45,45,45,0.05)] font-mono">
-                    {closingDraft.items.map((ci) => {
-                      const countVal = closingPhysicalCounts[ci.item_id] ?? ci.physical_closing_qty ?? 0;
-                      const lineVal = countVal * ci.unit_cost;
-
-                      return (
-                        <tr key={ci.item_id} className="hover:bg-[#FAF8F5]/60 transition-all font-sans">
-                          <td className="p-3.5 font-bold text-[#1C1C1C]">
-                            {ci.item_name}
-                            <span className="block text-[10px] font-mono text-gray-400">{ci.item_code}</span>
-                          </td>
-                          <td className="p-3.5 font-mono">${Number(ci.unit_cost).toFixed(2)}</td>
-                          <td className="p-3.5 font-mono text-gray-600">{ci.opening_qty} {ci.unit_symbol}</td>
-                          <td className="p-3.5 font-mono text-[#2E8B57] font-bold">+{ci.received_qty} {ci.unit_symbol}</td>
-                          <td className="p-3.5 font-mono text-gray-600">{ci.theoretical_closing_qty} {ci.unit_symbol}</td>
-                          <td className="p-3.5">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={countVal}
-                              onChange={(e) =>
-                                setClosingPhysicalCounts({
-                                  ...closingPhysicalCounts,
-                                  [ci.item_id]: parseFloat(e.target.value) || 0,
-                                })
-                              }
-                              className="w-24 p-1.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-lg text-xs font-mono font-bold text-[#1C1C1C]"
-                            />
-                          </td>
-                          <td className="p-3.5 font-mono font-bold text-[#B8862D]">${lineVal.toFixed(2)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="p-4 border-t border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
-                <input
-                  type="text"
-                  placeholder="Optional Closing Notes..."
-                  value={closingNotes}
-                  onChange={(e) => setClosingNotes(e.target.value)}
-                  className="w-1/2 p-2 bg-white border border-[rgba(45,45,45,0.15)] rounded-xl text-xs"
-                />
-                <button
-                  onClick={handleSubmitClosing}
-                  disabled={closingSubmitting}
-                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-[#C79A3B]" />
-                  {closingSubmitting ? 'Calculating...' : 'Submit Physical Closing Count'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </PurchaseModuleLayout>
 
       {/* ========================================================================= */}
       {/* MODALS */}
       {/* ========================================================================= */}
 
-      {/* 1. Modal: Batch Consolidation Preview */}
-      {consolidationModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-xl border border-[rgba(45,45,45,0.1)]">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-[#1C1C1C] flex items-center gap-2">
-                <Layers className="w-5 h-5 text-[#C79A3B]" />
-                Auto-Consolidate Indents into Supplier POs
-              </h3>
-              <button onClick={() => setConsolidationModalOpen(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-[#707070]">
-              You have selected <strong>{selectedPRIds.length} purchase request(s)</strong>. The core engine will group line items strictly by primary supplier, consolidate quantities, preserve individual outlet delivery allocations, and create clean purchase orders.
-            </p>
-
-            <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] space-y-2 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer font-semibold text-[#1C1C1C]">
-                <input
-                  type="checkbox"
-                  checked={autoSubmitConsolidated}
-                  onChange={(e) => setAutoSubmitConsolidated(e.target.checked)}
-                  className="rounded accent-[#B8862D]"
-                />
-                Auto-submit POs to PENDING_APPROVAL status
-              </label>
-
-              <textarea
-                placeholder="Consolidation Notes / Special Vendor Instructions..."
-                value={consolidationNotes}
-                onChange={(e) => setConsolidationNotes(e.target.value)}
-                rows={2}
-                className="w-full p-2.5 bg-white border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:outline-none"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                onClick={() => setConsolidationModalOpen(false)}
-                className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5]"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConsolidation}
-                disabled={loading}
-                className="px-5 py-2 rounded-xl bg-[#B8862D] text-white text-xs font-bold hover:bg-[#9E7326] shadow-xs"
-              >
-                {loading ? 'Consolidating...' : 'Generate Supplier Orders'}
-              </button>
-            </div>
-          </div>
+  {/* 1. Modal: Batch Consolidation Preview */}
+  {consolidationModalOpen && (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-xl border border-[rgba(45,45,45,0.1)]">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-[#1C1C1C] flex items-center gap-2">
+            <Layers className="w-5 h-5 text-[#C79A3B]" />
+            Auto-Consolidate Indents into Supplier POs
+          </h3>
+          <button onClick={() => setConsolidationModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      )}
+
+        <p className="text-xs text-[#707070]">
+          You have selected <strong>{selectedPRIds.length} purchase request(s)</strong>. The core engine will group line items strictly by primary supplier, consolidate quantities, preserve individual outlet delivery allocations, and create clean purchase orders.
+        </p>
+
+        <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] space-y-2 text-xs">
+          <label className="flex items-center gap-2 cursor-pointer font-semibold text-[#1C1C1C]">
+            <input
+              type="checkbox"
+              checked={autoSubmitConsolidated}
+              onChange={(e) => setAutoSubmitConsolidated(e.target.checked)}
+              className="rounded accent-[#B8862D]"
+            />
+            Auto-submit POs to PENDING_APPROVAL status
+          </label>
+
+          <textarea
+            placeholder="Consolidation Notes / Special Vendor Instructions..."
+            value={consolidationNotes}
+            onChange={(e) => setConsolidationNotes(e.target.value)}
+            rows={2}
+            className="w-full p-2.5 bg-white border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:outline-none"
+          />
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button
+            onClick={() => setConsolidationModalOpen(false)}
+            className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs font-semibold text-[#707070] hover:bg-[#FAF8F5]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConsolidation}
+            disabled={loading}
+            className="px-5 py-2 rounded-xl bg-[#B8862D] text-white text-xs font-bold hover:bg-[#9E7326] shadow-xs"
+          >
+            {loading ? 'Consolidating...' : 'Generate Supplier Orders'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
 
       {/* 2. Modal: Create New PR (Indent) */}
       {createPRModalOpen && (

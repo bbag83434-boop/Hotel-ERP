@@ -16,7 +16,6 @@ import DashboardOverview from '@/components/workspaces/DashboardOverview';
 import UserManagementWorkspace from '@/components/workspaces/UserManagementWorkspace';
 import OrganizationManager from '@/components/organization/OrganizationManager';
 import InventoryManager from '@/components/inventory/InventoryManager';
-import SetupWorkspace from '@/components/workspaces/SetupWorkspace';
 import TransfersWorkspace from '@/components/workspaces/TransfersWorkspace';
 import PurchaseWorkspace from '@/components/workspaces/PurchaseWorkspace';
 import ProductionWorkspace from '@/components/workspaces/ProductionWorkspace';
@@ -101,12 +100,6 @@ export const AppContent = () => {
           {activeWorkspace === 'inventory' && (
             <div className="w-full min-w-0">
               <InventoryManager />
-            </div>
-          )}
-
-          {activeWorkspace === 'setup' && (
-            <div className="w-full min-w-0">
-              <SetupWorkspace />
             </div>
           )}
 

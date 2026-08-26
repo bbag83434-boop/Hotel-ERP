@@ -29,7 +29,6 @@ export type WorkspaceId =
   | 'users'
   | 'organization'
   | 'inventory'
-  | 'setup'
   | 'purchase'
   | 'production'
   | 'transfers'
@@ -73,7 +72,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           : []),
         { id: 'organization' as WorkspaceId, label: 'Outlets & Master Structure', icon: Building2, badge: null },
         { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
-        { id: 'setup' as WorkspaceId, label: 'Setup & Masters', icon: SlidersHorizontal, badge: null },
         { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },
         { id: 'production' as WorkspaceId, label: 'Recipes & Production', icon: ChefHat, badge: null },
         { id: 'transfers' as WorkspaceId, label: 'Store Transfers', icon: Truck, badge: null },
