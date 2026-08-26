@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
+import { useOutlet } from '@/context/OutletContext';
 import {
   FileText,
   PackageCheck,
@@ -65,6 +66,17 @@ const PURCHASE_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+// Sections that are only permitted for Head Office users.
+const HEAD_OFFICE_SECTIONS: PurchaseSectionId[] = [
+  'approvals',
+  'orders',
+  'bills_payments',
+  'needs_attention',
+  'transfers',
+  'reports',
+  'setup',
+];
+
 interface PurchaseModuleLayoutProps {
   activeSection: PurchaseSectionId;
   onSectionChange: (section: PurchaseSectionId) => void;
@@ -76,12 +88,29 @@ export const PurchaseModuleLayout: React.FC<PurchaseModuleLayoutProps> = ({
   onSectionChange,
   children,
 }) => {
+  const { isHeadOffice } = useOutlet();
+
+  // If a stale state / deep-link points to a Head-Office-only section while the
+  // active outlet is NOT Head Office, force it back to the 'requisitions' queue.
+  useEffect(() => {
+    if (!isHeadOffice && HEAD_OFFICE_SECTIONS.includes(activeSection)) {
+      onSectionChange('requisitions');
+    }
+  }, [isHeadOffice, activeSection, onSectionChange]);
+
+  // "Day to Day" always renders; the "Head Office" group is only present for
+  // Head Office users (fully absent — not collapsed/disabled — otherwise).
+  const visibleGroups = PURCHASE_NAV_GROUPS.filter(
+    (group) =>
+      isHeadOffice || group.items.some((item) => !HEAD_OFFICE_SECTIONS.includes(item.id))
+  );
+
   return (
     <div className="flex flex-col md:flex-row gap-5 items-start w-full min-w-0">
       {/* 1. Sub-Sidebar Navigation for Desktop (md+) */}
       <aside className="hidden md:flex flex-col w-60 shrink-0 bg-white rounded-3xl border border-[rgba(45,45,45,0.08)] p-4 shadow-sm sticky top-20">
         <div className="space-y-5">
-          {PURCHASE_NAV_GROUPS.map((group) => (
+          {visibleGroups.map((group) => (
             <div key={group.label} className="space-y-1.5">
               <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-[#707070]">
                 {group.label}
@@ -128,7 +157,7 @@ export const PurchaseModuleLayout: React.FC<PurchaseModuleLayoutProps> = ({
       {/* 2. Mobile Responsive Sub-Nav Bar (< md) */}
       <div className="md:hidden w-full overflow-x-auto pb-2 -mt-1">
         <div className="flex items-center gap-1.5 p-1 bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs w-max">
-          {PURCHASE_NAV_GROUPS.flatMap((g) => g.items).map((item) => {
+          {visibleGroups.flatMap((g) => g.items).map((item) => {
             const Icon = item.icon;
             const isActive = activeSection === item.id;
             return (

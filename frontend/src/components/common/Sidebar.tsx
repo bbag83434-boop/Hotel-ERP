@@ -52,7 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen = false,
   setMobileOpen,
 }) => {
-  const { activeOutlet, isHeadOffice } = useOutlet();
+  const { activeOutlet, isHeadOffice, isCentralStore, canInitiateTransfers } = useOutlet();
   const { isOnline } = usePWA();
   const { user } = useAuth();
 
@@ -61,33 +61,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
     userRole.toUpperCase()
   );
 
-  const navGroups = [
-    {
-      label: 'Core Operations',
-      items: [
-        { id: 'dashboard' as WorkspaceId, label: 'Executive Dashboard', icon: LayoutDashboard, badge: null },
-        { id: 'assistant' as WorkspaceId, label: 'AI Assistant', icon: Sparkles, badge: 'Smart' },
-        ...(isAdmin
-          ? [{ id: 'users' as WorkspaceId, label: 'User & Admin Mgmt', icon: UserCog, badge: 'RBAC' }]
-          : []),
-        { id: 'organization' as WorkspaceId, label: 'Outlets & Master Structure', icon: Building2, badge: null },
-        { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
-        { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },
-        { id: 'production' as WorkspaceId, label: 'Recipes & Production', icon: ChefHat, badge: null },
-        { id: 'transfers' as WorkspaceId, label: 'Store Transfers', icon: Truck, badge: null },
-        { id: 'wastage' as WorkspaceId, label: 'Wastage Control', icon: AlertTriangle, badge: null },
-      ],
-    },
-    {
-      label: 'People & Finance',
-      items: [
-        { id: 'hr' as WorkspaceId, label: 'HR, Staff & Payroll', icon: Users, badge: null },
-        { id: 'closing' as WorkspaceId, label: 'Bi-Monthly Closing', icon: CalendarDays, badge: '1st–15th' },
-        { id: 'reports' as WorkspaceId, label: 'Reports & Cost Control', icon: BarChart3, badge: null },
-        { id: 'telemetry' as WorkspaceId, label: 'Live Telemetry', icon: Cpu, badge: isOnline ? 'Online' : 'Offline' },
-      ],
-    },
-  ];
+  const navGroups = isHeadOffice
+    ? [
+        {
+          label: 'Core Operations',
+          items: [
+            { id: 'dashboard' as WorkspaceId, label: 'Executive Dashboard', icon: LayoutDashboard, badge: null },
+            { id: 'assistant' as WorkspaceId, label: 'AI Assistant', icon: Sparkles, badge: 'Smart' },
+            ...(isAdmin
+              ? [{ id: 'users' as WorkspaceId, label: 'User & Admin Mgmt', icon: UserCog, badge: 'RBAC' }]
+              : []),
+            { id: 'organization' as WorkspaceId, label: 'Outlets & Master Structure', icon: Building2, badge: null },
+            { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
+            { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },
+            { id: 'production' as WorkspaceId, label: 'Recipes & Production', icon: ChefHat, badge: null },
+            { id: 'transfers' as WorkspaceId, label: 'Store Transfers', icon: Truck, badge: null },
+            { id: 'wastage' as WorkspaceId, label: 'Wastage Control', icon: AlertTriangle, badge: null },
+          ],
+        },
+        {
+          label: 'People & Finance',
+          items: [
+            { id: 'hr' as WorkspaceId, label: 'HR, Staff & Payroll', icon: Users, badge: null },
+            { id: 'closing' as WorkspaceId, label: 'Bi-Monthly Closing', icon: CalendarDays, badge: '1st–15th' },
+            { id: 'reports' as WorkspaceId, label: 'Reports & Cost Control', icon: BarChart3, badge: null },
+            { id: 'telemetry' as WorkspaceId, label: 'Live Telemetry', icon: Cpu, badge: isOnline ? 'Online' : 'Offline' },
+          ],
+        },
+      ]
+    : [
+        {
+          label: isCentralStore ? 'Main Branch Operations' : 'Outlet Operations',
+          items: [
+            { id: 'dashboard' as WorkspaceId, label: 'Dashboard', icon: LayoutDashboard, badge: null },
+            { id: 'assistant' as WorkspaceId, label: 'AI Assistant', icon: Sparkles, badge: 'Smart' },
+            { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },
+            { id: 'wastage' as WorkspaceId, label: 'Wastage Control', icon: AlertTriangle, badge: null },
+            ...(canInitiateTransfers
+              ? [{ id: 'transfers' as WorkspaceId, label: 'Store Transfers', icon: Truck, badge: null }]
+              : []),
+          ],
+        },
+      ];
 
   const handleSelect = (id: WorkspaceId) => {
     setActiveWorkspace(id);
@@ -135,7 +150,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <p className="text-xs font-bold text-[#1C1C1C] truncate">{activeOutlet.name}</p>
         <div className="flex items-center gap-1 text-[10px] text-[#2E8B57] font-medium pt-0.5">
           <ShieldCheck className="w-3 h-3 text-[#C79A3B]" />
-          <span>{isHeadOffice ? 'Head Office Scope' : 'Restricted Outlet'}</span>
+          <span>{isHeadOffice ? 'Head Office Scope' : isCentralStore ? 'Main Branch (Central Store)' : 'Restricted Outlet'}</span>
         </div>
       </div>
 

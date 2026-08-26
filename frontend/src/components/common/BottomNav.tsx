@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useOutlet } from '@/context/OutletContext';
 import {
   LayoutDashboard,
   Building2,
@@ -8,6 +9,8 @@ import {
   ShoppingCart,
   CalendarDays,
   Sparkles,
+  AlertTriangle,
+  Truck,
 } from 'lucide-react';
 
 interface BottomNavProps {
@@ -16,13 +19,23 @@ interface BottomNavProps {
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({ activeTab = 'dashboard', setActiveTab }) => {
-  const navItems = [
-    { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
-    { id: 'assistant', label: 'AI Intel', icon: Sparkles },
-    { id: 'inventory', label: 'Stock', icon: Boxes },
-    { id: 'purchase', label: 'Purchase', icon: ShoppingCart },
-    { id: 'closing', label: 'Closing', icon: CalendarDays },
-  ];
+  const { isHeadOffice, canInitiateTransfers } = useOutlet();
+
+  const navItems = isHeadOffice
+    ? [
+        { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
+        { id: 'assistant', label: 'AI Intel', icon: Sparkles },
+        { id: 'inventory', label: 'Stock', icon: Boxes },
+        { id: 'purchase', label: 'Purchase', icon: ShoppingCart },
+        { id: 'closing', label: 'Closing', icon: CalendarDays },
+      ]
+    : [
+        { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
+        { id: 'assistant', label: 'AI Intel', icon: Sparkles },
+        { id: 'purchase', label: 'Purchase', icon: ShoppingCart },
+        { id: 'wastage', label: 'Wastage', icon: AlertTriangle },
+        ...(canInitiateTransfers ? [{ id: 'transfers', label: 'Transfers', icon: Truck }] : []),
+      ];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-[rgba(45,45,45,0.08)] pb-safe md:hidden shadow-[0_-4px_20px_rgba(45,45,45,0.06)]">

@@ -1187,25 +1187,29 @@ export const PurchaseWorkspace: React.FC = () => {
                         <span>+ New Indent (PR)</span>
                       </button>
 
-                      <button
-                        onClick={selectAllPendingPRs}
-                        className="px-3 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs text-[#707070] bg-white hover:bg-[#FAF8F5] font-semibold transition-all shadow-xs"
-                      >
-                        {selectedPRIds.length > 0 ? 'Deselect All' : 'Select All Ready'}
-                      </button>
+                      {isHeadOffice && (
+                        <button
+                          onClick={selectAllPendingPRs}
+                          className="px-3 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-xs text-[#707070] bg-white hover:bg-[#FAF8F5] font-semibold transition-all shadow-xs"
+                        >
+                          {selectedPRIds.length > 0 ? 'Deselect All' : 'Select All Ready'}
+                        </button>
+                      )}
 
-                      <button
-                        onClick={() => setConsolidationModalOpen(true)}
-                        disabled={selectedPRIds.length === 0}
-                        className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs whitespace-nowrap ${
-                          selectedPRIds.length > 0
-                            ? 'bg-[#1C1C1C] text-white hover:bg-[#2D2D2D] active:scale-95 shadow-md'
-                            : 'bg-gray-100 text-gray-400 border border-[rgba(45,45,45,0.08)] cursor-not-allowed'
-                        }`}
-                      >
-                        <Layers className="w-3.5 h-3.5 text-[#C79A3B]" />
-                        Consolidate Selected ({selectedPRIds.length}) to PO
-                      </button>
+                      {isHeadOffice && (
+                        <button
+                          onClick={() => setConsolidationModalOpen(true)}
+                          disabled={selectedPRIds.length === 0}
+                          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs whitespace-nowrap ${
+                            selectedPRIds.length > 0
+                              ? 'bg-[#1C1C1C] text-white hover:bg-[#2D2D2D] active:scale-95 shadow-md'
+                              : 'bg-gray-100 text-gray-400 border border-[rgba(45,45,45,0.08)] cursor-not-allowed'
+                          }`}
+                        >
+                          <Layers className="w-3.5 h-3.5 text-[#C79A3B]" />
+                          Consolidate Selected ({selectedPRIds.length}) to PO
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1221,12 +1225,14 @@ export const PurchaseWorkspace: React.FC = () => {
                         <thead>
                           <tr className="bg-[#FAF8F5]/80 border-b border-[rgba(45,45,45,0.08)] text-[#707070] uppercase font-bold text-[10px] tracking-wider">
                             <th className="py-3 px-4 w-10 text-center">
-                              <input
-                                type="checkbox"
-                                checked={selectedPRIds.length > 0 && selectedPRIds.length === filteredRequests.length}
-                                onChange={selectAllPendingPRs}
-                                className="rounded accent-[#B8862D] cursor-pointer"
-                              />
+                              {isHeadOffice && (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedPRIds.length > 0 && selectedPRIds.length === filteredRequests.length}
+                                  onChange={selectAllPendingPRs}
+                                  className="rounded accent-[#B8862D] cursor-pointer"
+                                />
+                              )}
                             </th>
                             <th className="py-3 px-4">PR NUMBER</th>
                             <th className="py-3 px-4">DESTINATION</th>
@@ -1318,12 +1324,14 @@ export const PurchaseWorkspace: React.FC = () => {
                                   }`}
                                 >
                                   <td className="py-3 px-4 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={() => togglePRSelection(pr.id)}
-                                      className="rounded accent-[#B8862D] cursor-pointer"
-                                    />
+                                    {isHeadOffice && (
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => togglePRSelection(pr.id)}
+                                        className="rounded accent-[#B8862D] cursor-pointer"
+                                      />
+                                    )}
                                   </td>
                                   <td className="py-3 px-4 font-mono font-bold text-[#B8862D]">
                                     {pr.request_number}
@@ -1380,8 +1388,23 @@ export const PurchaseWorkspace: React.FC = () => {
                                           : 'bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.08)]'
                                       }`}
                                     >
-                                      {pr.status}
+                                      {pr.status === 'APPROVED'
+                                        ? 'Approved'
+                                        : pr.status === 'PENDING_APPROVAL'
+                                        ? 'Pending Approval'
+                                        : pr.status === 'ORDERED'
+                                        ? 'Consolidated / Ordered'
+                                        : pr.status === 'REJECTED'
+                                        ? 'Rejected'
+                                        : pr.status === 'DRAFT'
+                                        ? 'Draft'
+                                        : pr.status}
                                     </span>
+                                    {pr.status === 'REJECTED' && pr.rejection_reason && (
+                                      <div className="mt-1 text-[10px] font-semibold text-[#D9534F]">
+                                        Rejected: {pr.rejection_reason}
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="py-3 px-4 text-right space-x-1">
                                     <button
@@ -1392,7 +1415,7 @@ export const PurchaseWorkspace: React.FC = () => {
                                       <Eye className="w-3.5 h-3.5" />
                                     </button>
 
-                                    {pr.status === 'PENDING_APPROVAL' && (
+                                    {isHeadOffice && pr.status === 'PENDING_APPROVAL' && (
                                       <>
                                         <button
                                           onClick={() => handleApprovePR(pr.id)}
@@ -1569,7 +1592,7 @@ export const PurchaseWorkspace: React.FC = () => {
                                 </span>
                               </td>
                               <td className="p-3.5 text-right">
-                                {isPending ? (
+                                {isHeadOffice && isPending ? (
                                   <div className="flex items-center justify-end gap-1.5">
                                     <button
                                       onClick={() => handleApproveGRN(g.id)}
@@ -1590,6 +1613,10 @@ export const PurchaseWorkspace: React.FC = () => {
                                 ) : isApproved ? (
                                   <span className="text-[#2E8B57] font-semibold text-xs inline-flex items-center gap-1">
                                     <CheckCircle2 className="w-3.5 h-3.5" /> Stock Posted
+                                  </span>
+                                ) : isPending ? (
+                                  <span className="text-[#B8862D] font-semibold text-xs inline-flex items-center gap-1">
+                                    <Clock className="w-3.5 h-3.5" /> Pending HO Approval
                                   </span>
                                 ) : (
                                   <span className="text-red-500 font-semibold text-xs inline-flex items-center gap-1">
@@ -1831,7 +1858,7 @@ export const PurchaseWorkspace: React.FC = () => {
                           <Eye className="w-3.5 h-3.5" /> Details
                         </button>
 
-                        {po.status === 'PENDING_APPROVAL' && (
+                        {isHeadOffice && po.status === 'PENDING_APPROVAL' && (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleApprovePO(po.id)}

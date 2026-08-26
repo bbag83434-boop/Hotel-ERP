@@ -68,6 +68,8 @@ interface OutletContextType {
   setActiveOutlet: (outlet: Outlet) => void;
   isLoading: boolean;
   isHeadOffice: boolean;
+  isCentralStore: boolean;
+  canInitiateTransfers: boolean;
   closingInfo: BiMonthlyPeriodInfo;
   refreshOutlets: () => Promise<void>;
 }
@@ -203,6 +205,8 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const isHeadOffice = activeOutlet.type === 'HEAD_OFFICE';
+  const isCentralStore = activeOutlet.type === 'CENTRAL_STORE';
+  const canInitiateTransfers = isHeadOffice || isCentralStore;
 
   return (
     <OutletContext.Provider
@@ -213,6 +217,8 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setActiveOutlet,
         isLoading,
         isHeadOffice,
+        isCentralStore,
+        canInitiateTransfers,
         closingInfo,
         refreshOutlets: fetchOutlets,
       }}
@@ -233,6 +239,8 @@ export function useOutlet(): OutletContextType {
         setActiveOutlet: () => {},
         isLoading: false,
         isHeadOffice: false,
+        isCentralStore: false,
+        canInitiateTransfers: false,
         closingInfo: { periodType: 'FIRST_HALF', year: 2026, month: 1, startDate: '', endDate: '', daysRemaining: 0, label: '' },
         refreshOutlets: async () => {},
       };

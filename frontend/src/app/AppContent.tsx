@@ -29,17 +29,31 @@ import AIAssistantWorkspace from '@/components/workspaces/AIAssistantWorkspace';
 export const AppContent = () => {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const router = useRouter();
-  const { activeOutlet } = useOutlet();
+  const { activeOutlet, isHeadOffice, canInitiateTransfers } = useOutlet();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [loadingHealth, setLoadingHealth] = useState<boolean>(true);
+
+  const isAllowedWorkspace = (ws: WorkspaceId): boolean => {
+    if (isHeadOffice) return true;
+    if (ws === 'dashboard' || ws === 'assistant' || ws === 'purchase' || ws === 'wastage') return true;
+    if (ws === 'transfers' && canInitiateTransfers) return true;
+    return false;
+  };
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push('/login');
     }
   }, [authLoading, isAuthenticated, router]);
+
+  // Guard tier-restricted navigation: redirect to dashboard if workspace is not permitted
+  useEffect(() => {
+    if (!isHeadOffice && !isAllowedWorkspace(activeWorkspace)) {
+      setActiveWorkspace('dashboard');
+    }
+  }, [isHeadOffice, canInitiateTransfers, activeWorkspace]);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -79,73 +93,73 @@ export const AppContent = () => {
 
         <main className="flex-1 p-3 sm:p-5 lg:p-8 max-w-7xl w-full mx-auto pb-24 md:pb-12 min-w-0 overflow-x-hidden">
           {/* Dashboard and other workspaces render here */}
-          {activeWorkspace === 'dashboard' && (
+          {(activeWorkspace === 'dashboard' || !isAllowedWorkspace(activeWorkspace)) && (
             <div className="w-full min-w-0">
               <DashboardOverview health={health} setActiveWorkspace={setActiveWorkspace} />
             </div>
           )}
 
-          {activeWorkspace === 'users' && (
+          {activeWorkspace === 'users' && isAllowedWorkspace('users') && (
             <div className="w-full min-w-0">
               <UserManagementWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'organization' && (
+          {activeWorkspace === 'organization' && isAllowedWorkspace('organization') && (
             <div className="w-full min-w-0">
               <OrganizationManager />
             </div>
           )}
 
-          {activeWorkspace === 'inventory' && (
+          {activeWorkspace === 'inventory' && isAllowedWorkspace('inventory') && (
             <div className="w-full min-w-0">
               <InventoryManager />
             </div>
           )}
 
-          {activeWorkspace === 'transfers' && (
+          {activeWorkspace === 'transfers' && isAllowedWorkspace('transfers') && (
             <div className="w-full min-w-0">
               <TransfersWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'purchase' && (
+          {activeWorkspace === 'purchase' && isAllowedWorkspace('purchase') && (
             <div className="w-full min-w-0">
               <PurchaseWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'production' && (
+          {activeWorkspace === 'production' && isAllowedWorkspace('production') && (
             <div className="w-full min-w-0">
               <ProductionWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'wastage' && (
+          {activeWorkspace === 'wastage' && isAllowedWorkspace('wastage') && (
             <div className="w-full min-w-0">
               <WastageWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'hr' && (
+          {activeWorkspace === 'hr' && isAllowedWorkspace('hr') && (
             <div className="w-full min-w-0">
               <HRWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'closing' && (
+          {activeWorkspace === 'closing' && isAllowedWorkspace('closing') && (
             <div className="w-full min-w-0">
               <ClosingWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'reports' && (
+          {activeWorkspace === 'reports' && isAllowedWorkspace('reports') && (
             <div className="w-full min-w-0">
               <ReportsWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'telemetry' && (
+          {activeWorkspace === 'telemetry' && isAllowedWorkspace('telemetry') && (
             <div className="w-full min-w-0">
               <TelemetryWorkspace
                 health={health}
@@ -155,7 +169,7 @@ export const AppContent = () => {
             </div>
           )}
 
-          {activeWorkspace === 'assistant' && (
+          {activeWorkspace === 'assistant' && isAllowedWorkspace('assistant') && (
             <div className="w-full min-w-0">
               <AIAssistantWorkspace activeOutlet={activeOutlet} />
             </div>
