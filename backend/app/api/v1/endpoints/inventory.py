@@ -3,7 +3,7 @@ from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, select
 
 from app.core.database import get_db
@@ -508,7 +508,11 @@ def get_items(
     search: Optional[str] = None,
     is_active: Optional[bool] = None,
 ):
-    query = db.query(Item).filter(Item.company_id == current_user.company_id)
+    query = (
+        db.query(Item)
+        .options(joinedload(Item.category), joinedload(Item.unit))
+        .filter(Item.company_id == current_user.company_id)
+    )
     if category_id:
         query = query.filter(Item.category_id == category_id)
     if type:
@@ -528,8 +532,6 @@ def get_items(
     items = query.order_by(Item.name.asc()).all()
     results = []
     for it in items:
-        cat = db.query(Category).filter(Category.id == it.category_id).first()
-        u = db.query(Unit).filter(Unit.id == it.unit_id).first()
         results.append(
             ItemResponse(
                 id=it.id,
@@ -546,9 +548,9 @@ def get_items(
                 min_stock_level=Decimal(str(it.min_stock_level or 0)),
                 reorder_qty=Decimal(str(it.reorder_qty or 0)),
                 is_active=it.is_active,
-                category_name=cat.name if cat else None,
-                unit_symbol=u.symbol if u else None,
-                unit_name=u.name if u else None,
+                category_name=it.category.name if it.category else None,
+                unit_symbol=it.unit.symbol if it.unit else None,
+                unit_name=it.unit.name if it.unit else None,
                 created_at=it.created_at,
                 updated_at=it.updated_at,
             )
