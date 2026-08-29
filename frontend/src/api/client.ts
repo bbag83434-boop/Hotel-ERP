@@ -1,9 +1,15 @@
 import axios from 'axios';
 
-// Get API base URL from environment or default to relative path
+// Get API base URL from environment or default to live backend URL
 const getApiBaseUrl = (): string => {
   const envUrl = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL ? String(process.env.NEXT_PUBLIC_API_URL).trim() : '';
-  if (!envUrl) return '/api/v1';
+  if (!envUrl) {
+    // In production browser, route directly to live backend URL
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return 'https://hotel-erp-muv8.onrender.com/api/v1';
+    }
+    return '/api/v1';
+  }
   const clean = envUrl.replace(/\/+$/, '');
   return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
 };
@@ -15,7 +21,6 @@ export const apiClient = axios.create({
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
-    'X-Requested-With': 'XMLHttpRequest',
   },
 });
 

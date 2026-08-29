@@ -89,7 +89,7 @@ app.add_middleware(
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Outlet-Id", "X-Request-ID", "X-Telegram-Bot-Api-Secret-Token", "X-Hub-Signature-256"],
+    allow_headers=["Authorization", "Content-Type", "X-Outlet-Id", "X-Request-ID", "X-Telegram-Bot-Api-Secret-Token", "X-Hub-Signature-256", "X-Requested-With", "Accept", "Origin"],
 )
 
 # Structured Request Logging Middleware
