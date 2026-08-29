@@ -1,7 +1,14 @@
 import axios from 'axios';
 
 // Get API base URL from environment or default to relative path
-const API_BASE_URL = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL) || '/api/v1';
+const getApiBaseUrl = (): string => {
+  const envUrl = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL ? String(process.env.NEXT_PUBLIC_API_URL).trim() : '';
+  if (!envUrl) return '/api/v1';
+  const clean = envUrl.replace(/\/+$/, '');
+  return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
