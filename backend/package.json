@@ -1,0 +1,11 @@
+﻿{
+  "name": "hotel-erp-backend",
+  "version": "2.0.0",
+  "private": true,
+  "description": "APEX Multi-Outlet Restaurant ERP - Python FastAPI Backend",
+  "scripts": {
+    "build": "python3 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r requirements.txt || python -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r requirements.txt",
+    "start": ".venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}",
+    "dev": ".venv/bin/python -m uvicorn app.main:app --reload --port ${PORT:-4000}"
+  }
+}
