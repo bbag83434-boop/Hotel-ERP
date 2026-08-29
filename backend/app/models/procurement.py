@@ -134,6 +134,7 @@ class PurchaseOrder(BaseModel):
     discount_amount = Column("discountAmount", Numeric(14, 4), default=0, nullable=False)
     net_amount = Column("netAmount", Numeric(14, 4), default=0, nullable=False)
     notes = Column(String(500), nullable=True)
+    created_by_id = Column("createdById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     approved_by_id = Column("approvedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column("approvedAt", DateTime, nullable=True)
     whatsapp_opened_at = Column("whatsappOpenedAt", DateTime, nullable=True)
@@ -150,6 +151,7 @@ class PurchaseOrder(BaseModel):
     taxAmount = synonym("tax_amount")
     discountAmount = synonym("discount_amount")
     netAmount = synonym("net_amount")
+    createdById = synonym("created_by_id")
     approvedById = synonym("approved_by_id")
     approvedAt = synonym("approved_at")
     whatsappOpenedAt = synonym("whatsapp_opened_at")
@@ -165,6 +167,7 @@ class PurchaseOrder(BaseModel):
 
     supplier = relationship("Supplier", back_populates="purchase_orders")
     branch = relationship("Branch", foreign_keys=[branch_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
     items = relationship("PurchaseOrderItem", back_populates="po", cascade="all, delete-orphan")
     grns = relationship("GoodsReceiveNote", back_populates="po")

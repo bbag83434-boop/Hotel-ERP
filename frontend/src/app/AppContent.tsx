@@ -25,35 +25,43 @@ import ClosingWorkspace from '@/components/workspaces/ClosingWorkspace';
 import ReportsWorkspace from '@/components/workspaces/ReportsWorkspace';
 import TelemetryWorkspace from '@/components/workspaces/TelemetryWorkspace';
 import AIAssistantWorkspace from '@/components/workspaces/AIAssistantWorkspace';
+import AIAgentWorkspace from '@/components/workspaces/AIAgentWorkspace';
+import OrdersWorkspace from '@/components/workspaces/OrdersWorkspace';
+import KDSWorkspace from '@/components/workspaces/KDSWorkspace';
+import AutomationWorkspace from '@/components/workspaces/AutomationWorkspace';
+import SecurityWorkspace from '@/components/workspaces/SecurityWorkspace';
+import CRMWorkspace from '@/components/workspaces/CRMWorkspace';
+import MaintenanceWorkspace from '@/components/workspaces/MaintenanceWorkspace';
+import BeverageWorkspace from '@/components/workspaces/BeverageWorkspace';
+import FinanceWorkspace from '@/components/workspaces/FinanceWorkspace';
+import HotelOperationsWorkspace from '@/components/workspaces/HotelOperationsWorkspace';
+import ApprovalCenterWorkspace from '@/components/workspaces/ApprovalCenterWorkspace';
+import MultiOutletIntelligenceWorkspace from '@/components/workspaces/MultiOutletIntelligenceWorkspace';
+import CashierShiftWorkspace from '@/components/workspaces/CashierShiftWorkspace';
+import FinanceControlWorkspace from '@/components/workspaces/FinanceControlWorkspace';
+import ScheduledReportsAlertsWorkspace from '@/components/workspaces/ScheduledReportsAlertsWorkspace';
+import SupplierPerformanceWorkspace from '@/components/workspaces/SupplierPerformanceWorkspace';
+import AIProviderWorkspace from '@/components/workspaces/AIProviderWorkspace';
+import AIControlledToolsWorkspace from '@/components/workspaces/AIControlledToolsWorkspace';
+import TelegramNotificationWorkspace from '@/components/workspaces/TelegramNotificationWorkspace';
+import AIDocumentProcessingWorkspace from '@/components/workspaces/AIDocumentProcessingWorkspace';
+import AIWastageSalesIntelligenceWorkspace from '@/components/workspaces/AIWastageSalesIntelligenceWorkspace';
+import WhatsAppBusinessWorkspace from '@/components/workspaces/WhatsAppBusinessWorkspace';
 
 export const AppContent = () => {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const router = useRouter();
-  const { activeOutlet, isHeadOffice, canInitiateTransfers } = useOutlet();
+  const { activeOutlet } = useOutlet();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [loadingHealth, setLoadingHealth] = useState<boolean>(true);
-
-  const isAllowedWorkspace = (ws: WorkspaceId): boolean => {
-    if (isHeadOffice) return true;
-    if (ws === 'dashboard' || ws === 'assistant' || ws === 'purchase' || ws === 'wastage') return true;
-    if (ws === 'transfers' && canInitiateTransfers) return true;
-    return false;
-  };
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push('/login');
     }
   }, [authLoading, isAuthenticated, router]);
-
-  // Guard tier-restricted navigation: redirect to dashboard if workspace is not permitted
-  useEffect(() => {
-    if (!isHeadOffice && !isAllowedWorkspace(activeWorkspace)) {
-      setActiveWorkspace('dashboard');
-    }
-  }, [isHeadOffice, canInitiateTransfers, activeWorkspace]);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -89,77 +97,149 @@ export const AppContent = () => {
       />
 
       <div className="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden">
-        <Header onMenuClick={() => setMobileSidebarOpen(true)} setActiveWorkspace={setActiveWorkspace} />
+        <Header onMenuClick={() => setMobileSidebarOpen(true)} />
 
         <main className="flex-1 p-3 sm:p-5 lg:p-8 max-w-7xl w-full mx-auto pb-24 md:pb-12 min-w-0 overflow-x-hidden">
           {/* Dashboard and other workspaces render here */}
-          {(activeWorkspace === 'dashboard' || !isAllowedWorkspace(activeWorkspace)) && (
+          {activeWorkspace === 'supplierPerformance' && (
+            <div className="w-full min-w-0"><SupplierPerformanceWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'scheduledReports' && (
+            <div className="w-full min-w-0"><ScheduledReportsAlertsWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'multiOutlet' && (
+            <div className="w-full min-w-0"><MultiOutletIntelligenceWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'financeControl' && (
+            <div className="w-full min-w-0"><FinanceControlWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'dashboard' && (
             <div className="w-full min-w-0">
               <DashboardOverview health={health} setActiveWorkspace={setActiveWorkspace} />
             </div>
           )}
 
-          {activeWorkspace === 'users' && isAllowedWorkspace('users') && (
+          {activeWorkspace === 'users' && (
             <div className="w-full min-w-0">
               <UserManagementWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'organization' && isAllowedWorkspace('organization') && (
+          {activeWorkspace === 'organization' && (
             <div className="w-full min-w-0">
               <OrganizationManager />
             </div>
           )}
 
-          {activeWorkspace === 'inventory' && isAllowedWorkspace('inventory') && (
+          {activeWorkspace === 'kds' && (
+            <div className="w-full min-w-0">
+              <KDSWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'cashierShift' && (
+            <div className="w-full min-w-0"><CashierShiftWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'orders' && (
+            <div className="w-full min-w-0">
+              <OrdersWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'inventory' && (
             <div className="w-full min-w-0">
               <InventoryManager />
             </div>
           )}
 
-          {activeWorkspace === 'transfers' && isAllowedWorkspace('transfers') && (
+          {activeWorkspace === 'transfers' && (
             <div className="w-full min-w-0">
               <TransfersWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'purchase' && isAllowedWorkspace('purchase') && (
+          {activeWorkspace === 'purchase' && (
             <div className="w-full min-w-0">
-              <PurchaseWorkspace />
+              <PurchaseWorkspace onNavigateWorkspace={setActiveWorkspace} />
             </div>
           )}
 
-          {activeWorkspace === 'production' && isAllowedWorkspace('production') && (
+          {activeWorkspace === 'production' && (
             <div className="w-full min-w-0">
               <ProductionWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'wastage' && isAllowedWorkspace('wastage') && (
+          {activeWorkspace === 'wastage' && (
             <div className="w-full min-w-0">
               <WastageWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'hr' && isAllowedWorkspace('hr') && (
+          {activeWorkspace === 'hr' && (
             <div className="w-full min-w-0">
               <HRWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'closing' && isAllowedWorkspace('closing') && (
+          {activeWorkspace === 'closing' && (
             <div className="w-full min-w-0">
               <ClosingWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'reports' && isAllowedWorkspace('reports') && (
+          {activeWorkspace === 'crm' && (
+            <div className="w-full min-w-0">
+              <CRMWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'maintenance' && (
+            <div className="w-full min-w-0">
+              <MaintenanceWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'beverage' && (
+            <div className="w-full min-w-0"><BeverageWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'hotel' && (
+            <div className="w-full min-w-0"><HotelOperationsWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'finance' && (
+            <div className="w-full min-w-0"><FinanceWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'approvals' && (
+            <div className="w-full min-w-0"><ApprovalCenterWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'security' && (
+            <div className="w-full min-w-0">
+              <SecurityWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'automation' && (
+            <div className="w-full min-w-0">
+              <AutomationWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'reports' && (
             <div className="w-full min-w-0">
               <ReportsWorkspace />
             </div>
           )}
 
-          {activeWorkspace === 'telemetry' && isAllowedWorkspace('telemetry') && (
+          {activeWorkspace === 'telemetry' && (
             <div className="w-full min-w-0">
               <TelemetryWorkspace
                 health={health}
@@ -169,7 +249,35 @@ export const AppContent = () => {
             </div>
           )}
 
-          {activeWorkspace === 'assistant' && isAllowedWorkspace('assistant') && (
+          {activeWorkspace === 'aiAgent' && (
+            <div className="w-full min-w-0">
+              <AIAgentWorkspace activeOutlet={activeOutlet} />
+            </div>
+          )}
+
+          {activeWorkspace === 'aiProvider' && (
+            <div className="w-full min-w-0"><AIProviderWorkspace /></div>
+          )}
+          {activeWorkspace === 'aiTools' && (
+            <div className="w-full min-w-0"><AIControlledToolsWorkspace /></div>
+          )}
+          {activeWorkspace === 'aiDocuments' && (
+            <div className="w-full min-w-0"><AIDocumentProcessingWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'telegramNotifications' && (
+            <div className="w-full min-w-0"><TelegramNotificationWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'aiWastageSales' && (
+            <div className="w-full min-w-0"><AIWastageSalesIntelligenceWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'whatsappBusiness' && (
+            <div className="w-full min-w-0"><WhatsAppBusinessWorkspace /></div>
+          )}
+
+          {activeWorkspace === 'assistant' && (
             <div className="w-full min-w-0">
               <AIAssistantWorkspace activeOutlet={activeOutlet} />
             </div>

@@ -1,6 +1,8 @@
 from fastapi.encoders import jsonable_encoder
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from app.core.security_hardening import SecurityHeadersMiddleware, RequestSizeLimitMiddleware, AbuseRateLimitMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
@@ -9,6 +11,17 @@ import time
 import logging
 from app.core.config import settings
 from app.core.database import check_database_connection
+from app.core.order_schema_bootstrap import ensure_order_columns
+from app.core.billing_schema_bootstrap import ensure_billing_schema
+from app.core.customer_support_schema_bootstrap import ensure_customer_support_schema
+from app.core.maintenance_schema_bootstrap import ensure_maintenance_schema
+from app.core.beverage_schema_bootstrap import ensure_beverage_schema
+from app.core.finance_schema_bootstrap import ensure_finance_schema
+from app.core.hotel_schema_bootstrap import ensure_hotel_schema
+from app.core.cashier_schema_bootstrap import ensure_cashier_schema
+from app.core.expense_schema_bootstrap import ensure_expense_schema
+from app.core.notification_schema_bootstrap import ensure_notification_schema
+from app.core.ai_document_schema_bootstrap import ensure_ai_document_schema
 from app.core.exceptions import AppException
 from app.api.v1.api import api_router
 
@@ -19,6 +32,30 @@ logger = logging.getLogger("apex_erp")
 async def lifespan(app: FastAPI):
     logger.info("🚀 Starting APEX Multi-Outlet ERP Backend (FastAPI + SQLAlchemy)...")
     check_database_connection()
+    try:
+        ensure_order_columns()
+        logger.info("✅ Order channel schema compatibility check complete")
+        ensure_billing_schema()
+        logger.info("✅ Billing schema compatibility check complete")
+        ensure_customer_support_schema()
+        logger.info("✅ Customer/complaint schema compatibility check complete")
+        ensure_maintenance_schema()
+        logger.info("✅ Maintenance/asset schema compatibility check complete")
+        ensure_beverage_schema()
+        logger.info("✅ Beverage schema compatibility check complete")
+        ensure_finance_schema()
+        logger.info("✅ Finance schema compatibility check complete")
+        ensure_hotel_schema()
+        logger.info("✅ Hotel schema compatibility check complete")
+        ensure_cashier_schema()
+        logger.info("✅ Cashier shift schema compatibility check complete")
+        ensure_expense_schema()
+        logger.info("✅ Expense/reconciliation schema compatibility check complete")
+        ensure_notification_schema()
+        ensure_ai_document_schema()
+        logger.info("✅ Notification schema compatibility check complete")
+    except Exception as exc:
+        logger.warning("Schema bootstrap skipped: %s", exc)
     yield
     logger.info("🛑 Shutting down APEX Multi-Outlet ERP Backend...")
 
@@ -31,13 +68,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+if settings.is_production and not settings.security_ready:
+    raise RuntimeError("Production JWT secrets are missing or unsafe")
+
+# Part 33 performance middleware
+# Compress JSON/API responses while leaving already-compressed payloads untouched.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+
+# Part 32 security middleware
+app.add_middleware(RequestSizeLimitMiddleware, max_bytes=12 * 1024 * 1024)
+app.add_middleware(AbuseRateLimitMiddleware, limit=30, window_seconds=60)
+app.add_middleware(SecurityHeadersMiddleware)
+
 # CORS configuration
+if settings.is_production and (not settings.BACKEND_CORS_ORIGINS or "*" in settings.BACKEND_CORS_ORIGINS):
+    raise RuntimeError("BACKEND_CORS_ORIGINS must explicitly list trusted frontend origins in production")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Outlet-Id", "X-Request-ID", "X-Telegram-Bot-Api-Secret-Token", "X-Hub-Signature-256"],
 )
 
 # Structured Request Logging Middleware

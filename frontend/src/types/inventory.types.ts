@@ -223,6 +223,7 @@ export interface StockLedgerEntry {
   notes?: string;
   created_by_id?: string;
   created_by_name?: string;
+  user_name?: string;
   created_at?: string;
   item_name?: string;
   item_code?: string;
@@ -257,4 +258,27 @@ export interface StockMovementTimelineEntry {
   reason_code?: string;
   notes?: string;
   badge_color: 'emerald' | 'rose' | 'amber' | 'blue';
+}
+
+
+export interface ReorderRecommendation {
+  warehouse_id: string;
+  warehouse_name: string;
+  item_id: string;
+  item_name: string;
+  item_code: string;
+  unit_symbol?: string;
+  current_stock: number | string;
+  min_stock_level: number | string;
+  reorder_qty: number | string;
+  suggested_order_qty: number | string;
+  estimated_unit_cost: number | string;
+  estimated_total_cost: number | string;
+  urgency_level: 'CRITICAL' | 'HIGH' | 'MEDIUM' | string;
+}
+
+export interface ReorderRecommendationResponse {
+  total_items_to_reorder: number;
+  total_estimated_replenishment_cost: number | string;
+  recommendations: ReorderRecommendation[];
 }

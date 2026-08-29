@@ -25,6 +25,7 @@ import {
 import { Recipe, ProductionOrder, ProductionPreview } from '@/types/production.types';
 import { Warehouse } from '@/types/inventory.types';
 import { Badge, Button, StatCard, SearchInput, AlertBanner, EmptyState } from '@/components/ui';
+import RecipeManager from './RecipeManager';
 
 export const ProductionWorkspace: React.FC = () => {
   const { activeOutlet } = useOutlet();
@@ -254,132 +255,7 @@ export const ProductionWorkspace: React.FC = () => {
 
       {/* Tab 1: Recipe & BOM Directory */}
       {activeTab === 'recipes' && (
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">
-              Standard Recipe Registry ({filteredRecipes.length})
-            </h3>
-            <SearchInput
-              value={searchQuery}
-              onChangeValue={setSearchQuery}
-              placeholder="Search recipes by name or code..."
-              className="w-full sm:w-72"
-            />
-          </div>
-
-          {loading ? (
-            <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-2">
-              <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
-              <span>Loading recipe registry...</span>
-            </div>
-          ) : filteredRecipes.length === 0 ? (
-            <EmptyState
-              title="No Recipes Found"
-              description="BOM recipes establish theoretical raw ingredient usage per finished dish."
-              icon={<ChefHat className="w-6 h-6" />}
-            />
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredRecipes.map((r) => (
-                <div
-                  key={r.id}
-                  className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-3 hover:border-[#C79A3B]/40 transition-all flex flex-col justify-between"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{r.name}</h4>
-                          <Badge variant="outlet">{r.code}</Badge>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#F1E4C5] text-[#B8862D]">
-                            v{r.version || 1}
-                          </span>
-                          {r.effectiveDate && (
-                            <span className="text-[10px] text-[#707070]">
-                              Eff: {new Date(r.effectiveDate).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-[#707070] mt-0.5">
-                          {r.description || 'Standard multi-outlet recipe BOM'}
-                        </p>
-                      </div>
-                      <Badge variant="success">Active</Badge>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.05)] text-center text-xs">
-                      <div>
-                        <span className="text-[10px] text-[#707070] block">Yield Qty</span>
-                        <span className="font-bold text-[#1C1C1C]">{r.yieldQty || 1} Servings</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-[#707070] block">Prep Time</span>
-                        <span className="font-bold text-[#1C1C1C]">{r.preparationMinutes || 15} mins</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-[#707070] block">Est. Unit Cost</span>
-                        <span className="font-bold text-[#2E8B57]">
-                          ${Number(r.estimatedUnitCost || 0).toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {r.ingredients && r.ingredients.length > 0 && (
-                      <div className="space-y-1.5 pt-2 border-t border-[rgba(45,45,45,0.06)]">
-                        <span className="text-[11px] font-bold text-[#707070] block">
-                          Ingredients ({r.ingredients.length}):
-                        </span>
-                        <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
-                          {r.ingredients.map((ing) => (
-                            <div
-                              key={ing.id}
-                              className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-white border border-[rgba(45,45,45,0.04)]"
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[#1C1C1C] font-medium">
-                                  {ing.rawItem?.name || 'Raw Ingredient'}
-                                </span>
-                                {ing.usableYield && Number(ing.usableYield) < 100 && (
-                                  <span className="text-[10px] text-amber-600 bg-amber-50 px-1 rounded">
-                                    Yield: {Number(ing.usableYield).toFixed(0)}%
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-right">
-                                <span className="font-mono text-[11px] font-semibold text-[#1C1C1C]">
-                                  {Number(ing.grossQuantity || ing.quantity).toFixed(2)} {ing.unit?.symbol || ing.rawItem?.unit?.symbol || ''}
-                                </span>
-                                {ing.grossQuantity && Number(ing.grossQuantity) !== Number(ing.quantity) && (
-                                  <span className="text-[10px] text-[#707070] block">
-                                    Net: {Number(ing.quantity).toFixed(2)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="pt-2 flex items-center justify-end gap-2 border-t border-[rgba(45,45,45,0.06)]">
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedRecipeId(r.id);
-                        setActiveTab('batch_prep');
-                      }}
-                      icon={<Flame className="w-3.5 h-3.5 text-[#C79A3B]" />}
-                    >
-                      Run Batch
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <RecipeManager onRunBatch={(recipeId) => { setSelectedRecipeId(recipeId); setActiveTab('batch_prep'); }} />
       )}
 
       {/* Tab 2: Batch Runs & History */}

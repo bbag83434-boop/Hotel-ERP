@@ -175,6 +175,36 @@ export const procurementApi = {
     return res.data;
   },
 
+  // 5. Supplier Bills, Payments & Vendor Ledger
+  getSupplierBills: async (params?: { supplier_id?: string; status_filter?: string }): Promise<any[]> => {
+    const res = await apiClient.get<any[]>('/procurement/bills', { params });
+    return res.data;
+  },
+  createSupplierBill: async (payload: any): Promise<any> => {
+    const res = await apiClient.post('/procurement/bills', payload);
+    return res.data;
+  },
+  verifySupplierBill: async (billId: string): Promise<any> => {
+    const res = await apiClient.post(`/procurement/bills/${billId}/verify`);
+    return res.data;
+  },
+  approveSupplierBill: async (billId: string): Promise<any> => {
+    const res = await apiClient.post(`/procurement/bills/${billId}/approve`);
+    return res.data;
+  },
+  getSupplierPayments: async (supplierId?: string): Promise<any[]> => {
+    const res = await apiClient.get<any[]>('/procurement/payments', { params: supplierId ? { supplier_id: supplierId } : undefined });
+    return res.data;
+  },
+  createSupplierPayment: async (payload: any): Promise<any> => {
+    const res = await apiClient.post('/procurement/payments', payload);
+    return res.data;
+  },
+  getVendorLedger: async (supplierId: string): Promise<any> => {
+    const res = await apiClient.get(`/procurement/vendor-ledger/${supplierId}`);
+    return res.data;
+  },
+
   // 5. Twice-Monthly Closing & Food Cost Tie-In
   getOutletClosings: async (params?: { branch_id?: string; year?: number; month?: number }): Promise<OutletClosingRecord[]> => {
     const res = await apiClient.get<OutletClosingRecord[]>('/procurement/closings', { params });
@@ -194,6 +224,12 @@ export const procurementApi = {
   },
   reopenOutletClosing: async (closingId: string, payload: { reason: string }): Promise<OutletClosingRecord> => {
     const res = await apiClient.post<OutletClosingRecord>(`/procurement/closings/${closingId}/reopen`, payload);
+    return res.data;
+  },
+
+  // PART 27 — Smart Inventory / Purchase Intelligence
+  getSmartInventoryIntelligence: async (branchId: string): Promise<any> => {
+    const res = await apiClient.get('/procurement/smart-inventory/intelligence', { params: { branch_id: branchId } });
     return res.data;
   },
 

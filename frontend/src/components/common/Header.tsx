@@ -17,20 +17,17 @@ import {
   Check,
 } from 'lucide-react';
 
-import { WorkspaceId } from './Sidebar';
-
 interface HeaderProps {
   onMenuClick?: () => void;
-  setActiveWorkspace?: (id: WorkspaceId) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onMenuClick, setActiveWorkspace }) => {
+export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const { outlets, activeOutlet, setActiveOutlet, isHeadOffice } = useOutlet();
   const { isInstallable, installPWA, isOnline, updateAvailable, applyUpdate } = usePWA();
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-[rgba(45,45,45,0.08)] px-3 sm:px-4 py-2.5 sm:py-3 shadow-[0_2px_12px_rgba(45,45,45,0.03)] w-full max-w-full">
+    <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-[rgba(45,45,45,0.08)] px-3 sm:px-4 py-2.5 sm:py-3 shadow-[0_2px_12px_rgba(45,45,45,0.03)] w-full max-w-full overflow-hidden">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-3 w-full min-w-0">
         {/* Left: Brand & Mobile Hamburger */}
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
@@ -82,7 +79,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick, setActiveWorkspace 
             {dropdownOpen && (
               <>
                 <div
-                  className="fixed inset-0 z-50 bg-black/30 backdrop-blur-2xs"
+                  className="fixed inset-0 z-20 bg-black/30 backdrop-blur-2xs"
                   onClick={() => setDropdownOpen(false)}
                 />
                 <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 w-auto sm:w-80 max-h-[80vh] sm:max-h-96 overflow-y-auto bg-white border border-[rgba(45,45,45,0.12)] rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
@@ -105,7 +102,6 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick, setActiveWorkspace 
                           key={outlet.id}
                           onClick={() => {
                             setActiveOutlet(outlet);
-                            setActiveWorkspace?.('dashboard');
                             setDropdownOpen(false);
                           }}
                           className={`w-full text-left px-3 py-2.5 rounded-xl text-xs flex items-center justify-between transition-colors ${

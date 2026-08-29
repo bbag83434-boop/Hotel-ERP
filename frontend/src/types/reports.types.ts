@@ -168,6 +168,29 @@ export interface ProcurementSummaryResponse {
   topSuppliers: SupplierSpendMetric[];
 }
 
+export interface VendorReportMetric {
+  supplierId: string;
+  supplierName: string;
+  poCount: number;
+  poSpend: number;
+  billCount: number;
+  billedAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  fulfillmentRatePercentage: number;
+}
+
+export interface VendorReportResponse {
+  periodStart: string;
+  periodEnd: string;
+  totalVendors: number;
+  totalPoSpend: number;
+  totalBilledAmount: number;
+  totalPaidAmount: number;
+  totalOutstandingAmount: number;
+  vendors: VendorReportMetric[];
+}
+
 export interface ReportExportRequest {
   reportType: 'EXECUTIVE_SUMMARY' | 'SALES_SUMMARY' | 'INVENTORY_VALUATION';
   format: 'CSV' | 'JSON';

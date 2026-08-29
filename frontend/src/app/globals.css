@@ -99,3 +99,38 @@ html, body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(199, 154, 59, 0.45);
 }
+
+.field {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(45,45,45,0.10);
+  background: #fff;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.75rem;
+  outline: none;
+}
+.field:focus { border-color: #C79A3B; box-shadow: 0 0 0 3px rgba(199,154,59,0.10); }
+
+
+/* Part 33: mobile performance safeguards */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Avoid painting long off-screen dashboard/report sections until needed. */
+.performance-list > * {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 72px;
+}
+
+@media (max-width: 430px) {
+  .luxury-card, .glass-card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}

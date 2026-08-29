@@ -89,3 +89,4 @@ class Payment(BaseModel):
     paymentDate = synonym("payment_date")
     paymentMethod = synonym("payment_method")
     referenceNumber = synonym("reference_number")
+    billId = synonym("bill_id")

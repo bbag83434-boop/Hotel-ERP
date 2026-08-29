@@ -13,6 +13,8 @@ import {
   ItemCreateInput,
   StockTransferCreateInput,
   StockAdjustmentInput,
+  StockLedgerEntry,
+  ReorderRecommendation,
 } from '@/types/inventory.types';
 import { Warehouse } from '@/types/organization.types';
 import { useOutlet } from '@/context/OutletContext';
@@ -36,7 +38,7 @@ import {
 
 export const InventoryManager: React.FC = () => {
   const { currentOutlet } = useOutlet();
-  const [subTab, setSubTab] = useState<'balances' | 'items' | 'transfers' | 'categories'>('balances');
+  const [subTab, setSubTab] = useState<'balances' | 'alerts' | 'reorder' | 'ledger' | 'items' | 'transfers' | 'categories'>('balances');
 
   // Domain Data
   const [balances, setBalances] = useState<StockBalance[]>([]);
@@ -46,6 +48,9 @@ export const InventoryManager: React.FC = () => {
   const [units, setUnits] = useState<Unit[]>([]);
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<StockLedgerEntry[]>([]);
+  const [reorderRecommendations, setReorderRecommendations] = useState<ReorderRecommendation[]>([]);
+  const [reorderCost, setReorderCost] = useState<number>(0);
 
   // UI / State Handling
   const [loading, setLoading] = useState<boolean>(true);
@@ -96,7 +101,7 @@ export const InventoryManager: React.FC = () => {
     setLoading(true);
     setFeedback(null);
     try {
-      const [balData, lowData, itemData, catData, unitData, trData, whData] = await Promise.all([
+      const [balData, lowData, itemData, catData, unitData, trData, whData, ledgerData, reorderData] = await Promise.all([
         inventoryApi.getStockBalances().catch(() => []),
         inventoryApi.getLowStockAlerts().catch(() => []),
         inventoryApi.getItems().catch(() => []),
@@ -104,6 +109,8 @@ export const InventoryManager: React.FC = () => {
         inventoryApi.getUnits().catch(() => []),
         inventoryApi.getTransfers().catch(() => []),
         organizationApi.getWarehouses().catch(() => []),
+        inventoryApi.getStockLedger({ limit: 100 }).catch(() => []),
+        inventoryApi.getReorderRecommendations().catch(() => ({ recommendations: [], total_estimated_replenishment_cost: 0 })),
       ]);
 
       setBalances(balData);
@@ -113,6 +120,9 @@ export const InventoryManager: React.FC = () => {
       setUnits(unitData);
       setTransfers(trData);
       setWarehouses(whData);
+      setLedgerEntries(ledgerData);
+      setReorderRecommendations(reorderData?.recommendations || []);
+      setReorderCost(Number(reorderData?.total_estimated_replenishment_cost || 0));
 
       // Preselect default IDs in forms
       if (catData.length > 0) setItemForm((prev) => ({ ...prev, category_id: prev.category_id || catData[0].id }));
@@ -137,6 +147,14 @@ export const InventoryManager: React.FC = () => {
 
   useEffect(() => {
     loadData();
+  }, [loadData]);
+
+  // Keep operational stock screens fresh without requiring a manual refresh.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') loadData();
+    }, 30000);
+    return () => window.clearInterval(timer);
   }, [loadData]);
 
   // Form Handlers
@@ -262,6 +280,19 @@ export const InventoryManager: React.FC = () => {
       it.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       it.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (it.category_name || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredLedger = ledgerEntries.filter((entry) =>
+    (entry.item_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (entry.item_code || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (entry.warehouse_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (entry.movement_type || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredReorder = reorderRecommendations.filter((entry) =>
+    entry.item_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    entry.item_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    entry.warehouse_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const filteredTransfers = transfers.filter(
@@ -427,6 +458,39 @@ export const InventoryManager: React.FC = () => {
         </button>
 
         <button
+          onClick={() => { setSubTab('alerts'); setSearchQuery(''); }}
+          className={`p-4 rounded-xl text-left border transition-all ${subTab === 'alerts' ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]' : 'bg-white/80 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'}`}
+        >
+          <div className="flex items-center justify-between text-[#707070] mb-1">
+            <span className="text-xs font-semibold">Stock Alerts</span><AlertTriangle className="w-4 h-4 text-[#D99625]" />
+          </div>
+          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{lowStockAlerts.length}</p>
+          <p className="text-[10px] text-[#D99625] mt-1 font-medium">Below minimum</p>
+        </button>
+
+        <button
+          onClick={() => { setSubTab('reorder'); setSearchQuery(''); }}
+          className={`p-4 rounded-xl text-left border transition-all ${subTab === 'reorder' ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]' : 'bg-white/80 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'}`}
+        >
+          <div className="flex items-center justify-between text-[#707070] mb-1">
+            <span className="text-xs font-semibold">Reorder Queue</span><TrendingDown className="w-4 h-4 text-[#D9534F]" />
+          </div>
+          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{reorderRecommendations.length}</p>
+          <p className="text-[10px] text-[#D9534F] mt-1 font-medium">Est. ₹{reorderCost.toFixed(0)}</p>
+        </button>
+
+        <button
+          onClick={() => { setSubTab('ledger'); setSearchQuery(''); }}
+          className={`p-4 rounded-xl text-left border transition-all ${subTab === 'ledger' ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]' : 'bg-white/80 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'}`}
+        >
+          <div className="flex items-center justify-between text-[#707070] mb-1">
+            <span className="text-xs font-semibold">Stock Movements</span><ArrowLeftRight className="w-4 h-4 text-[#3978B8]" />
+          </div>
+          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{ledgerEntries.length}</p>
+          <p className="text-[10px] text-[#3978B8] mt-1 font-medium">Recent ledger entries</p>
+        </button>
+
+        <button
           onClick={() => { setSubTab('categories'); setSearchQuery(''); }}
           className={`p-4 rounded-xl text-left border transition-all ${
             subTab === 'categories'
@@ -446,7 +510,7 @@ export const InventoryManager: React.FC = () => {
       {/* Sub-Tabs & Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
         <div className="flex border-b border-[rgba(45,45,45,0.08)] space-x-3 overflow-x-auto">
-          {(['balances', 'items', 'transfers', 'categories'] as const).map((tab) => (
+          {(['balances', 'alerts', 'reorder', 'ledger', 'items', 'transfers', 'categories'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => { setSubTab(tab); setSearchQuery(''); }}
@@ -456,13 +520,13 @@ export const InventoryManager: React.FC = () => {
                   : 'border-transparent text-[#707070] hover:text-[#1C1C1C]'
               }`}
             >
-              {tab === 'balances' ? 'Live Balances' : tab === 'items' ? 'Items Catalogue' : tab === 'transfers' ? 'Inter-Outlet Transfers' : 'Categories & Units'}
+              {tab === 'balances' ? 'Live Balances' : tab === 'alerts' ? 'Stock Alerts' : tab === 'reorder' ? 'Reorder Queue' : tab === 'ledger' ? 'Stock History' : tab === 'items' ? 'Items Catalogue' : tab === 'transfers' ? 'Inter-Outlet Transfers' : 'Categories & Units'}
             </button>
           ))}
         </div>
 
         <div className="flex items-center gap-2">
-          {subTab === 'balances' && (
+          {(subTab === 'balances' || subTab === 'alerts' || subTab === 'reorder' || subTab === 'ledger') && (
             <select
               value={selectedWarehouseId}
               onChange={(e) => setSelectedWarehouseId(e.target.value)}
@@ -566,6 +630,52 @@ export const InventoryManager: React.FC = () => {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* SUBTAB: Stock Alerts */}
+          {subTab === 'alerts' && (
+            <div className="space-y-3">
+              {lowStockAlerts.filter((a) => !selectedWarehouseId || a.warehouse_id === selectedWarehouseId).length === 0 ? (
+                <div className="p-8 text-center bg-white/50 rounded-2xl border border-[rgba(45,45,45,0.08)] text-xs text-[#2E8B57]">No active low-stock alerts.</div>
+              ) : (
+                lowStockAlerts.filter((a) => !selectedWarehouseId || a.warehouse_id === selectedWarehouseId).map((a) => (
+                  <div key={`${a.warehouse_id}-${a.item_id}`} className="p-4 rounded-2xl bg-white border border-[#D99625]/30 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div><p className="font-bold text-sm">{a.item_name}</p><p className="text-[10px] text-[#707070]">{a.item_code} · {a.warehouse_name}</p></div>
+                    <div className="flex items-center gap-4 text-xs font-mono"><span>Now {Number(a.current_quantity).toFixed(2)}</span><span>Min {Number(a.min_stock_level).toFixed(2)}</span><span className="font-bold text-[#D9534F]">Short {Number(a.shortage).toFixed(2)} {a.unit_symbol || ''}</span></div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* SUBTAB: Reorder Queue */}
+          {subTab === 'reorder' && (
+            <div className="space-y-3">
+              <div className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] flex items-center justify-between"><div><p className="text-xs text-[#707070]">Recommended replenishment</p><p className="text-xl font-bold">{filteredReorder.length} items</p></div><p className="font-mono font-bold text-[#B8862D]">Est. ₹{reorderCost.toFixed(2)}</p></div>
+              {filteredReorder.filter((r) => !selectedWarehouseId || r.warehouse_id === selectedWarehouseId).map((r) => (
+                <div key={`${r.warehouse_id}-${r.item_id}`} className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm grid grid-cols-1 sm:grid-cols-4 gap-3 items-center">
+                  <div><p className="font-bold text-sm">{r.item_name}</p><p className="text-[10px] text-[#707070]">{r.item_code} · {r.warehouse_name}</p></div>
+                  <div className="text-xs font-mono">Current: <b>{Number(r.current_stock).toFixed(2)}</b> / Min: {Number(r.min_stock_level).toFixed(2)}</div>
+                  <div className="text-xs font-mono">Suggested: <b>{Number(r.suggested_order_qty).toFixed(2)} {r.unit_symbol || ''}</b></div>
+                  <div className="text-right"><span className={`text-[10px] font-bold px-2 py-1 rounded-full ${r.urgency_level === 'CRITICAL' ? 'bg-[#D9534F]/10 text-[#D9534F]' : r.urgency_level === 'HIGH' ? 'bg-[#D99625]/10 text-[#D99625]' : 'bg-[#3978B8]/10 text-[#3978B8]'}`}>{r.urgency_level}</span><p className="text-[10px] text-[#707070] mt-1">₹{Number(r.estimated_total_cost).toFixed(2)}</p></div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* SUBTAB: Stock History */}
+          {subTab === 'ledger' && (
+            <div className="space-y-2">
+              {filteredLedger.filter((e) => !selectedWarehouseId || e.warehouse_id === selectedWarehouseId).map((e) => (
+                <div key={e.id} className="p-3 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] grid grid-cols-1 sm:grid-cols-5 gap-2 items-center text-xs">
+                  <div><p className="font-bold">{e.item_name || e.item_id}</p><p className="text-[10px] text-[#707070]">{e.item_code || ''}</p></div>
+                  <div className="text-[#707070]">{e.warehouse_name || e.warehouse_id}</div>
+                  <div><span className="font-bold">{e.movement_type}</span><p className="text-[10px] text-[#707070]">{e.reference_type || 'Inventory'}</p></div>
+                  <div className={`font-mono font-bold ${Number(e.change_qty) < 0 ? 'text-[#D9534F]' : 'text-[#2E8B57]'}`}>{Number(e.change_qty) > 0 ? '+' : ''}{Number(e.change_qty).toFixed(2)} {e.unit_symbol || ''}<p className="text-[10px] text-[#707070] font-normal">Balance {Number(e.balance_qty).toFixed(2)}</p></div>
+                  <div className="text-right text-[10px] text-[#707070]">{e.created_at ? new Date(e.created_at).toLocaleString() : '—'}<br/>{e.created_by_name || e.user_name || ''}</div>
+                </div>
+              ))}
             </div>
           )}
 

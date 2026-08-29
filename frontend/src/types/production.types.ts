@@ -3,7 +3,7 @@ export type ProductionStatus = 'DRAFT' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLE
 export interface RecipeIngredient {
   id: string;
   rawItemId: string;
-  rawItem: {
+  rawItem?: {
     id: string;
     name: string;
     code: string;
@@ -11,6 +11,8 @@ export interface RecipeIngredient {
     unit: { symbol: string };
     stockBalances?: Array<{ quantity: number | string; warehouse: { name: string } }>;
   };
+  itemName?: string;
+  unitSymbol?: string;
   quantity: number | string;
   grossQuantity?: number | string;
   usableYield?: number | string;
@@ -30,7 +32,10 @@ export interface Recipe {
   isCurrent?: boolean;
   description?: string;
   finishedItemId: string;
-  finishedItem: {
+  finishedItemName?: string;
+  finishedUnitSymbol?: string;
+  unitCost?: number | string;
+  finishedItem?: {
     id: string;
     name: string;
     code: string;

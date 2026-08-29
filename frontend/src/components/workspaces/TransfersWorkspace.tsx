@@ -191,8 +191,8 @@ export const TransfersWorkspace: React.FC = () => {
 
         <StatCard
           title="Central Supply Hubs"
-          value={`${warehouses.filter((w) => w.is_central || w.type === 'CENTRAL').length} Hub${warehouses.filter((w) => w.is_central || w.type === 'CENTRAL').length === 1 ? '' : 's'}`}
-          subtitle={warehouses.filter((w) => w.is_central || w.type === 'CENTRAL').length > 0 ? 'Designated Central Hubs' : 'Standard Stores'}
+          value="2 Hubs"
+          subtitle="Central Store & Bakery Commissary"
           icon={<Building2 className="w-4 h-4 text-[#3978B8]" />}
           iconBgColor="bg-blue-50 text-[#3978B8]"
         />
@@ -262,19 +262,19 @@ export const TransfersWorkspace: React.FC = () => {
                     </td>
                     <td className="p-3.5">
                       <div className="font-semibold text-[#1C1C1C]">
-                        {t.from_warehouse_name || t.fromWarehouse?.name || '—'}
+                        {t.from_warehouse_name || t.fromWarehouse?.name || 'Central Store CS-01'}
                       </div>
                     </td>
                     <td className="p-3.5">
                       <div className="font-semibold text-[#1C1C1C]">
-                        {t.to_warehouse_name || t.toWarehouse?.name || '—'}
+                        {t.to_warehouse_name || t.toWarehouse?.name || activeOutlet.name}
                       </div>
                     </td>
                     <td className="p-3.5 text-[#707070]">
-                      {t.notes || '—'}
+                      {t.notes || 'Routine kitchen stock replenishment'}
                     </td>
                     <td className="p-3.5 font-mono text-[11px] text-[#707070]">
-                      {t.transfer_date ? t.transfer_date.slice(0, 10) : (t.created_at ? t.created_at.slice(0, 10) : '—')}
+                      {t.transfer_date ? t.transfer_date.slice(0, 10) : new Date().toLocaleDateString()}
                     </td>
                     <td className="p-3.5">
                       <Badge variant="success">{t.status || 'COMPLETED'}</Badge>

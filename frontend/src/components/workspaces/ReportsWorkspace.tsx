@@ -10,6 +10,7 @@ import {
   FoodCostVarianceResponse,
   WastageSummaryReportResponse,
   ProcurementSummaryResponse,
+  VendorReportResponse,
 } from '@/types/reports.types';
 import {
   BarChart3,
@@ -40,6 +41,7 @@ type ReportTab =
   | 'FOOD_COST'
   | 'WASTAGE'
   | 'PROCUREMENT'
+  | 'VENDOR'
   | 'EXPORT';
 
 export const ReportsWorkspace: React.FC = () => {
@@ -60,6 +62,7 @@ export const ReportsWorkspace: React.FC = () => {
   const [foodCostData, setFoodCostData] = useState<FoodCostVarianceResponse | null>(null);
   const [wastageData, setWastageData] = useState<WastageSummaryReportResponse | null>(null);
   const [procurementData, setProcurementData] = useState<ProcurementSummaryResponse | null>(null);
+  const [vendorData, setVendorData] = useState<VendorReportResponse | null>(null);
 
   const getDateRange = () => {
     const end = new Date();
@@ -97,6 +100,9 @@ export const ReportsWorkspace: React.FC = () => {
       } else if (activeTab === 'PROCUREMENT') {
         const data = await reportsApi.getProcurementSummary({ startDate, endDate });
         setProcurementData(data);
+      } else if (activeTab === 'VENDOR') {
+        const data = await reportsApi.getVendorReport({ branchId: branchParam, startDate, endDate });
+        setVendorData(data);
       }
     } catch (err: any) {
       setFeedback({
@@ -161,6 +167,7 @@ export const ReportsWorkspace: React.FC = () => {
     { id: 'FOOD_COST', label: 'Food Cost & Margins', icon: Percent },
     { id: 'WASTAGE', label: 'Wastage & Loss Audit', icon: Trash2 },
     { id: 'PROCUREMENT', label: 'Procurement & Spend', icon: ShoppingCart },
+    { id: 'VENDOR', label: 'Vendor Report', icon: Building2 },
     { id: 'EXPORT', label: 'Export Center', icon: Download },
   ];
 
@@ -781,7 +788,46 @@ export const ReportsWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 7: EXPORT CENTER */}
+      {/* TAB 7: VENDOR REPORT */}
+      {!loading && activeTab === 'VENDOR' && vendorData && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-4">
+            <StatCard title="Vendors" value={vendorData.totalVendors} subtitle="Active suppliers in period" icon={<Building2 className="w-4 h-4 text-[#C79A3B]" />} iconBgColor="bg-[#FAF8F5] text-[#C79A3B]" />
+            <StatCard title="PO Spend" value={`$${vendorData.totalPoSpend.toLocaleString(undefined,{minimumFractionDigits:2})}`} subtitle="Purchase order value" icon={<ShoppingCart className="w-4 h-4" />} iconBgColor="bg-[#FAF8F5]" />
+            <StatCard title="Billed" value={`$${vendorData.totalBilledAmount.toLocaleString(undefined,{minimumFractionDigits:2})}`} subtitle="Vendor invoices" icon={<FileSpreadsheet className="w-4 h-4" />} iconBgColor="bg-[#FAF8F5]" />
+            <StatCard title="Paid" value={`$${vendorData.totalPaidAmount.toLocaleString(undefined,{minimumFractionDigits:2})}`} subtitle="Recorded payments" icon={<CheckCircle2 className="w-4 h-4" />} iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]" />
+            <StatCard title="Outstanding" value={`$${vendorData.totalOutstandingAmount.toLocaleString(undefined,{minimumFractionDigits:2})}`} subtitle="Billed less payments" icon={<Clock className="w-4 h-4" />} iconBgColor="bg-[#F1E4C5]/40 text-[#B8862D]" />
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Vendor Spend, Billing & Payment Report</h3>
+              <p className="text-xs text-[#707070] mt-1">Compare purchase volume, invoicing, payments, outstanding balances and PO fulfillment by supplier.</p>
+            </div>
+            <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)]">
+              <table className="w-full text-left text-xs">
+                <thead><tr className="border-b border-[rgba(45,45,45,0.08)] text-[#707070] bg-[#FAF8F5]">
+                  <th className="p-3">Vendor</th><th className="p-3 text-center">POs</th><th className="p-3 text-right">PO Spend</th><th className="p-3 text-right">Billed</th><th className="p-3 text-right">Paid</th><th className="p-3 text-right">Outstanding</th><th className="p-3 text-right">Fulfillment</th>
+                </tr></thead>
+                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                  {vendorData.vendors.map((v) => <tr key={v.supplierId} className="hover:bg-[#FAF8F5]">
+                    <td className="p-3 font-semibold">{v.supplierName}<div className="text-[10px] text-[#707070]">{v.billCount} bills</div></td>
+                    <td className="p-3 text-center font-mono">{v.poCount}</td>
+                    <td className="p-3 text-right font-mono">${v.poSpend.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                    <td className="p-3 text-right font-mono">${v.billedAmount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                    <td className="p-3 text-right font-mono text-[#2E8B57]">${v.paidAmount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                    <td className="p-3 text-right font-mono font-semibold text-[#D9534F]">${v.outstandingAmount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                    <td className="p-3 text-right"><Badge variant={v.fulfillmentRatePercentage >= 90 ? 'success' : v.fulfillmentRatePercentage >= 70 ? 'outlet' : 'danger'}>{v.fulfillmentRatePercentage.toFixed(1)}%</Badge></td>
+                  </tr>)}
+                  {!vendorData.vendors.length && <tr><td colSpan={7} className="p-8 text-center text-[#707070]">No vendor activity found for this period.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 8: EXPORT CENTER */}
       {activeTab === 'EXPORT' && (
         <div className="p-6 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-6 max-w-2xl mx-auto">
           <div>

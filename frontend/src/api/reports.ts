@@ -7,6 +7,7 @@ import {
   FoodCostVarianceResponse,
   WastageSummaryReportResponse,
   ProcurementSummaryResponse,
+  VendorReportResponse,
   ReportExportRequest,
   ReportExportResponse,
   ReportSnapshot,
@@ -95,6 +96,18 @@ export const reportsApi = {
     const res = await axios.get(`${API_BASE}/reports/procurement-summary`, {
       ...getAuthHeaders(),
       params: {
+        start_date: params?.startDate,
+        end_date: params?.endDate,
+      },
+    });
+    return res.data;
+  },
+
+  getVendorReport: async (params?: { branchId?: string; startDate?: string; endDate?: string }): Promise<VendorReportResponse> => {
+    const res = await axios.get(`${API_BASE}/reports/vendor-report`, {
+      ...getAuthHeaders(),
+      params: {
+        branch_id: params?.branchId,
         start_date: params?.startDate,
         end_date: params?.endDate,
       },

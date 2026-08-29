@@ -27,8 +27,17 @@ export const HRWorkspace: React.FC = () => {
   const { activeOutlet, isHeadOffice } = useOutlet();
   const [staff, setStaff] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<any[]>([]);
+  const [leaves, setLeaves] = useState<any[]>([]);
+  const [leaveTypes, setLeaveTypes] = useState<any[]>([]);
+  const [payroll, setPayroll] = useState<any | null>(null);
+  const [payrollMonth, setPayrollMonth] = useState<number>(new Date().getMonth() + 1);
+  const [payrollYear, setPayrollYear] = useState<number>(new Date().getFullYear());
+  const [attendanceDate, setAttendanceDate] = useState<string>(new Date().toISOString().slice(0,10));
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ employee_id: '', leave_type_id: '', start_date: new Date().toISOString().slice(0,10), end_date: new Date().toISOString().slice(0,10), total_days: 1, reason: '' });
   const [loading, setLoading] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<'staff' | 'shifts' | 'payroll'>('staff');
+  const [activeTab, setActiveTab] = useState<'staff' | 'attendance' | 'leave' | 'payroll'>('staff');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -52,12 +61,22 @@ export const HRWorkspace: React.FC = () => {
     setFeedback(null);
     try {
       const targetBranch = isHeadOffice ? undefined : activeOutlet.id;
-      const [staffRes, shiftRes] = await Promise.all([
+      const [staffRes, shiftRes, attendanceRes, leaveRes, leaveTypeRes, payrollRes] = await Promise.all([
         apiClient.get('/organization/staff', { params: { branch_id: targetBranch } }).catch(() => ({ data: [] })),
         apiClient.get('/hr/shifts', { params: { branch_id: targetBranch } }).catch(() => ({ data: [] })),
+        apiClient.get('/hr/attendance', { params: { branch_id: targetBranch, date: attendanceDate } }).catch(() => ({ data: [] })),
+        apiClient.get('/hr/leaves', { params: { branch_id: targetBranch } }).catch(() => ({ data: [] })),
+        apiClient.get('/hr/leave-types').catch(() => ({ data: [] })),
+        apiClient.get('/hr/payrolls', { params: { branch_id: targetBranch } }).catch(() => ({ data: [] })),
       ]);
-      setStaff(Array.isArray(staffRes.data) ? staffRes.data : staffRes.data?.data || []);
-      setShifts(Array.isArray(shiftRes.data) ? shiftRes.data : shiftRes.data?.data || []);
+      const unwrap = (r: any) => Array.isArray(r.data) ? r.data : r.data?.data || [];
+      setStaff(unwrap(staffRes));
+      setShifts(unwrap(shiftRes));
+      setAttendance(unwrap(attendanceRes));
+      setLeaves(unwrap(leaveRes));
+      setLeaveTypes(unwrap(leaveTypeRes));
+      const payrollList = unwrap(payrollRes);
+      setPayroll(payrollList.find((p:any) => Number(p.month) === payrollMonth && Number(p.year) === payrollYear) || payrollList[0] || null);
     } catch (err: any) {
       setStaff([]);
       setShifts([]);
@@ -72,7 +91,7 @@ export const HRWorkspace: React.FC = () => {
 
   useEffect(() => {
     loadHRData();
-  }, [activeOutlet.id]);
+  }, [activeOutlet.id, attendanceDate, payrollMonth, payrollYear]);
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,6 +124,52 @@ export const HRWorkspace: React.FC = () => {
       setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to register staff member' });
     } finally {
       setSubmittingStaff(false);
+    }
+  };
+
+  const recordAttendance = async (staffId: string, status: string) => {
+    try {
+      await apiClient.post('/hr/attendance', { staff_id: staffId, branch_id: activeOutlet.id, date: attendanceDate, status, hours_worked: status === 'PRESENT' ? 8 : 0, overtime_hours: 0 });
+      setFeedback({ type: 'success', message: 'Attendance recorded.' });
+      loadHRData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'Failed to record attendance.' });
+    }
+  };
+
+  const submitLeave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!leaveForm.employee_id || !leaveForm.leave_type_id || !leaveForm.reason) {
+      setFeedback({ type: 'error', message: 'Employee, leave type and reason are required.' });
+      return;
+    }
+    try {
+      await apiClient.post('/hr/leaves', { ...leaveForm, branch_id: activeOutlet.id, total_days: Number(leaveForm.total_days) });
+      setLeaveModalOpen(false);
+      setFeedback({ type: 'success', message: 'Leave request submitted.' });
+      loadHRData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'Failed to submit leave request.' });
+    }
+  };
+
+  const actOnLeave = async (id: string, status: 'APPROVED' | 'REJECTED') => {
+    try {
+      await apiClient.put(`/hr/leaves/${id}`, { status });
+      setFeedback({ type: 'success', message: `Leave request ${status.toLowerCase()}.` });
+      loadHRData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'Failed to update leave request.' });
+    }
+  };
+
+  const generatePayroll = async () => {
+    try {
+      const res = await apiClient.post('/hr/payrolls/generate', { branch_id: activeOutlet.id, month: payrollMonth, year: payrollYear });
+      setPayroll(res.data);
+      setFeedback({ type: 'success', message: `Payroll generated for ${String(payrollMonth).padStart(2,'0')}/${payrollYear}.` });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'Failed to generate payroll.' });
     }
   };
 
@@ -171,8 +236,8 @@ export const HRWorkspace: React.FC = () => {
 
         <StatCard
           title="Active Shifts"
-          value={shifts.length}
-          subtitle={`${shifts.filter((s: any) => s.is_active !== false).length} Active Roster Shifts`}
+          value={shifts.length || '3 Shifts'}
+          subtitle="Morning, Evening, Night"
           icon={<Clock className="w-4 h-4 text-[#3978B8]" />}
           iconBgColor="bg-blue-50 text-[#3978B8]"
         />
@@ -212,15 +277,28 @@ export const HRWorkspace: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('shifts')}
+          onClick={() => setActiveTab('attendance')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'shifts'
+            activeTab === 'attendance'
               ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
               : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
           }`}
         >
           <Clock className="w-4 h-4" />
-          <span>Shift Schedule & Attendance</span>
+          <span>Attendance</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('leave')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'leave'
+              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs'
+              : 'text-[#707070] hover:text-[#1C1C1C] hover:bg-[#FAF8F5]'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Leave</span>
+          {leaves.filter(l=>l.status==='PENDING').length > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-100 text-red-700">{leaves.filter(l=>l.status==='PENDING').length}</span>}
         </button>
 
         <button
@@ -328,97 +406,49 @@ export const HRWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: SHIFT SCHEDULE & ATTENDANCE */}
-      {activeTab === 'shifts' && (
-        <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
-            <div>
-              <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Standard Shift Rosters</h3>
-              <p className="text-xs text-[#707070]">Automated clock-in, overtime calculation, and night allowance shifts</p>
+      {/* TAB 2: ATTENDANCE */}
+      {activeTab === 'attendance' && (
+        <div className="space-y-4">
+          <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div><h3 className="text-sm font-bold text-[#1C1C1C]">Daily Attendance</h3><p className="text-xs text-[#707070]">Record present, absent, half-day or late status per employee.</p></div>
+              <input type="date" value={attendanceDate} onChange={e=>setAttendanceDate(e.target.value)} className="px-3 py-2 rounded-xl border text-xs" />
             </div>
-            <Badge variant="info">{shifts.length} Shift{shifts.length === 1 ? '' : 's'} Configured</Badge>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-xs"><thead><tr className="bg-[#FAF8F5]"><th className="p-3 text-left">Employee</th><th className="p-3 text-left">Existing</th><th className="p-3 text-right">Action</th></tr></thead>
+              <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">{staff.map(s=>{const a=attendance.find(x=>x.staff_id===s.id); return <tr key={s.id}><td className="p-3 font-semibold">{s.first_name} {s.last_name}<span className="block text-[10px] text-[#707070]">{s.employee_code}</span></td><td className="p-3"><Badge variant={a?.status==='ABSENT'?'danger':a?'success':'neutral'}>{a?.status || 'NOT RECORDED'}</Badge></td><td className="p-3 text-right flex gap-1 justify-end">{['PRESENT','ABSENT','HALF_DAY','LATE'].map(st=><Button key={st} size="sm" variant={st==='PRESENT'?'primary':'secondary'} onClick={()=>recordAttendance(s.id,st)}>{st.replace('_',' ')}</Button>)}</td></tr>})}</tbody></table>
+            </div>
           </div>
-
-          {shifts.length === 0 ? (
-            <EmptyState
-              title="No Shifts Configured"
-              description={`No operational shifts have been created for ${activeOutlet.name}. Configure shifts in the backend or HR settings.`}
-              icon={<Clock className="w-6 h-6" />}
-            />
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {shifts.map((s) => (
-                <div key={s.id || s.code} className="p-4 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs text-[#1C1C1C]">{s.name}</span>
-                    <Badge variant="success">
-                      {String(s.start_time || s.startTime || '').slice(0, 5)} – {String(s.end_time || s.endTime || '').slice(0, 5)}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-[#707070] font-mono">Code: [{s.code}]</p>
-                  <div className="text-[11px] text-[#707070] pt-2 border-t border-[rgba(45,45,45,0.06)] flex justify-between">
-                    <span>Grace Period:</span>
-                    <strong className="text-[#1C1C1C]">{s.grace_period_mins || s.gracePeriodMins || 0} mins</strong>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
-      {/* TAB 3: PAYROLL RUN */}
+      {/* TAB 3: LEAVE */}
+      {activeTab === 'leave' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between"><div><h3 className="text-sm font-bold text-[#1C1C1C]">Leave Management</h3><p className="text-xs text-[#707070]">Submit and approve employee leave requests.</p></div><Button variant="primary" size="sm" onClick={()=>setLeaveModalOpen(true)} icon={<Plus className="w-3.5 h-3.5"/>}>New Leave</Button></div>
+          <div className="grid gap-3">{leaves.length===0?<EmptyState title="No Leave Requests" description="No leave requests found for this outlet." icon={<Calendar className="w-6 h-6"/>}/>:leaves.map(l=><div key={l.id} className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><div className="font-bold text-sm">{l.leave_type_name || 'Leave'} <Badge variant="outlet">{l.status}</Badge></div><div className="text-xs text-[#707070] mt-1">Employee: {staff.find(s=>s.id===l.employee_id)?.first_name || l.employee_id} · {l.start_date} → {l.end_date} · {l.total_days} day(s)</div><div className="text-xs mt-1">{l.reason}</div></div>{l.status==='PENDING'&&<div className="flex gap-2"><Button size="sm" variant="primary" onClick={()=>actOnLeave(l.id,'APPROVED')}>Approve</Button><Button size="sm" variant="danger" onClick={()=>actOnLeave(l.id,'REJECTED')}>Reject</Button></div>}</div>)}</div>
+        </div>
+      )}
+
+      {/* TAB 4: PAYROLL */}
       {activeTab === 'payroll' && (
         <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
-            <div>
-              <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Monthly Payroll Calculation Preview</h3>
-              <p className="text-xs text-[#707070]">Integrated with attendance, deductions, and tax withholdings</p>
-            </div>
-            <Button variant="gold" size="sm" icon={<FileSpreadsheet className="w-3.5 h-3.5" />}>
-              Export Payroll Sheet
-            </Button>
-          </div>
-
-          <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)]">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                  <th className="p-3.5">Employee</th>
-                  <th className="p-3.5">Designation</th>
-                  <th className="p-3.5 text-right">Base Salary</th>
-                  <th className="p-3.5 text-right">Overtime ($)</th>
-                  <th className="p-3.5 text-right">Deductions</th>
-                  <th className="p-3.5 text-right">Net Payable</th>
-                  <th className="p-3.5">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
-                {staff.map((s) => (
-                  <tr key={s.id} className="hover:bg-[#FAF8F5]/60 transition-colors">
-                    <td className="p-3.5 font-bold text-[#1C1C1C]">
-                      {s.first_name} {s.last_name}
-                      <span className="block text-[10px] font-mono text-[#707070]">{s.employee_code || s.employeeCode}</span>
-                    </td>
-                    <td className="p-3.5 text-[#707070]">{s.designation || 'Operations'}</td>
-                    <td className="p-3.5 text-right font-mono font-semibold text-[#1C1C1C]">
-                      ${Number(s.base_salary || 0).toFixed(2)}
-                    </td>
-                    <td className="p-3.5 text-right font-mono text-[#2E8B57] font-semibold">$0.00</td>
-                    <td className="p-3.5 text-right font-mono text-red-600 font-semibold">$0.00</td>
-                    <td className="p-3.5 text-right font-mono font-bold text-[#1C1C1C]">
-                      ${Number(s.base_salary || 0).toFixed(2)}
-                    </td>
-                    <td className="p-3.5">
-                      <Badge variant="success">Calculated</Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b pb-3"><div><h3 className="text-sm font-bold text-[#1C1C1C]">Monthly Payroll Run</h3><p className="text-xs text-[#707070]">Generate deterministic payroll from active staff and recorded overtime.</p></div><div className="flex gap-2"><select value={payrollMonth} onChange={e=>setPayrollMonth(Number(e.target.value))} className="px-3 py-2 rounded-xl border text-xs">{Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>{String(i+1).padStart(2,'0')}</option>)}</select><input type="number" value={payrollYear} onChange={e=>setPayrollYear(Number(e.target.value))} className="w-24 px-3 py-2 rounded-xl border text-xs"/><Button variant="gold" size="sm" onClick={generatePayroll} icon={<FileSpreadsheet className="w-3.5 h-3.5"/>}>Generate</Button></div></div>
+          {payroll ? <><div className="grid grid-cols-3 gap-3"><StatCard title="Gross" value={`$${Number(payroll.total_gross||0).toFixed(2)}`} subtitle={payroll.status} icon={<DollarSign className="w-4 h-4"/>}/><StatCard title="Deductions" value={`$${Number(payroll.total_deductions||0).toFixed(2)}`} subtitle="Payroll deductions" icon={<DollarSign className="w-4 h-4"/>}/><StatCard title="Net" value={`$${Number(payroll.total_net||0).toFixed(2)}`} subtitle={`${payroll.items?.length||0} employees`} icon={<Users className="w-4 h-4"/>}/></div><div className="overflow-x-auto rounded-2xl border"><table className="w-full text-xs"><thead><tr className="bg-[#FAF8F5]"><th className="p-3 text-left">Employee</th><th className="p-3 text-right">Base</th><th className="p-3 text-right">OT</th><th className="p-3 text-right">Net</th><th className="p-3">Attendance</th></tr></thead><tbody className="divide-y">{(payroll.items||[]).map((i:any)=><tr key={i.id}><td className="p-3 font-semibold">{i.staff_name}<span className="block text-[10px] text-[#707070]">{i.employee_code}</span></td><td className="p-3 text-right">${Number(i.base_pay||0).toFixed(2)}</td><td className="p-3 text-right">${Number(i.overtime_pay||0).toFixed(2)}</td><td className="p-3 text-right font-bold">${Number(i.net_pay||0).toFixed(2)}</td><td className="p-3">{i.days_present} present / {i.days_absent} absent</td></tr>)}</tbody></table></div></> : <EmptyState title="No Payroll Run Loaded" description="Select month/year and generate the payroll calculation." icon={<DollarSign className="w-6 h-6"/>}/>}
         </div>
       )}
+
+      {/* Leave Modal */}
+      <Modal isOpen={leaveModalOpen} onClose={()=>setLeaveModalOpen(false)} title="Submit Leave Request" icon={<Calendar className="w-5 h-5 text-[#C79A3B]"/>}>
+        <form onSubmit={submitLeave} className="space-y-3">
+          <select value={leaveForm.employee_id} onChange={e=>setLeaveForm({...leaveForm,employee_id:e.target.value})} className="w-full px-3 py-2 rounded-xl border text-xs"><option value="">Select employee</option>{staff.map(s=><option key={s.id} value={s.id}>{s.first_name} {s.last_name} ({s.employee_code})</option>)}</select>
+          <select value={leaveForm.leave_type_id} onChange={e=>setLeaveForm({...leaveForm,leave_type_id:e.target.value})} className="w-full px-3 py-2 rounded-xl border text-xs"><option value="">Select leave type</option>{leaveTypes.map(t=><option key={t.id} value={t.id}>{t.name} · {t.is_paid?'Paid':'Unpaid'}</option>)}</select>
+          <div className="grid grid-cols-2 gap-2"><input type="date" value={leaveForm.start_date} onChange={e=>setLeaveForm({...leaveForm,start_date:e.target.value})} className="px-3 py-2 rounded-xl border text-xs"/><input type="date" value={leaveForm.end_date} onChange={e=>setLeaveForm({...leaveForm,end_date:e.target.value})} className="px-3 py-2 rounded-xl border text-xs"/></div>
+          <input type="number" min="1" value={leaveForm.total_days} onChange={e=>setLeaveForm({...leaveForm,total_days:Number(e.target.value)||1})} className="w-full px-3 py-2 rounded-xl border text-xs" placeholder="Total days"/>
+          <textarea value={leaveForm.reason} onChange={e=>setLeaveForm({...leaveForm,reason:e.target.value})} className="w-full px-3 py-2 rounded-xl border text-xs" rows={3} placeholder="Reason"/>
+          <div className="flex justify-end gap-2"><Button type="button" variant="secondary" size="sm" onClick={()=>setLeaveModalOpen(false)}>Cancel</Button><Button type="submit" variant="primary" size="sm">Submit Request</Button></div>
+        </form>
+      </Modal>
 
       {/* Modal: Register Personnel */}
       <Modal

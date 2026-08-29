@@ -186,6 +186,7 @@ export interface GoodsReceiveNote {
   warehouseId: string;
   warehouse: { id: string; name: string; code: string };
   supplierId: string;
+  supplier_id?: string;
   supplier: { id: string; name: string; code: string };
   poId?: string;
   po?: { id: string; poNumber: string; totalAmount?: number | string };

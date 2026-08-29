@@ -1295,7 +1295,7 @@ def get_stock_transfer(
     transfer = db.query(StockTransfer).filter(
         StockTransfer.id == transfer_id,
         StockTransfer.company_id == current_user.company_id,
-    ).first()
+    ).with_for_update().first()
     if not transfer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock transfer not found")
 
@@ -1346,7 +1346,7 @@ def update_stock_transfer_status(
     transfer = db.query(StockTransfer).filter(
         StockTransfer.id == transfer_id,
         StockTransfer.company_id == current_user.company_id,
-    ).first()
+    ).with_for_update().first()
     if not transfer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock transfer not found")
 
@@ -1378,7 +1378,15 @@ def update_stock_transfer_status(
                 db.add(from_bal)
                 db.flush()
 
-            new_from_qty = Decimal(str(from_bal.quantity)) - qty
+            available_from = Decimal(str(from_bal.quantity))
+            if qty <= Decimal("0"):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transfer quantity must be greater than zero")
+            if available_from < qty:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Insufficient stock for transfer: Available {available_from}, Requested {qty}, Shortage {qty - available_from}",
+                )
+            new_from_qty = available_from - qty
             from_bal.quantity = new_from_qty
 
             # Source ledger: TRANSFER_OUT

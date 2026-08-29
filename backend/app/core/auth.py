@@ -18,8 +18,11 @@ def get_current_user(
 ) -> User:
     actual_token = token
     if not actual_token and auth_header:
-        if auth_header.startswith("Bearer ") or auth_header.startswith("bearer "):
-            actual_token = auth_header.split(" ")[1]
+        if auth_header.lower().startswith("bearer "):
+            parts = auth_header.split(None, 1)
+            if len(parts) != 2 or not parts[1].strip():
+                raise UnauthorizedException("Invalid Authorization header")
+            actual_token = parts[1].strip()
 
     if not actual_token:
         raise UnauthorizedException("Authentication credentials were not provided")
@@ -71,14 +74,10 @@ def require_outlet_scope(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> str:
-    # If no outlet header is provided, use user's default branch or company HQ
-    if not outlet_id:
-        if current_user.branches:
-            default_branch = next((b for b in current_user.branches if b.is_default), current_user.branches[0])
-            return default_branch.branch_id
-        # Fallback to any active branch
-        first_branch = db.query(Branch.id).filter(Branch.is_active == True).first()
-        return first_branch[0] if first_branch else "HQ"
+    # Never silently infer an outlet for a scoped request. Missing scope must fail closed.
+    if not outlet_id or not outlet_id.strip():
+        raise ForbiddenException("X-Outlet-Id header is required for outlet-scoped requests")
+    outlet_id = outlet_id.strip()
 
     # Verify if user has access to requested outlet
     if current_user.role and current_user.role.name in ["SUPER_ADMIN", "OWNER", "HQ_ADMIN", "CENTRAL_PURCHASE_MANAGER"]:

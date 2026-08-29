@@ -12,6 +12,7 @@ import {
   StockAdjustmentInput,
   StockAdjustmentResult,
   InventoryValuation,
+  StockLedgerEntry,
 } from '../types/inventory.types';
 
 export const inventoryApi = {
@@ -82,8 +83,8 @@ export const inventoryApi = {
   },
 
   // Stock Ledger & Timeline
-  getStockLedger: async (params?: { warehouse_id?: string; item_id?: string; movement_type?: string; limit?: number }) => {
-    const res = await apiClient.get('/inventory/stock-ledger', { params });
+  getStockLedger: async (params?: { warehouse_id?: string; item_id?: string; movement_type?: string; limit?: number }): Promise<StockLedgerEntry[]> => {
+    const res = await apiClient.get<StockLedgerEntry[]>('/inventory/stock-ledger', { params });
     return res.data;
   },
   getMovementTimeline: async (params?: { item_id?: string; warehouse_id?: string; start_date?: string; end_date?: string; movement_type?: string; limit?: number }) => {
@@ -94,6 +95,12 @@ export const inventoryApi = {
   // Direct Stock Adjustments
   adjustStock: async (payload: { warehouse_id: string; item_id: string; change_qty: number; reason_code: string; batch_number?: string; expiry_date?: string; unit_cost?: number; notes?: string; is_emergency_override?: boolean; override_reason?: string }) => {
     const res = await apiClient.post('/inventory/stock-adjustments', payload);
+    return res.data;
+  },
+
+
+  getReorderRecommendations: async (params?: { warehouse_id?: string }) => {
+    const res = await apiClient.get('/inventory/reorder-recommendations', { params });
     return res.data;
   },
 

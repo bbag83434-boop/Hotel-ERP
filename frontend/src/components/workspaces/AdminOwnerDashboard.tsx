@@ -7,9 +7,7 @@ import { usePWA } from '@/context/PWAContext';
 import { reportsApi } from '@/api/reports';
 import { apiClient } from '@/api/client';
 import { procurementApi } from '@/api/procurement';
-import { organizationApi } from '@/api/organization';
 import { WorkspaceId } from '@/components/common/Sidebar';
-import { Branch, Warehouse, Department, Staff } from '@/types/organization.types';
 import {
   Building2,
   TrendingUp,
@@ -31,13 +29,6 @@ import {
   Bot,
   Wallet,
   X,
-  Search,
-  Filter,
-  MapPin,
-  Mail,
-  Phone,
-  Warehouse as WarehouseIcon,
-  Briefcase,
 } from 'lucide-react';
 import { StatCard, Badge, Button, EmptyState, AlertBanner, FeedbackState } from '@/components/ui';
 import { LowStockAlertItem, InventoryValuationResponse, ExecutiveDashboardResponse } from '@/types/reports.types';
@@ -98,7 +89,7 @@ const formatQty = (val?: number | null) => {
   return Number(val).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 };
 export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setActiveWorkspace }) => {
-  const { outlets, activeOutlet, setActiveOutlet } = useOutlet();
+  const { outlets, activeOutlet } = useOutlet();
   const { user } = useAuth();
   const { isOnline } = usePWA();
 
@@ -113,14 +104,6 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-
-  // All Outlets Overview state
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [staffList, setStaffList] = useState<Staff[]>([]);
-  const [branchSearch, setBranchSearch] = useState<string>('');
-  const [branchTypeFilter, setBranchTypeFilter] = useState<string>('ALL');
 
   // --- Existing AI functionality (reused, not modified) ---
   const [aiRecs, setAiRecs] = useState<AIRecommendation[]>([]);
@@ -145,22 +128,14 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
     setError(null);
     const sellingOutlets = outlets.filter((o) => o.type !== 'HEAD_OFFICE');
 
-    // Business Overview: today's sales + purchase & branches/topology
+    // Business Overview: today's sales + purchase (executive summary) & consolidated stock value
     try {
-      const [execRes, invRes, brRes, whRes, deptRes, stRes] = await Promise.all([
+      const [execRes, invRes] = await Promise.all([
         reportsApi.getExecutiveSummary({ startDate: todayStart(), endDate: todayEnd() }),
         reportsApi.getInventoryValuation(),
-        organizationApi.getBranches().catch(() => []),
-        organizationApi.getWarehouses().catch(() => []),
-        organizationApi.getDepartments().catch(() => []),
-        organizationApi.getStaff().catch(() => []),
       ]);
       setToday(execRes);
       setInventory(invRes);
-      setBranches(brRes || []);
-      setWarehouses(whRes || []);
-      setDepartments(deptRes || []);
-      setStaffList(stRes || []);
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Business overview could not be loaded.');
       setToday(null);
@@ -195,17 +170,6 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
     setOutletRows(rows);
     setBusinessName(capturedCompany);
   }, [outlets]);
-
-  const handleScopeToBranch = (b: Branch) => {
-    setActiveOutlet({
-      id: b.id,
-      code: b.code,
-      name: b.name,
-      type: b.type as any,
-      isActive: b.is_active,
-    });
-    setActiveWorkspace('dashboard');
-  };
 
 // --- Existing AI stock recommendations (reused from AIAssistantWorkspace pattern) ---
   const fetchAiRecommendations = useCallback(async () => {
@@ -309,36 +273,8 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
     { id: 'users' as WorkspaceId, label: 'Settings', desc: 'User & admin mgmt', icon: Settings, color: 'bg-gray-100 text-[#707070]' },
   ];
 
-  const branchTypeOptions = [
-    { value: 'ALL', label: 'All Branch Types' },
-    { value: 'HEAD_OFFICE', label: 'Head Office' },
-    { value: 'CENTRAL_STORE', label: 'Central Store' },
-    { value: 'RESTAURANT', label: 'Restaurant / Outlet' },
-    { value: 'HOTEL', label: 'Hotel' },
-    { value: 'DESSERT_KITCHEN', label: 'Dessert Kitchen' },
-    { value: 'HYBRID', label: 'Hybrid' },
-  ];
-
-  const filteredOverviewBranches = useMemo(() => {
-    return branches.filter((b) => {
-      const q = branchSearch.trim().toLowerCase();
-      const matchesSearch =
-        !q ||
-        b.name.toLowerCase().includes(q) ||
-        b.code.toLowerCase().includes(q) ||
-        (b.address && b.address.toLowerCase().includes(q));
-
-      const matchesType =
-        branchTypeFilter === 'ALL' ||
-        b.type === branchTypeFilter ||
-        (branchTypeFilter === 'RESTAURANT' && (b.type === 'RESTAURANT' || b.type === 'RESTAURANT_OUTLET'));
-
-      return matchesSearch && matchesType;
-    });
-  }, [branches, branchSearch, branchTypeFilter]);
-
   const displayBusinessName = businessName || 'Multi-Outlet Business';
-  return (
+return (
     <div className="space-y-4 sm:space-y-6 w-full min-w-0">
       {/* ===== 1. HEADER ===== */}
       <div className="relative overflow-hidden p-4 sm:p-6 bg-gradient-to-br from-white via-white/95 to-[#FAF8F5] border border-[rgba(45,45,45,0.08)] shadow-xs rounded-2xl sm:rounded-3xl">
@@ -444,190 +380,7 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
               </span>
             </div>
           </div>
-
-          {/* ===== ALL OUTLETS OVERVIEW ===== */}
-          <div className="space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xs sm:text-sm font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
-                    <Building2 className="w-4 h-4 text-[#C79A3B]" /> All Outlets Overview
-                  </h2>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30">
-                    {branches.length} Outlets
-                  </span>
-                </div>
-                <p className="text-[11px] text-[#707070] mt-0.5">
-                  Live cross-branch topology, operational status, and staff counts at a glance.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Search Box */}
-                <div className="relative min-w-[170px] sm:w-56">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
-                  <input
-                    type="text"
-                    placeholder="Search name / code..."
-                    value={branchSearch}
-                    onChange={(e) => setBranchSearch(e.target.value)}
-                    className="w-full pl-8 pr-7 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C] placeholder-[#A0A0A0]"
-                  />
-                  {branchSearch && (
-                    <button
-                      onClick={() => setBranchSearch('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Type Filter */}
-                <div className="relative">
-                  <select
-                    value={branchTypeFilter}
-                    onChange={(e) => setBranchTypeFilter(e.target.value)}
-                    className="px-3 py-1.5 pr-7 text-xs font-semibold rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C] appearance-none cursor-pointer"
-                  >
-                    {branchTypeOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  <Filter className="w-3 h-3 text-[#707070] absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
-
-                <button
-                  onClick={() => setActiveWorkspace('organization')}
-                  className="text-[11px] font-bold text-[#B8862D] hover:text-[#9E7326] flex items-center gap-1 ml-1"
-                >
-                  Structure Master <ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-
-            {/* Outlets Grid */}
-            {filteredOverviewBranches.length === 0 ? (
-              <div className="py-8 text-center bg-white rounded-2xl border border-[rgba(45,45,45,0.08)]">
-                <Building2 className="w-6 h-6 text-[#C79A3B] mx-auto mb-2 opacity-60" />
-                <p className="text-xs font-bold text-[#1C1C1C]">No outlets match your search</p>
-                <p className="text-[11px] text-[#707070] mt-0.5">Try clearing your search query or filter</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 max-h-[560px] overflow-y-auto pr-1">
-                {filteredOverviewBranches.map((b) => {
-                  const isCurrent = b.id === activeOutlet.id;
-                  const branchWarehouses = warehouses.filter((w) => w.branch_id === b.id);
-                  const branchDepts = departments.filter((d) => d.branch_id === b.id);
-                  const branchStaff = staffList.filter((s) => s.branch_id === b.id);
-                  const perfRow = outletRows.find((r) => r.outletId === b.id);
-
-                  return (
-                    <div
-                      key={b.id}
-                      className={`p-4 sm:p-5 rounded-2xl border transition-all space-y-3 ${
-                        isCurrent
-                          ? 'bg-[#FAF8F5] border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-                          : 'bg-white border-[rgba(45,45,45,0.08)] shadow-xs hover:border-[#C79A3B]/40 hover:shadow-sm'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-xs sm:text-sm text-[#1C1C1C] font-['Outfit'] truncate">
-                              {b.name}
-                            </h4>
-                            {isCurrent && (
-                              <span className="text-[9px] bg-[#F1E4C5] text-[#B8862D] font-extrabold px-1.5 py-0.5 rounded border border-[#B8862D]/30 shrink-0">
-                                ACTIVE
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] font-mono text-[#B8862D] mt-0.5">[{b.code}]</p>
-                        </div>
-                        <span
-                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
-                            b.type === 'HEAD_OFFICE' || b.type === 'HYBRID'
-                              ? 'bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30'
-                              : b.type === 'CENTRAL_STORE'
-                              ? 'bg-[#3978B8]/10 text-[#3978B8] border border-[#3978B8]/25'
-                              : b.type === 'DESSERT_KITCHEN'
-                              ? 'bg-[#D99625]/10 text-[#D99625] border border-[#D99625]/25'
-                              : 'bg-[#2E8B57]/10 text-[#2E8B57] border border-[#2E8B57]/25'
-                          }`}
-                        >
-                          {b.type.replace('_', ' ')}
-                        </span>
-                      </div>
-
-                      {/* Live Counts & Structural Metrics */}
-                      <div className="grid grid-cols-3 gap-2 py-2 px-3 rounded-xl bg-[#FAF8F5]/80 border border-[rgba(45,45,45,0.06)] text-center text-xs">
-                        <div>
-                          <span className="text-[10px] text-[#707070] block">Stores</span>
-                          <span className="font-bold text-[#1C1C1C]">{branchWarehouses.length}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-[#707070] block">Depts</span>
-                          <span className="font-bold text-[#1C1C1C]">{branchDepts.length}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-[#707070] block">Staff</span>
-                          <span className="font-bold text-[#2E8B57]">{branchStaff.length}</span>
-                        </div>
-                      </div>
-
-                      {/* Live sales if available from reports */}
-                      {perfRow && (
-                        <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)]">
-                          <span className="text-[#707070]">Today's Sales:</span>
-                          <span className="font-bold text-[#1C1C1C]">{formatCurrency(perfRow.todaySales)}</span>
-                        </div>
-                      )}
-
-                      {/* Location & Contact Info */}
-                      <div className="space-y-1 text-[11px] text-[#707070]">
-                        {b.address && (
-                          <div className="flex items-center gap-1.5 truncate">
-                            <MapPin className="w-3 h-3 text-[#C79A3B] shrink-0" />
-                            <span className="truncate">{b.address}</span>
-                          </div>
-                        )}
-                        {b.phone && (
-                          <div className="flex items-center gap-1.5 truncate">
-                            <Phone className="w-3 h-3 text-[#707070] shrink-0" />
-                            <span className="truncate">{b.phone}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Card Footer: Operational Status & Scope Action */}
-                      <div className="pt-2.5 border-t border-[rgba(45,45,45,0.06)] flex items-center justify-between gap-2">
-                        <span className={`text-[10px] font-semibold flex items-center gap-1 ${b.is_active ? 'text-[#2E8B57]' : 'text-[#D9534F]'}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${b.is_active ? 'bg-[#2E8B57]' : 'bg-[#D9534F]'}`} />
-                          {b.is_active ? 'Operational' : 'Inactive'}
-                        </span>
-
-                        {!isCurrent ? (
-                          <button
-                            onClick={() => handleScopeToBranch(b)}
-                            className="px-3 py-1 rounded-lg bg-[#FAF8F5] hover:bg-[#F1E4C5] text-[11px] font-bold text-[#B8862D] border border-[#B8862D]/30 transition-all active:scale-95"
-                          >
-                            Scope Here
-                          </button>
-                        ) : (
-                          <span className="text-[10px] text-[#2E8B57] font-semibold">Active Scope</span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* ===== 3. OUTLET PERFORMANCE ===== */}
+{/* ===== 3. OUTLET PERFORMANCE ===== */}
           <div className="space-y-2.5 sm:space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-xs sm:text-sm font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">

@@ -6,8 +6,10 @@ import { usePWA } from '@/context/PWAContext';
 import { useAuth } from '@/context/AuthContext';
 import {
   LayoutDashboard,
+  Bot,
   Building2,
   Boxes,
+  ShoppingBag,
   ShoppingCart,
   ChefHat,
   Truck,
@@ -19,16 +21,29 @@ import {
   Sparkles,
   ChevronRight,
   ShieldCheck,
+  CheckSquare,
+  Wrench,
+  Beer,
+  BookOpen,
+  Hotel,
+  Zap,
   UserCog,
-  SlidersHorizontal,
+  UserRoundSearch,
   X,
+  Banknote,
+  MessageCircle,
+  FileText,
 } from 'lucide-react';
 
 export type WorkspaceId =
   | 'dashboard'
+  | 'crm'
   | 'users'
   | 'organization'
   | 'inventory'
+  | 'orders'
+  | 'cashierShift'
+  | 'kds'
   | 'purchase'
   | 'production'
   | 'transfers'
@@ -37,7 +52,25 @@ export type WorkspaceId =
   | 'closing'
   | 'reports'
   | 'telemetry'
-  | 'assistant';
+  | 'assistant'
+  | 'aiAgent'
+  | 'automation'
+  | 'security'
+  | 'maintenance'
+  | 'beverage'
+  | 'finance'
+  | 'financeControl'
+  | 'hotel'
+  | 'approvals'
+  | 'multiOutlet'
+  | 'scheduledReports'
+  | 'supplierPerformance'
+  | 'aiProvider'
+  | 'aiTools'
+  | 'telegramNotifications'
+  | 'aiDocuments'
+  | 'aiWastageSales'
+  | 'whatsappBusiness';
 
 interface SidebarProps {
   activeWorkspace: WorkspaceId;
@@ -52,7 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen = false,
   setMobileOpen,
 }) => {
-  const { activeOutlet, isHeadOffice, isCentralStore, canInitiateTransfers } = useOutlet();
+  const { activeOutlet, isHeadOffice } = useOutlet();
   const { isOnline } = usePWA();
   const { user } = useAuth();
 
@@ -61,48 +94,88 @@ export const Sidebar: React.FC<SidebarProps> = ({
     userRole.toUpperCase()
   );
 
-  const navGroups = isHeadOffice
-    ? [
-        {
-          label: 'Core Operations',
-          items: [
-            { id: 'dashboard' as WorkspaceId, label: 'Executive Dashboard', icon: LayoutDashboard, badge: null },
-            { id: 'assistant' as WorkspaceId, label: 'AI Assistant', icon: Sparkles, badge: 'Smart' },
-            ...(isAdmin
-              ? [{ id: 'users' as WorkspaceId, label: 'User & Admin Mgmt', icon: UserCog, badge: 'RBAC' }]
-              : []),
-            { id: 'organization' as WorkspaceId, label: 'Outlets & Master Structure', icon: Building2, badge: null },
-            { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
-            { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },
-            { id: 'production' as WorkspaceId, label: 'Recipes & Production', icon: ChefHat, badge: null },
-            { id: 'transfers' as WorkspaceId, label: 'Store Transfers', icon: Truck, badge: null },
-            { id: 'wastage' as WorkspaceId, label: 'Wastage Control', icon: AlertTriangle, badge: null },
-          ],
-        },
-        {
-          label: 'People & Finance',
-          items: [
-            { id: 'hr' as WorkspaceId, label: 'HR, Staff & Payroll', icon: Users, badge: null },
-            { id: 'closing' as WorkspaceId, label: 'Bi-Monthly Closing', icon: CalendarDays, badge: '1st–15th' },
-            { id: 'reports' as WorkspaceId, label: 'Reports & Cost Control', icon: BarChart3, badge: null },
-            { id: 'telemetry' as WorkspaceId, label: 'Live Telemetry', icon: Cpu, badge: isOnline ? 'Online' : 'Offline' },
-          ],
-        },
-      ]
-    : [
-        {
-          label: isCentralStore ? 'Main Branch Operations' : 'Outlet Operations',
-          items: [
-            { id: 'dashboard' as WorkspaceId, label: 'Dashboard', icon: LayoutDashboard, badge: null },
-            { id: 'assistant' as WorkspaceId, label: 'AI Assistant', icon: Sparkles, badge: 'Smart' },
-            { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'Direct GRN' },
-            { id: 'wastage' as WorkspaceId, label: 'Wastage Control', icon: AlertTriangle, badge: null },
-            ...(canInitiateTransfers
-              ? [{ id: 'transfers' as WorkspaceId, label: 'Store Transfers', icon: Truck, badge: null }]
-              : []),
-          ],
-        },
-      ];
+  const navGroups = [
+    {
+      label: 'Core Operations',
+      defaultOpen: true,
+      items: [
+        { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
+        { id: 'orders' as WorkspaceId, label: 'Orders & POS', icon: ShoppingBag, badge: '3 Sources' },
+        { id: 'cashierShift' as WorkspaceId, label: 'Cashier Shift & Reconcile', icon: Banknote, badge: 'Shift' },
+        { id: 'kds' as WorkspaceId, label: 'Kitchen Display', icon: ChefHat, badge: 'Live' },
+        { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'PO' },
+        { id: 'production' as WorkspaceId, label: 'Recipes & Production', icon: ChefHat, badge: null },
+        { id: 'transfers' as WorkspaceId, label: 'Store Transfers', icon: Truck, badge: null },
+        { id: 'wastage' as WorkspaceId, label: 'Wastage Control', icon: AlertTriangle, badge: null },
+        { id: 'crm' as WorkspaceId, label: 'Customer & CRM', icon: UserRoundSearch, badge: 'CRM' },
+        { id: 'maintenance' as WorkspaceId, label: 'Maintenance & Assets', icon: Wrench, badge: null },
+        { id: 'beverage' as WorkspaceId, label: 'Beverage Control', icon: Beer, badge: 'Controlled' },
+        { id: 'hotel' as WorkspaceId, label: 'Hotel Operations', icon: Hotel, badge: 'Rooms' },
+        { id: 'hr' as WorkspaceId, label: 'HR, Staff & Payroll', icon: Users, badge: null },
+      ],
+    },
+    {
+      label: 'Management',
+      defaultOpen: true,
+      items: [
+        { id: 'dashboard' as WorkspaceId, label: 'Executive Dashboard', icon: LayoutDashboard, badge: null },
+        ...(isHeadOffice && isAdmin ? [{ id: 'multiOutlet' as WorkspaceId, label: 'Multi-Outlet Intelligence', icon: BarChart3, badge: 'HQ' }] : []),
+        ...(isAdmin ? [{ id: 'supplierPerformance' as WorkspaceId, label: 'Supplier Performance', icon: Truck, badge: 'Procurement' }] : []),
+        ...(isAdmin ? [{ id: 'approvals' as WorkspaceId, label: 'Approval Center', icon: CheckSquare, badge: 'Pending' }] : []),
+        { id: 'organization' as WorkspaceId, label: 'Outlets & Master Structure', icon: Building2, badge: null },
+      ],
+    },
+    {
+      label: 'Finance & Reporting',
+      items: [
+        { id: 'finance' as WorkspaceId, label: 'Accounts & Finance', icon: BookOpen, badge: 'GL' },
+        { id: 'financeControl' as WorkspaceId, label: 'Expense & Reconciliation', icon: Banknote, badge: 'Control' },
+        { id: 'reports' as WorkspaceId, label: 'Reports & Cost Control', icon: BarChart3, badge: null },
+        ...(isAdmin ? [{ id: 'scheduledReports' as WorkspaceId, label: 'Scheduled Reports & Alerts', icon: CalendarDays, badge: 'Alerts' }] : []),
+        { id: 'closing' as WorkspaceId, label: 'Bi-Monthly Closing', icon: CalendarDays, badge: '1st–15th' },
+      ],
+    },
+    {
+      label: 'AI & Intelligence',
+      items: [
+        { id: 'assistant' as WorkspaceId, label: 'AI Assistant', icon: Sparkles, badge: 'Smart' },
+        { id: 'aiWastageSales' as WorkspaceId, label: 'AI Wastage & Sales', icon: BarChart3, badge: 'AI' },
+        { id: 'aiAgent' as WorkspaceId, label: 'Controlled AI Agent', icon: Bot, badge: 'Guarded' },
+        ...(isAdmin ? [{ id: 'aiProvider' as WorkspaceId, label: 'AI Provider Control', icon: Bot, badge: 'Admin' }, { id: 'aiTools' as WorkspaceId, label: 'AI Controlled Tools', icon: ShieldCheck, badge: 'Guarded' }] : []),
+        { id: 'aiDocuments' as WorkspaceId, label: 'AI Invoice Processing', icon: FileText, badge: 'AI' },
+      ],
+    },
+    {
+      label: 'Integrations & Automation',
+      items: [
+        ...(isAdmin ? [{ id: 'telegramNotifications' as WorkspaceId, label: 'Telegram', icon: MessageCircle, badge: 'Free' }, { id: 'whatsappBusiness' as WorkspaceId, label: 'WhatsApp Business', icon: MessageCircle, badge: 'Meta' }] : []),
+        { id: 'automation' as WorkspaceId, label: 'Automation Center', icon: Zap, badge: 'Live' },
+      ],
+    },
+    {
+      label: 'Security & System',
+      items: [
+        ...(isAdmin ? [{ id: 'users' as WorkspaceId, label: 'User & Admin Management', icon: UserCog, badge: 'RBAC' }] : []),
+        ...(isAdmin ? [{ id: 'security' as WorkspaceId, label: 'Security Center', icon: ShieldCheck, badge: 'Audit' }] : []),
+        { id: 'telemetry' as WorkspaceId, label: 'Live Telemetry', icon: Cpu, badge: isOnline ? 'Online' : 'Offline' },
+      ],
+    },
+  ];
+
+  const workspaceGroup = (id: WorkspaceId) => navGroups.find((group) => group.items.some((item) => item.id === id));
+  const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    navGroups.forEach((group) => { initial[group.label] = !!group.defaultOpen; });
+    return initial;
+  });
+
+  React.useEffect(() => {
+    const activeGroup = workspaceGroup(activeWorkspace);
+    if (activeGroup) {
+      setOpenGroups((current) => ({ ...current, [activeGroup.label]: true }));
+    }
+  }, [activeWorkspace]);
+
 
   const handleSelect = (id: WorkspaceId) => {
     setActiveWorkspace(id);
@@ -150,59 +223,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <p className="text-xs font-bold text-[#1C1C1C] truncate">{activeOutlet.name}</p>
         <div className="flex items-center gap-1 text-[10px] text-[#2E8B57] font-medium pt-0.5">
           <ShieldCheck className="w-3 h-3 text-[#C79A3B]" />
-          <span>{isHeadOffice ? 'Head Office Scope' : isCentralStore ? 'Main Branch (Central Store)' : 'Restricted Outlet'}</span>
+          <span>{isHeadOffice ? 'Head Office Scope' : 'Restricted Outlet'}</span>
         </div>
       </div>
 
       {/* Navigation Groups */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        {navGroups.map((group) => (
-          <div key={group.label} className="space-y-1">
-            <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-[#707070]">
-              {group.label}
-            </p>
-            <div className="space-y-0.5">
-              {group.items.map((item) => {
-                const Icon = item.icon;
-                const isActive = activeWorkspace === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => handleSelect(item.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all duration-150 active:scale-[0.98] ${
-                      isActive
-                        ? 'bg-[#F1E4C5] text-[#B8862D] font-bold shadow-sm border border-[#B8862D]/30'
-                        : 'text-[#505050] hover:text-[#1C1C1C] hover:bg-[#FAF8F5] border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Icon
-                        className={`w-4 h-4 ${
-                          isActive ? 'text-[#B8862D] stroke-[2.2]' : 'text-[#707070] stroke-[1.8]'
-                        }`}
-                      />
-                      <span>{item.label}</span>
-                    </div>
-
-                    {item.badge ? (
-                      <span
-                        className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+        {navGroups.map((group) => {
+          const isOpen = !!openGroups[group.label];
+          const hasActive = group.items.some((item) => item.id === activeWorkspace);
+          return (
+            <div key={group.label} className="space-y-1">
+              <button
+                type="button"
+                onClick={() => setOpenGroups((current) => ({ ...current, [group.label]: !current[group.label] }))}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-[#FAF8F5] transition-colors"
+                aria-expanded={isOpen}
+              >
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${hasActive ? 'text-[#B8862D]' : 'text-[#707070]'}`}>
+                  {group.label}
+                </span>
+                <ChevronRight className={`w-3.5 h-3.5 text-[#707070] transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+              </button>
+              {isOpen && (
+                <div className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = activeWorkspace === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleSelect(item.id)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all duration-150 active:scale-[0.98] ${
                           isActive
-                            ? 'bg-white text-[#B8862D] border border-[#B8862D]/30'
-                            : 'bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.08)]'
+                            ? 'bg-[#F1E4C5] text-[#B8862D] font-bold shadow-sm border border-[#B8862D]/30'
+                            : 'text-[#505050] hover:text-[#1C1C1C] hover:bg-[#FAF8F5] border border-transparent'
                         }`}
                       >
-                        {item.badge}
-                      </span>
-                    ) : isActive ? (
-                      <ChevronRight className="w-3.5 h-3.5 text-[#B8862D]" />
-                    ) : null}
-                  </button>
-                );
-              })}
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#B8862D] stroke-[2.2]' : 'text-[#707070] stroke-[1.8]'}`} />
+                          <span className="truncate">{item.label}</span>
+                        </div>
+                        {item.badge ? (
+                          <span className={`ml-2 shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white text-[#B8862D] border border-[#B8862D]/30' : 'bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.08)]'}`}>
+                            {item.badge}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Footer / System Meta */}

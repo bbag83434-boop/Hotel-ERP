@@ -48,6 +48,7 @@ from app.models.closing import (
     ClosingStatus,
 )
 from app.models.audit import AuditLog
+from app.models.billing import VendorBill, Payment, BillStatus
 from app.schemas.procurement import (
     SupplierCreate,
     SupplierUpdate,
@@ -911,6 +912,8 @@ def approve_purchase_request(
 
     if req.status not in [PRStatus.PENDING_APPROVAL, PRStatus.DRAFT]:
         raise BadRequestException(f"Cannot approve PR with status '{req.status.value}'.")
+    if req.requested_by_id == current_user.id:
+        raise ForbiddenException("A Purchase Request creator cannot approve their own request.")
 
     req.status = PRStatus.APPROVED
     req.approved_by_id = current_user.id
@@ -1189,6 +1192,7 @@ def consolidate_outlet_orders(
             discount_amount=Decimal("0.0000"),
             net_amount=total_amt,
             notes=payload.notes or f"Auto-consolidated order for outlets: {', '.join(s_data['participating_branches'])}",
+            created_by_id=current_user.id,
             allocations=json.dumps(full_allocation_payload),
             whatsapp_number=supplier.effective_whatsapp_number,
         )
@@ -1317,6 +1321,7 @@ def create_direct_purchase_order(
         discount_amount=discount_amount,
         net_amount=net_amount,
         notes=payload.notes,
+        created_by_id=current_user.id,
         whatsapp_number=supplier.effective_whatsapp_number,
     )
     db.add(po)
@@ -1441,6 +1446,8 @@ def approve_purchase_order(
 
     if po.status not in [POStatus.PENDING_APPROVAL, POStatus.DRAFT]:
         raise BadRequestException(f"Cannot approve order with status '{po.status.value}'. Must be PENDING_APPROVAL or DRAFT.")
+    if po.created_by_id and po.created_by_id == current_user.id:
+        raise ForbiddenException("A Purchase Order creator cannot approve their own order.")
 
     old_status = po.status.value
     po.status = POStatus.APPROVED
@@ -2989,6 +2996,122 @@ def reopen_outlet_closing(
 
 
 # ==============================================================================
+# PART 27 — Smart Inventory / Purchase Intelligence
+# ==============================================================================
+
+@router.get("/smart-inventory/intelligence")
+def get_smart_inventory_purchase_intelligence(
+    branch_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Part 27 read-only intelligence layer.
+
+    Uses deterministic stock/consumption/pending-inbound calculations and existing
+    SupplierItem mappings to produce purchase recommendations. No stock mutation,
+    PO creation, or approval is performed here.
+    """
+    check_user_outlet_access(current_user, branch_id, db)
+    company_id = current_user.company_id
+
+    # Reuse the existing deterministic engine so Part 27 does not create a
+    # duplicate calculation path.
+    items = calculate_outlet_smart_requirements(
+        db=db,
+        company_id=company_id,
+        branch_id=branch_id,
+        lead_time_days=1,
+        safety_buffer_percent=Decimal("10.00"),
+    )
+
+    # Existing supplier-item master is the source for purchase price, conversion,
+    # lead time and preferred-supplier information.
+    item_ids = [row["item_id"] for row in items]
+    supplier_rows = []
+    if item_ids:
+        supplier_rows = (
+            db.query(SupplierItem)
+            .filter(
+                SupplierItem.company_id == company_id,
+                SupplierItem.item_id.in_(item_ids),
+                SupplierItem.is_active == True,
+            )
+            .all()
+        )
+
+    supplier_map = {}
+    for row in supplier_rows:
+        supplier_map.setdefault(row.item_id, []).append(row)
+
+    actionable = []
+    for row in items:
+        if row["system_suggested_qty"] <= Decimal("0.0000") and row["priority"] == "LOW":
+            continue
+
+        candidates = supplier_map.get(row["item_id"], [])
+        preferred = next((x for x in candidates if x.is_preferred), None)
+        chosen = preferred or (sorted(candidates, key=lambda x: (x.purchase_price or Decimal("0"), x.lead_time_days or 999))[0] if candidates else None)
+
+        daily = row["daily_consumption"] or Decimal("0")
+        days_cover = None
+        if daily > Decimal("0"):
+            days_cover = round(row["current_stock"] / daily, 2)
+
+        purchase_price = chosen.purchase_price if chosen else row["cost_price"]
+        estimated_value = (row["system_suggested_qty"] or Decimal("0")) * (purchase_price or Decimal("0"))
+
+        actionable.append({
+            "item_id": row["item_id"],
+            "item_name": row["item_name"],
+            "item_code": row["item_code"],
+            "unit_symbol": row["unit_symbol"],
+            "current_stock": row["current_stock"],
+            "min_stock": row["min_stock"],
+            "target_stock": row["target_stock"],
+            "pending_incoming": row["pending_incoming"],
+            "daily_consumption": row["daily_consumption"],
+            "days_of_cover": days_cover,
+            "short_qty": row["short_qty"],
+            "recommended_order_qty": row["system_suggested_qty"],
+            "priority": row["priority"],
+            "supplier_id": chosen.supplier_id if chosen else row["supplier_id"],
+            "supplier_name": chosen.supplier.name if chosen and chosen.supplier else row["supplier_name"],
+            "supplier_price": purchase_price or Decimal("0"),
+            "supplier_lead_time_days": chosen.lead_time_days if chosen else None,
+            "supplier_is_preferred": bool(chosen.is_preferred) if chosen else False,
+            "purchase_unit_id": chosen.purchase_unit_id if chosen else None,
+            "conversion_rate": chosen.conversion_rate if chosen else Decimal("1"),
+            "estimated_purchase_value": round(estimated_value, 4),
+            "reason": row["reason"],
+        })
+
+    priority_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    actionable.sort(key=lambda x: (priority_order.get(x["priority"], 9), -float(x["recommended_order_qty"])))
+
+    return {
+        "success": True,
+        "branch_id": branch_id,
+        "generated_at": datetime.utcnow().isoformat(),
+        "summary": {
+            "monitored_items": len(items),
+            "actionable_items": len(actionable),
+            "critical_items": sum(1 for x in actionable if x["priority"] == "CRITICAL"),
+            "high_priority_items": sum(1 for x in actionable if x["priority"] == "HIGH"),
+            "medium_priority_items": sum(1 for x in actionable if x["priority"] == "MEDIUM"),
+            "estimated_purchase_value": round(sum((x["estimated_purchase_value"] for x in actionable), Decimal("0")), 4),
+        },
+        "recommendations": actionable,
+        "safety": {
+            "read_only": True,
+            "no_stock_mutation": True,
+            "no_po_creation": True,
+            "requires_existing_purchase_approval_workflow": True,
+        },
+    }
+
+
+# ==============================================================================
 # Outlet Smart AI Requirement Calculation Engine & Endpoints
 # ==============================================================================
 
@@ -3927,3 +4050,84 @@ def process_scheduled_smart_requirements(
         "message": f"Processed {len(processed)} outlet schedule(s), skipped {len(skipped)} already up-to-date."
     }
 
+
+
+# ==============================================================================
+# Part 22 — Supplier Performance & Procurement Intelligence
+# ===============================================================================
+
+@router.get('/supplier-performance')
+def supplier_performance(
+    days: int = Query(90, ge=1, le=3650),
+    supplier_id: Optional[str] = Query(None),
+    branch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission('procurement:read')),
+):
+    """Live supplier KPIs derived only from existing PO/GRN/Bill/Payment records."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    q = db.query(Supplier).filter(Supplier.is_active.is_(True))
+    if current_user.company_id:
+        q = q.filter(Supplier.company_id == current_user.company_id)
+    if supplier_id:
+        q = q.filter(Supplier.id == supplier_id)
+    suppliers = q.order_by(Supplier.name.asc()).all()
+
+    rows = []
+    for supplier in suppliers:
+        po_q = db.query(PurchaseOrder).filter(PurchaseOrder.supplier_id == supplier.id, PurchaseOrder.order_date >= cutoff)
+        if current_user.company_id:
+            po_q = po_q.filter(PurchaseOrder.company_id == current_user.company_id)
+        if branch_id:
+            po_q = po_q.filter(PurchaseOrder.branch_id == branch_id)
+        pos = po_q.all()
+        valid_pos = [po for po in pos if str(po.status) not in {POStatus.CANCELLED.value, POStatus.REJECTED.value, str(POStatus.CANCELLED), str(POStatus.REJECTED)}]
+
+        ordered = Decimal('0'); received = Decimal('0'); rejected = Decimal('0'); damaged = Decimal('0')
+        on_time = 0; delivery_checked = 0; delivery_days = []
+        for po in valid_pos:
+            for item in po.items:
+                ordered += Decimal(str(item.approved_qty if item.approved_qty is not None else item.ordered_qty or 0))
+                received += Decimal(str(item.received_qty or 0))
+            grns = [g for g in po.grns if str(g.status) not in {GRNStatus.REJECTED.value, str(GRNStatus.REJECTED)}]
+            if po.expected_delivery_date and grns:
+                first = min(grns, key=lambda g: g.receive_date or datetime.max)
+                if first.receive_date:
+                    delivery_checked += 1
+                    delta = (first.receive_date - po.expected_delivery_date).total_seconds() / 86400
+                    delivery_days.append(delta)
+                    if delta <= 0: on_time += 1
+                for grn in grns:
+                    for gi in grn.items:
+                        rejected += Decimal(str(gi.rejected_qty or 0))
+                        damaged += Decimal(str(gi.damaged_qty or 0))
+
+        bills = db.query(VendorBill).filter(VendorBill.supplier_id == supplier.id, VendorBill.invoice_date >= cutoff)
+        if current_user.company_id:
+            bills = bills.filter(VendorBill.company_id == current_user.company_id)
+        bills = bills.all()
+        bill_net = sum((Decimal(str(b.net_amount or 0)) for b in bills if b.status != BillStatus.CANCELLED), Decimal('0'))
+        bill_ids = {b.id for b in bills}
+        payments = db.query(Payment).filter(Payment.supplier_id == supplier.id, Payment.status.in_(['POSTED','PAID']), Payment.payment_date >= cutoff).all()
+        paid = sum((Decimal(str(p.amount or 0)) for p in payments if getattr(p, 'bill_id', None) in bill_ids), Decimal('0'))
+
+        spend = sum((Decimal(str(po.grand_total or po.net_amount or po.total_amount or 0)) for po in valid_pos), Decimal('0'))
+        fulfillment = (received / ordered * 100) if ordered > 0 else Decimal('0')
+        quality_den = received + rejected + damaged
+        quality_reject = ((rejected + damaged) / quality_den * 100) if quality_den > 0 else Decimal('0')
+        on_time_pct = (Decimal(on_time) / Decimal(delivery_checked) * 100) if delivery_checked else Decimal('0')
+        avg_delay = (sum(delivery_days) / len(delivery_days)) if delivery_days else 0.0
+        rating = max(0.0, min(100.0, float(on_time_pct) * 0.4 + float(fulfillment) * 0.4 + max(0.0, 20.0 - float(quality_reject) * 2)))
+
+        rows.append({
+            'supplier_id': supplier.id, 'supplier_name': supplier.name, 'supplier_code': supplier.code,
+            'po_count': len(valid_pos), 'purchase_spend': float(spend), 'ordered_qty': float(ordered),
+            'received_qty': float(received), 'fulfillment_percent': round(float(fulfillment), 2),
+            'on_time_delivery_percent': round(float(on_time_pct), 2), 'delivery_checked': delivery_checked,
+            'average_delivery_delay_days': round(avg_delay, 2), 'rejected_qty': float(rejected),
+            'damaged_qty': float(damaged), 'quality_issue_percent': round(float(quality_reject), 2),
+            'bill_count': len(bills), 'billed_amount': float(bill_net), 'paid_amount': float(paid),
+            'outstanding_amount': float(max(Decimal('0'), bill_net - paid)), 'rating': round(rating, 1),
+        })
+    rows.sort(key=lambda x: (-x['rating'], -x['purchase_spend'], x['supplier_name']))
+    return {'days': days, 'supplier_count': len(rows), 'suppliers': rows}

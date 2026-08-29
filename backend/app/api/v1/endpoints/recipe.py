@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.organization import Warehouse, Branch
 from app.models.inventory import Item, Unit, StockBalance, StockBatch, StockLedger, ItemType
 from app.models.recipe import Recipe, RecipeItem, ProductionOrder, ProductionConsumption, ProductionStatus
+from app.services.unit_conversion import convert_quantity
 from app.schemas.recipe import (
     RecipeCreate,
     RecipeUpdate,
@@ -229,12 +230,21 @@ def create_recipe(
     # Add ingredients
     for ing in recipe_in.ingredients:
         raw = db.query(Item).filter(Item.id == ing.raw_item_id).first()
-        cost_contrib = Decimal(str(ing.quantity)) * Decimal(str(raw.cost_price or 0))
+        net_qty = Decimal(str(ing.quantity))
+        waste_pct = Decimal(str(ing.waste_percentage or 0))
+        usable_yield = Decimal(str(ing.usable_yield or 100))
+        gross_qty = Decimal(str(ing.gross_quantity)) if ing.gross_quantity is not None else (
+            net_qty / (Decimal("1") - waste_pct / Decimal("100")) if waste_pct < Decimal("100") else net_qty
+        )
+        cost_contrib = gross_qty * Decimal(str(raw.cost_price or 0))
         rec_item = RecipeItem(
             recipe_id=new_recipe.id,
             raw_item_id=ing.raw_item_id,
             unit_id=ing.unit_id or raw.unit_id,
-            quantity=Decimal(str(ing.quantity)),
+            quantity=net_qty,
+            gross_quantity=gross_qty,
+            usable_yield=usable_yield,
+            waste_percentage=waste_pct,
             cost_contribution=cost_contrib,
             notes=ing.notes.strip() if ing.notes else None,
         )
@@ -311,12 +321,21 @@ def update_recipe(
             ).first()
             if not raw:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingredient '{ing.raw_item_id}' not found")
-            cost_contrib = Decimal(str(ing.quantity)) * Decimal(str(raw.cost_price or 0))
+            net_qty = Decimal(str(ing.quantity))
+            waste_pct = Decimal(str(ing.waste_percentage or 0))
+            usable_yield = Decimal(str(ing.usable_yield or 100))
+            gross_qty = Decimal(str(ing.gross_quantity)) if ing.gross_quantity is not None else (
+                net_qty / (Decimal("1") - waste_pct / Decimal("100")) if waste_pct < Decimal("100") else net_qty
+            )
+            cost_contrib = gross_qty * Decimal(str(raw.cost_price or 0))
             rec_item = RecipeItem(
                 recipe_id=recipe.id,
                 raw_item_id=ing.raw_item_id,
                 unit_id=ing.unit_id or raw.unit_id,
-                quantity=Decimal(str(ing.quantity)),
+                quantity=net_qty,
+                gross_quantity=gross_qty,
+                usable_yield=usable_yield,
+                waste_percentage=waste_pct,
                 cost_contribution=cost_contrib,
                 notes=ing.notes.strip() if ing.notes else None,
             )
@@ -825,10 +844,17 @@ def execute_production_order(
     shortages = []
     consumptions_to_process = []
     for ing in recipe.ingredients:
-        std_req = Decimal(str(ing.quantity)) * multiplier
-        act_req = custom_map.get(ing.raw_item_id, std_req)
-
+        std_recipe_req = Decimal(str(ing.quantity)) * multiplier
         raw = db.query(Item).filter(Item.id == ing.raw_item_id).first()
+        if not raw:
+            raise HTTPException(status_code=400, detail=f"Raw item missing: {ing.raw_item_id}")
+        try:
+            std_req = convert_quantity(db, current_user.company_id, std_recipe_req, ing.unit_id, raw.unit_id)
+            custom_req = custom_map.get(ing.raw_item_id)
+            act_req = convert_quantity(db, current_user.company_id, custom_req, ing.unit_id, raw.unit_id) if custom_req is not None else std_req
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         bal = db.query(StockBalance).filter(
             StockBalance.warehouse_id == exec_in.kitchen_warehouse_id,
             StockBalance.item_id == ing.raw_item_id,

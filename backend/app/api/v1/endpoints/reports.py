@@ -24,6 +24,7 @@ from app.models.recipe import Recipe, ProductionOrder
 from app.models.wastage import WastageEntry, WastageItem, WastageStatus
 from app.models.closing import OutletClosingRecord, FoodCostCalculation
 from app.models.report import ReportSnapshot, ReportSchedule, ReportType
+from app.models.billing import VendorBill, Payment, BillStatus
 from app.models.audit import AuditLog
 from app.schemas.reports import (
     ExecutiveDashboardResponse,
@@ -40,6 +41,8 @@ from app.schemas.reports import (
     WastageSummaryReportResponse,
     ProcurementSummaryResponse,
     SupplierSpendMetric,
+    VendorReportMetric,
+    VendorReportResponse,
     ReportExportRequest,
     ReportExportResponse,
     ReportSnapshotCreate,
@@ -320,22 +323,28 @@ def get_sales_summary(
     if scoped_branches is not None:
         order_filter.append(RestaurantOrder.branch_id.in_(scoped_branches))
 
-    orders = db.query(RestaurantOrder).filter(*order_filter).all()
-
-    total_orders = len(orders)
-    total_guests = sum(o.guest_count for o in orders)
-    gross_sales = sum(Decimal(str(o.total_amount)) for o in orders)
-    net_sales = sum(Decimal(str(o.sub_total)) for o in orders)
-    total_tax = sum(Decimal(str(o.tax_amount)) for o in orders)
-    total_discount = sum(Decimal(str(o.discount_amount)) for o in orders)
+    # Aggregate header metrics in SQL; never materialize the full order range in Python.
+    totals = db.query(
+        func.count(RestaurantOrder.id).label("order_count"),
+        func.coalesce(func.sum(RestaurantOrder.guest_count), 0).label("guest_count"),
+        func.coalesce(func.sum(RestaurantOrder.total_amount), 0).label("gross_sales"),
+        func.coalesce(func.sum(RestaurantOrder.sub_total), 0).label("net_sales"),
+        func.coalesce(func.sum(RestaurantOrder.tax_amount), 0).label("tax"),
+        func.coalesce(func.sum(RestaurantOrder.discount_amount), 0).label("discount"),
+    ).filter(*order_filter).one()
+    total_orders = int(totals.order_count or 0)
+    total_guests = int(totals.guest_count or 0)
+    gross_sales = Decimal(str(totals.gross_sales or 0))
+    net_sales = Decimal(str(totals.net_sales or 0))
+    total_tax = Decimal(str(totals.tax or 0))
+    total_discount = Decimal(str(totals.discount or 0))
     aov = (gross_sales / Decimal(str(total_orders))) if total_orders > 0 else Decimal("0.00")
 
-    # Category breakdown & top selling items
-    order_ids = [o.id for o in orders]
+    # Category breakdown & top selling items are aggregated directly in SQL.
     by_category: List[SalesCategoryBreakdown] = []
     top_selling_items: List[SalesItemBreakdown] = []
 
-    if order_ids:
+    if total_orders > 0:
         item_sales_query = db.query(
             OrderItem.item_id,
             func.coalesce(MenuItem.name, OrderItem.name, "Item").label("item_name"),
@@ -347,7 +356,8 @@ def get_sales_summary(
             func.avg(OrderItem.unit_price).label("avg_unit_price")
         ).outerjoin(MenuItem, OrderItem.item_id == MenuItem.id)\
          .outerjoin(MenuCategory, MenuItem.category_id == MenuCategory.id)\
-         .filter(OrderItem.order_id.in_(order_ids))\
+         .join(RestaurantOrder, RestaurantOrder.id == OrderItem.order_id)\
+         .filter(*order_filter)\
          .group_by(OrderItem.item_id, MenuItem.name, OrderItem.name, MenuItem.code, MenuCategory.id, MenuCategory.name)\
          .order_by(desc("total_sales")).all()
 
@@ -791,7 +801,86 @@ def get_procurement_summary(
     )
 
 # ==============================================================================
-# 7. EXPORT REPORTS (CSV / JSON)
+# 7. VENDOR REPORT
+# ==============================================================================
+@router.get("/vendor-report", response_model=VendorReportResponse)
+def get_vendor_report(
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    branch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    start_date, end_date = _parse_date_range(start_date, end_date, default_days=30)
+    scoped_branches = _check_user_branch_access(current_user, branch_id, db)
+
+    po_query = db.query(PurchaseOrder).filter(
+        PurchaseOrder.company_id == current_user.company_id,
+        PurchaseOrder.order_date >= start_date,
+        PurchaseOrder.order_date <= end_date,
+        PurchaseOrder.status != POStatus.CANCELLED,
+    )
+    if scoped_branches is not None:
+        po_query = po_query.filter(PurchaseOrder.branch_id.in_(scoped_branches))
+    pos = po_query.all()
+
+    supplier_ids = {po.supplier_id for po in pos if po.supplier_id}
+    bill_query = db.query(VendorBill).filter(
+        VendorBill.company_id == current_user.company_id,
+        VendorBill.invoice_date >= start_date,
+        VendorBill.invoice_date <= end_date,
+        VendorBill.status != BillStatus.CANCELLED,
+    )
+    bills = bill_query.all()
+    supplier_ids.update(b.supplier_id for b in bills if b.supplier_id)
+
+    payment_query = db.query(Payment).filter(
+        Payment.company_id == current_user.company_id,
+        Payment.payment_date >= start_date,
+        Payment.payment_date <= end_date,
+    )
+    payments = payment_query.all()
+    supplier_ids.update(x.supplier_id for x in payments if x.supplier_id)
+
+    data = {}
+    for sid in supplier_ids:
+        supplier = db.query(Supplier).filter(Supplier.id == sid, Supplier.company_id == current_user.company_id).first()
+        if not supplier:
+            continue
+        data[sid] = {"name": supplier.name, "po_count": 0, "po_spend": Decimal("0"), "bill_count": 0, "billed": Decimal("0"), "paid": Decimal("0"), "fulfilled": 0}
+
+    for po in pos:
+        if po.supplier_id in data:
+            d=data[po.supplier_id]; d["po_count"] += 1; d["po_spend"] += Decimal(str(po.total_amount or 0))
+            if po.status == POStatus.RECEIVED: d["fulfilled"] += 1
+    for bill in bills:
+        if bill.supplier_id in data:
+            d=data[bill.supplier_id]; d["bill_count"] += 1; d["billed"] += Decimal(str(bill.total_amount or 0))
+    for payment in payments:
+        if payment.supplier_id in data:
+            data[payment.supplier_id]["paid"] += Decimal(str(payment.amount or 0))
+
+    vendors=[]
+    for sid,d in data.items():
+        outstanding=max(d["billed"]-d["paid"], Decimal("0"))
+        rate=(Decimal(d["fulfilled"])/Decimal(d["po_count"])*100) if d["po_count"] else Decimal("0")
+        vendors.append(VendorReportMetric(
+            supplier_id=sid, supplier_name=d["name"], po_count=d["po_count"], po_spend=round(d["po_spend"],2),
+            bill_count=d["bill_count"], billed_amount=round(d["billed"],2), paid_amount=round(d["paid"],2),
+            outstanding_amount=round(outstanding,2), fulfillment_rate_percentage=round(rate,2)
+        ))
+    vendors.sort(key=lambda x: x.po_spend, reverse=True)
+    return VendorReportResponse(
+        period_start=start_date, period_end=end_date, total_vendors=len(vendors),
+        total_po_spend=round(sum(x.po_spend for x in vendors),2),
+        total_billed_amount=round(sum(x.billed_amount for x in vendors),2),
+        total_paid_amount=round(sum(x.paid_amount for x in vendors),2),
+        total_outstanding_amount=round(sum(x.outstanding_amount for x in vendors),2),
+        vendors=vendors
+    )
+
+# ==============================================================================
+# 8. EXPORT REPORTS (CSV / JSON)
 # ==============================================================================
 @router.post("/export", response_model=ReportExportResponse)
 def export_report(
@@ -1423,3 +1512,148 @@ def get_outlet_dashboard(
         allowed_modules=allowed_modules
     )
 
+
+
+# ==============================================================================
+# 10. SCHEDULED REPORTS & LIVE ALERT CENTER (PART 21)
+# ==============================================================================
+from pydantic import BaseModel, Field
+
+class ReportScheduleCreateRequest(BaseModel):
+    report_type: str = Field(min_length=1, max_length=50)
+    frequency: str = Field(default="DAILY", min_length=1, max_length=20)
+    branch_id: Optional[str] = None
+    recipients: List[str] = Field(default_factory=list)
+    next_run_at: Optional[datetime] = None
+
+
+def _is_global_reporting_user(current_user: User, db: Session) -> bool:
+    role = db.query(Role).filter(Role.id == current_user.role_id).first() if current_user.role_id else None
+    name = role.name.upper() if role else ""
+    return any(x in name for x in ["ADMIN", "SUPER", "DIRECTOR", "OWNER", "HQ", "GENERAL_MANAGER", "AREA", "CENTRAL"])
+
+def _next_schedule_time(current: datetime, frequency: str) -> datetime:
+    freq = frequency.upper()
+    if freq == "WEEKLY": return current + timedelta(days=7)
+    if freq == "BI_WEEKLY": return current + timedelta(days=14)
+    if freq == "MONTHLY": return current + timedelta(days=30)
+    return current + timedelta(days=1)
+
+def _generate_scheduled_report(schedule: ReportSchedule, db: Session, current_user: User):
+    end = datetime.utcnow()
+    start = end - timedelta(days=1 if schedule.frequency == "DAILY" else 7 if schedule.frequency == "WEEKLY" else 14 if schedule.frequency == "BI_WEEKLY" else 30)
+    params = dict(start_date=start, end_date=end, db=db, current_user=current_user)
+    rt = str(schedule.report_type).upper()
+    if rt == ReportType.EXECUTIVE_SUMMARY.value:
+        data = get_executive_summary(**params)
+    elif rt == ReportType.SALES_SUMMARY.value:
+        data = get_sales_summary(branch_id=schedule.branch_id, **params)
+    elif rt == ReportType.INVENTORY_VALUATION.value:
+        data = get_inventory_valuation(branch_id=schedule.branch_id, db=db, current_user=current_user)
+    elif rt == ReportType.FOOD_COST_VARIANCE.value:
+        data = get_food_cost_variance(**params)
+    elif rt == ReportType.WASTAGE_SUMMARY.value:
+        data = get_wastage_summary(branch_id=schedule.branch_id, **params)
+    elif rt == ReportType.PROCUREMENT_SUMMARY.value:
+        data = get_procurement_summary(**params)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported report type: {schedule.report_type}")
+    metrics = json.loads(data.json()) if hasattr(data, 'json') else data
+    snapshot = ReportSnapshot(
+        id=str(uuid.uuid4()), company_id=current_user.company_id, branch_id=schedule.branch_id,
+        report_type=rt, period_start=start, period_end=end, generated_at=end, generated_by_id=current_user.id,
+        title=f"Scheduled {rt.replace('_', ' ').title()}", metrics=metrics,
+        summary_text=f"Scheduled {rt.replace('_', ' ').lower()} generated for {start.date()} to {end.date()}."
+    )
+    db.add(snapshot)
+    schedule.last_run_at = end
+    schedule.next_run_at = _next_schedule_time(end, schedule.frequency)
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
+
+@router.get("/schedules")
+def list_report_schedules(
+    branch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    query = db.query(ReportSchedule).filter(ReportSchedule.company_id == current_user.company_id)
+    if branch_id:
+        allowed = _check_user_branch_access(current_user, branch_id, db)
+        query = query.filter(ReportSchedule.branch_id == branch_id)
+    elif not _is_global_reporting_user(current_user, db):
+        allowed = _check_user_branch_access(current_user, None, db) or []
+        query = query.filter(or_(ReportSchedule.branch_id.is_(None), ReportSchedule.branch_id.in_(allowed)))
+    rows = query.order_by(desc(ReportSchedule.next_run_at), desc(ReportSchedule.created_at)).all()
+    return [{"id": r.id, "report_type": r.report_type, "frequency": str(r.frequency.value if hasattr(r.frequency, 'value') else r.frequency), "branch_id": r.branch_id, "recipients": r.recipients or [], "is_active": r.is_active, "last_run_at": r.last_run_at, "next_run_at": r.next_run_at} for r in rows]
+
+@router.post("/schedules", status_code=status.HTTP_201_CREATED)
+def create_report_schedule(
+    payload: ReportScheduleCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    if not _is_global_reporting_user(current_user, db) and payload.branch_id:
+        _check_user_branch_access(current_user, payload.branch_id, db)
+    if payload.frequency.upper() not in {"DAILY", "WEEKLY", "BI_WEEKLY", "MONTHLY"}:
+        raise HTTPException(status_code=400, detail="Unsupported schedule frequency")
+    if payload.report_type.upper() not in {x.value for x in ReportType}:
+        raise HTTPException(status_code=400, detail="Unsupported report type")
+    next_run = payload.next_run_at or _next_schedule_time(datetime.utcnow(), payload.frequency)
+    row = ReportSchedule(id=str(uuid.uuid4()), company_id=current_user.company_id, branch_id=payload.branch_id, report_type=payload.report_type.upper(), frequency=payload.frequency.upper(), recipients=payload.recipients, is_active=True, next_run_at=next_run)
+    db.add(row); db.commit(); db.refresh(row)
+    return {"id": row.id, "report_type": row.report_type, "frequency": str(row.frequency.value if hasattr(row.frequency,'value') else row.frequency), "branch_id": row.branch_id, "recipients": row.recipients or [], "is_active": row.is_active, "last_run_at": row.last_run_at, "next_run_at": row.next_run_at}
+
+@router.patch("/schedules/{schedule_id}")
+def update_report_schedule(schedule_id: str, is_active: Optional[bool] = Query(None), db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    row = db.query(ReportSchedule).filter(ReportSchedule.id == schedule_id, ReportSchedule.company_id == current_user.company_id).first()
+    if not row: raise HTTPException(status_code=404, detail="Schedule not found")
+    if is_active is not None: row.is_active = is_active
+    db.commit(); db.refresh(row)
+    return {"id": row.id, "is_active": row.is_active, "next_run_at": row.next_run_at}
+
+@router.post("/schedules/run-due")
+def run_due_report_schedules(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    now = datetime.utcnow()
+    query = db.query(ReportSchedule).filter(ReportSchedule.company_id == current_user.company_id, ReportSchedule.is_active == True, ReportSchedule.next_run_at <= now)
+    rows = query.all()
+    results = []
+    for row in rows:
+        try:
+            snap = _generate_scheduled_report(row, db, current_user)
+            results.append({"schedule_id": row.id, "snapshot_id": snap.id, "status": "GENERATED"})
+        except Exception as exc:
+            db.rollback(); results.append({"schedule_id": row.id, "status": "FAILED", "error": str(exc)})
+    return {"processed": len(results), "results": results}
+
+@router.get("/alerts")
+def get_report_alerts(branch_id: Optional[str] = Query(None), db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    scope = _check_user_branch_access(current_user, branch_id, db)
+    alerts = []
+    # Low stock alerts
+    stock_q = db.query(StockBalance, Item, Warehouse).join(Item, Item.id == StockBalance.item_id).join(Warehouse, Warehouse.id == StockBalance.warehouse_id).filter(Item.company_id == current_user.company_id)
+    if scope is not None:
+        stock_q = stock_q.filter(Warehouse.branch_id.in_(scope))
+    for sb, item, wh in stock_q.all():
+        minimum = Decimal(str(sb.min_stock_level if sb.min_stock_level is not None else item.min_stock_level or 0))
+        qty = Decimal(str(sb.quantity or 0))
+        if minimum > 0 and qty <= minimum:
+            alerts.append({"type":"LOW_STOCK","severity":"CRITICAL" if qty <= 0 else "HIGH","title":f"Low stock: {item.name}","message":f"{qty} remaining vs minimum {minimum} at {wh.name}","branch_id":wh.branch_id,"entity_id":item.id})
+    # Abnormal wastage
+    seven = datetime.utcnow() - timedelta(days=7)
+    wq = db.query(WastageEntry).filter(WastageEntry.company_id == current_user.company_id, WastageEntry.entry_date >= seven, WastageEntry.status == WastageStatus.APPROVED)
+    if scope is not None: wq = wq.filter(WastageEntry.branch_id.in_(scope))
+    totals = {}
+    for e in wq.all(): totals[e.branch_id] = totals.get(e.branch_id, Decimal('0')) + Decimal(str(e.total_cost or 0))
+    for bid, cost in totals.items():
+        if cost >= Decimal('2000'):
+            br = db.query(Branch).filter(Branch.id == bid).first()
+            alerts.append({"type":"WASTAGE_SURGE","severity":"HIGH","title":"High wastage detected","message":f"7-day approved wastage is ₹{cost:,.2f} at {br.name if br else bid}","branch_id":bid,"entity_id":bid})
+    # Due scheduled reports
+    due_q = db.query(ReportSchedule).filter(ReportSchedule.company_id == current_user.company_id, ReportSchedule.is_active == True, ReportSchedule.next_run_at <= datetime.utcnow())
+    if scope is not None: due_q = due_q.filter(or_(ReportSchedule.branch_id.is_(None), ReportSchedule.branch_id.in_(scope)))
+    for s in due_q.all(): alerts.append({"type":"SCHEDULE_DUE","severity":"MEDIUM","title":"Scheduled report is due","message":f"{s.report_type} is due to run","branch_id":s.branch_id,"entity_id":s.id})
+    severity_order={"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3}
+    alerts.sort(key=lambda x: severity_order.get(x["severity"],9))
+    return {"count":len(alerts),"alerts":alerts}

@@ -4730,3 +4730,16 @@ Stop and give me the final Part report.
 
 Do not continue beyond PART 1.
 
+
+## Current Part Status
+PART 1–26 COMPLETE → PART 27 COMPLETE → PART 28 COMPLETE (AI Wastage / Sales Intelligence) → PART 29 NEXT (Telegram Integration).
+
+
+## Current Part Status
+- PART 1–29: Complete cumulative base
+- PART 30: Complete — WhatsApp Business Integration
+- PART 31: Next — End-to-End Testing
+
+## Part 35 — Backup / Recovery / Monitoring
+
+Operational backup, verification, recovery and monitoring runbooks are in `ops/`. PostgreSQL backup helpers are in `backend/scripts/`. A real restore drill requires an authorized non-production database and is intentionally not executed during packaging.

@@ -55,10 +55,20 @@ from app.models.restaurant import DiningTable, Floor, Menu, MenuCategory, MenuIt
 from app.models.customer import Customer, CustomerAddress, LoyaltyTransaction, QRSession, CustomerType, LoyaltyTransactionType
 from app.models.finance import ChartOfAccount, JournalEntry, JournalEntryLine, AccountsPayable, AccountType, JournalStatus
 from app.models.report import ReportSnapshot, ReportSchedule, ReportType, ReportFrequency
+from app.models.maintenance import MaintenanceAsset, MaintenanceTicket, AssetStatus, MaintenanceStatus, MaintenancePriority
 from app.models.audit import AuditLog, IdempotencyRecord
+from app.models.expense import Expense, Reconciliation
+from app.models.notification import Notification, NotificationStatus, NotificationChannel
+from app.models.telegram import TelegramUserLink
 
 __all__ = [
     "BaseModel",
+    "Expense",
+    "Reconciliation",
+    "Notification",
+    "NotificationStatus",
+    "NotificationChannel",
+    "TelegramUserLink",
     "Company",
     "Branch",
     "Department",
@@ -143,6 +153,26 @@ __all__ = [
     "ReportSchedule",
     "ReportType",
     "ReportFrequency",
+    "VendorBill",
+    "VendorBillItem",
+    "VendorBillGRNLink",
+    "Payment",
     "AuditLog",
     "IdempotencyRecord",
+    "MaintenanceAsset",
+    "MaintenanceTicket",
+    "AssetStatus",
+    "MaintenanceStatus",
+    "MaintenancePriority",
+    "CashSession", "CashMovement", "CashSessionStatus", "CashMovementType",
 ]
+
+from app.models.customer_support import Complaint, ComplaintSeverity, ComplaintStatus
+from app.models.customer_support import Complaint, ComplaintSeverity, ComplaintStatus
+
+from app.models.beverage import BeverageItem, BeverageLedger, BeverageType, BeverageTxnType
+from app.models.hotel import HotelRoom, HotelBooking, HousekeepingTask, RoomStatus, BookingStatus, HousekeepingStatus, HousekeepingType
+
+from app.models.cashier import CashSession, CashMovement, CashSessionStatus, CashMovementType
+from app.models.ai_document import AIDocument
+from app.models.whatsapp import WhatsAppUserLink, WhatsAppMessageLog

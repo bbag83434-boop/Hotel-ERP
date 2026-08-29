@@ -223,6 +223,35 @@ class ProcurementSummaryResponse(BaseModel):
     class Config:
         populate_by_name = True
 
+
+# --- Vendor Report Schemas ---
+class VendorReportMetric(BaseModel):
+    supplier_id: str = Field(..., alias="supplierId")
+    supplier_name: str = Field(..., alias="supplierName")
+    po_count: int = Field(0, alias="poCount")
+    po_spend: Decimal = Field(Decimal("0.00"), alias="poSpend")
+    bill_count: int = Field(0, alias="billCount")
+    billed_amount: Decimal = Field(Decimal("0.00"), alias="billedAmount")
+    paid_amount: Decimal = Field(Decimal("0.00"), alias="paidAmount")
+    outstanding_amount: Decimal = Field(Decimal("0.00"), alias="outstandingAmount")
+    fulfillment_rate_percentage: Decimal = Field(Decimal("0.00"), alias="fulfillmentRatePercentage")
+
+    class Config:
+        populate_by_name = True
+
+class VendorReportResponse(BaseModel):
+    period_start: datetime = Field(..., alias="periodStart")
+    period_end: datetime = Field(..., alias="periodEnd")
+    total_vendors: int = Field(..., alias="totalVendors")
+    total_po_spend: Decimal = Field(..., alias="totalPoSpend")
+    total_billed_amount: Decimal = Field(..., alias="totalBilledAmount")
+    total_paid_amount: Decimal = Field(..., alias="totalPaidAmount")
+    total_outstanding_amount: Decimal = Field(..., alias="totalOutstandingAmount")
+    vendors: List[VendorReportMetric]
+
+    class Config:
+        populate_by_name = True
+
 # --- Export Schemas ---
 class ReportExportRequest(BaseModel):
     report_type: str = Field(..., alias="reportType")
