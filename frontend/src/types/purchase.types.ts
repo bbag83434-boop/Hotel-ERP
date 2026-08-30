@@ -420,6 +420,8 @@ export interface GoodsReceiveNoteCreate {
   receive_date?: string;
   supplier_invoice_number?: string;
   invoice_amount?: number;
+  status?: string;
+  auto_approve?: boolean;
   notes?: string;
   items: GoodsReceiveItemCreate[];
 }

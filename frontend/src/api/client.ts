@@ -8,7 +8,8 @@ const getApiBaseUrl = (): string => {
     if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
       return 'https://hotel-erp-muv8.onrender.com/api/v1';
     }
-    return '/api/v1';
+    // In local development, direct to standard FastAPI backend port
+    return 'http://127.0.0.1:8000/api/v1';
   }
   const clean = envUrl.replace(/\/+$/, '');
   return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;

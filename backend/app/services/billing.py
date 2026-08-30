@@ -15,36 +15,34 @@ class BillingService:
             raise AppException(status_code=404, message="Bill not found")
 
         # 1. Gather all items from linked GRNs that are APPROVED
-        linked_grn_ids = [link.grn_id for link in bill.grn_links]
+        linked_grn_ids = [link.grn_id for link in (bill.grn_links or [])]
         grns = self.db.query(GoodsReceiveNote).filter(
             GoodsReceiveNote.id.in_(linked_grn_ids),
             GoodsReceiveNote.status == "APPROVED"
         ).all()
+        approved_grn_ids = [g.id for g in grns]
         
         # 2. Match Logic
         mismatch_found = False
-        
-        for bill_item in bill.items:
+        bill_items = bill.items if getattr(bill, 'items', None) else self.db.query(VendorBillItem).filter(VendorBillItem.bill_id == bill.id).all()
+        if not bill_items:
+            return False
+
+        for bill_item in bill_items:
             # Aggregate accepted qty from linked APPROVED GRNs
-            total_received = sum(
-                gi.accepted_qty for grn in grns for gi in grn.items if gi.item_id == bill_item.item_id
-            )
-            
-            print(f"DEBUG: item={bill_item.item_id}, bill_qty={bill_item.quantity}, received={total_received}")
+            grn_items = self.db.query(GoodsReceiveItem).filter(
+                GoodsReceiveItem.item_id == bill_item.item_id,
+                GoodsReceiveItem.grn_id.in_(approved_grn_ids)
+            ).all()
+            total_received = sum((gi.accepted_qty for gi in grn_items), Decimal("0"))
             
             # Rule: Invoice quantity cannot exceed approved received quantity
             if bill_item.quantity > total_received:
                 mismatch_found = True
-                print(f"DEBUG: Mismatch due to qty: {bill_item.quantity} > {total_received}")
                 continue
                 
             # Check rate variance against PO items (linked via GRN)
             # Fetch GRN items first, then PO items linked to them
-            grn_items = self.db.query(GoodsReceiveItem).filter(
-                GoodsReceiveItem.item_id == bill_item.item_id,
-                GoodsReceiveItem.grn_id.in_(linked_grn_ids)
-            ).all()
-            
             po_item_ids = [gi.po_item_id for gi in grn_items if gi.po_item_id]
             po_items = self.db.query(PurchaseOrderItem).filter(PurchaseOrderItem.id.in_(po_item_ids)).all()
 
