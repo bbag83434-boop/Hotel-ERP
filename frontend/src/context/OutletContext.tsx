@@ -72,24 +72,36 @@ interface OutletContextType {
   refreshOutlets: () => Promise<void>;
 }
 
-// Clean Baseline Multi-Outlet Topology matching fresh database state
-const DEFAULT_TOPOLOGY: Outlet[] = [
-  { id: 'cb-main-hq', code: 'HQ-MAIN', name: 'CB Hotel Management (Main)', type: 'HEAD_OFFICE', isActive: true },
-];
+export const UNSELECTED_OUTLET: Outlet = {
+  id: '',
+  code: '',
+  name: 'Select Branch / Outlet',
+  type: 'RESTAURANT_OUTLET',
+  isActive: true,
+};
 
 const OutletContext = createContext<OutletContextType | undefined>(undefined);
 
 export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isAuthenticated } = useAuth();
-  const [outlets, setOutlets] = useState<Outlet[]>(DEFAULT_TOPOLOGY);
+  const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [activeOutlet, setActiveOutletState] = useState<Outlet>(() => {
     if (typeof window !== 'undefined') {
       const savedId = localStorage.getItem('apex_active_outlet_id');
       const savedCode = localStorage.getItem('apex_active_outlet_code');
-      const match = DEFAULT_TOPOLOGY.find((o) => o.id === savedId || o.code === savedCode);
-      if (match) return match;
+      const savedName = localStorage.getItem('apex_active_outlet_name');
+      const savedType = localStorage.getItem('apex_active_outlet_type') as BranchType;
+      if (savedId && savedCode && savedName) {
+        return {
+          id: savedId,
+          code: savedCode,
+          name: savedName,
+          type: savedType || 'RESTAURANT_OUTLET',
+          isActive: true,
+        };
+      }
     }
-    return DEFAULT_TOPOLOGY[0];
+    return UNSELECTED_OUTLET;
   });
   const [isLoading, setIsLoading] = useState(false);
   const closingInfo = getCurrentClosingPeriod();
@@ -109,7 +121,7 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }));
         setOutlets(mappedUserBranches);
 
-        // Sync active branch if set
+        // Sync active branch if set in user profile
         const activeBr = user?.active_branch || user?.activeBranch;
         if (activeBr) {
           const match = mappedUserBranches.find((o) => o.id === activeBr.id || o.code === activeBr.code);
@@ -118,6 +130,8 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             if (typeof window !== 'undefined') {
               localStorage.setItem('apex_active_outlet_id', match.id);
               localStorage.setItem('apex_active_outlet_code', match.code);
+              localStorage.setItem('apex_active_outlet_name', match.name);
+              localStorage.setItem('apex_active_outlet_type', match.type);
             }
           }
         }
@@ -128,7 +142,7 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (isAuthenticated) {
         try {
           const orgRes = await apiClient.get('/organization/branches');
-          if (Array.isArray(orgRes.data) && orgRes.data.length > 0) {
+          if (Array.isArray(orgRes.data)) {
             const liveBranches: Outlet[] = orgRes.data.map((b: any) => ({
               id: b.id,
               code: b.code,
@@ -141,14 +155,10 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // Re-sync current active outlet if it exists in live list
             const savedId = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_id') : null;
             const savedCode = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_code') : null;
-            const matched = liveBranches.find((o) => o.id === savedId || o.code === savedCode);
-            if (matched) {
-              setActiveOutletState(matched);
-            } else if (liveBranches.length > 0) {
-              setActiveOutletState(liveBranches[0]);
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('apex_active_outlet_id', liveBranches[0].id);
-                localStorage.setItem('apex_active_outlet_code', liveBranches[0].code);
+            if (savedId || savedCode) {
+              const matched = liveBranches.find((o) => o.id === savedId || o.code === savedCode);
+              if (matched) {
+                setActiveOutletState(matched);
               }
             }
             return;
@@ -160,7 +170,7 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       // Public health outlets endpoint fallback
       const res = await apiClient.get('/health/outlets');
-      if (res.data?.success && res.data?.data?.outlets?.length > 0) {
+      if (res.data?.success && Array.isArray(res.data?.data?.outlets)) {
         const dbOutlets: Outlet[] = res.data.data.outlets.map((b: any) => ({
           id: b.id,
           code: b.code,
@@ -172,19 +182,15 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         const savedId = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_id') : null;
         const savedCode = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_code') : null;
-        const matched = dbOutlets.find((o) => o.id === savedId || o.code === savedCode);
-        if (matched) {
-          setActiveOutletState(matched);
-        } else if (dbOutlets.length > 0) {
-          setActiveOutletState(dbOutlets[0]);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('apex_active_outlet_id', dbOutlets[0].id);
-            localStorage.setItem('apex_active_outlet_code', dbOutlets[0].code);
+        if (savedId || savedCode) {
+          const matched = dbOutlets.find((o) => o.id === savedId || o.code === savedCode);
+          if (matched) {
+            setActiveOutletState(matched);
           }
         }
       }
     } catch {
-      // Keep DEFAULT_TOPOLOGY fallback with real UUIDs
+      // Keep state as-is
     } finally {
       setIsLoading(false);
     }
@@ -197,12 +203,21 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const setActiveOutlet = (outlet: Outlet) => {
     setActiveOutletState(outlet);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('apex_active_outlet_id', outlet.id);
-      localStorage.setItem('apex_active_outlet_code', outlet.code);
+      if (outlet.id) {
+        localStorage.setItem('apex_active_outlet_id', outlet.id);
+        localStorage.setItem('apex_active_outlet_code', outlet.code);
+        localStorage.setItem('apex_active_outlet_name', outlet.name);
+        localStorage.setItem('apex_active_outlet_type', outlet.type);
+      } else {
+        localStorage.removeItem('apex_active_outlet_id');
+        localStorage.removeItem('apex_active_outlet_code');
+        localStorage.removeItem('apex_active_outlet_name');
+        localStorage.removeItem('apex_active_outlet_type');
+      }
     }
   };
 
-  const isHeadOffice = activeOutlet.type === 'HEAD_OFFICE';
+  const isHeadOffice = Boolean(activeOutlet?.id && activeOutlet.type === 'HEAD_OFFICE');
 
   return (
     <OutletContext.Provider
@@ -228,8 +243,8 @@ export function useOutlet(): OutletContextType {
     if (typeof window === 'undefined') {
       return {
         outlets: [],
-        currentOutlet: { id: 'dummy', code: 'DUMMY', name: 'Dummy', type: 'RESTAURANT_OUTLET', isActive: true },
-        activeOutlet: { id: 'dummy', code: 'DUMMY', name: 'Dummy', type: 'RESTAURANT_OUTLET', isActive: true },
+        currentOutlet: UNSELECTED_OUTLET,
+        activeOutlet: UNSELECTED_OUTLET,
         setActiveOutlet: () => {},
         isLoading: false,
         isHeadOffice: false,

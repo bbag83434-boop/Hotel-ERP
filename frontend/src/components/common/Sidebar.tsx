@@ -218,12 +218,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-3 mx-3 mt-3 rounded-xl bg-gradient-to-br from-[#FAF8F5] to-white border border-[#C79A3B]/25 space-y-1 shadow-sm">
         <div className="flex items-center justify-between text-[10px] text-[#707070]">
           <span className="font-semibold uppercase tracking-wider">Active Scope</span>
-          <span className="font-mono text-[#B8862D] font-bold">[{activeOutlet.code}]</span>
+          <span className="font-mono text-[#B8862D] font-bold">[{activeOutlet?.code || 'GLOBAL'}]</span>
         </div>
-        <p className="text-xs font-bold text-[#1C1C1C] truncate">{activeOutlet.name}</p>
+        <p className="text-xs font-bold text-[#1C1C1C] truncate">{activeOutlet?.id ? activeOutlet.name : 'All Outlets / Not Selected'}</p>
         <div className="flex items-center gap-1 text-[10px] text-[#2E8B57] font-medium pt-0.5">
           <ShieldCheck className="w-3 h-3 text-[#C79A3B]" />
-          <span>{isHeadOffice ? 'Head Office Scope' : 'Restricted Outlet'}</span>
+          <span>{isHeadOffice ? 'Head Office Scope' : activeOutlet?.id ? 'Restricted Outlet' : 'Select Branch Above'}</span>
         </div>
       </div>
 
