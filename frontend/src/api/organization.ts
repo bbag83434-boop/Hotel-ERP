@@ -51,6 +51,10 @@ export const organizationApi = {
     const res = await apiClient.put<Branch>(`/organization/branches/${branchId}`, payload);
     return res.data;
   },
+  deleteBranch: async (branchId: string): Promise<{ message: string } | { message: string; id: string; references?: string[]; deactivate_instead?: boolean }> => {
+    const res = await apiClient.delete(`/organization/branches/${branchId}`);
+    return res.data;
+  },
 
   // Warehouses
   getWarehouses: async (params?: { branch_id?: string; is_central?: boolean }): Promise<Warehouse[]> => {

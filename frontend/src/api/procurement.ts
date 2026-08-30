@@ -35,6 +35,10 @@ export const procurementApi = {
     const res = await apiClient.put<Supplier>(`/procurement/suppliers/${id}`, payload);
     return res.data;
   },
+  deleteSupplier: async (id: string): Promise<{ message: string } | { message: string; id: string; references?: string[]; deactivate_instead?: boolean }> => {
+    const res = await apiClient.delete(`/procurement/suppliers/${id}`);
+    return res.data;
+  },
 
   // 1.1 Vendor-Item Mappings
   getVendorItems: async (params?: { supplier_id?: string; item_id?: string; is_active?: boolean }): Promise<SupplierItem[]> => {

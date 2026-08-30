@@ -359,6 +359,60 @@ def update_supplier(
     return supplier
 
 
+@router.delete("/suppliers/{supplier_id}", status_code=status.HTTP_200_OK)
+def delete_supplier(
+    supplier_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Dependency-safe Vendor (Supplier) deletion.
+
+    Hard deletion is blocked whenever the vendor is referenced by master or
+    transactional records (vendor-item mappings, POS, POs, GRNs, bills,
+    payments, requisition lines, smart-requirement lines, payable accounts,
+    default item supplier links, ...). The caller is asked to use
+    Active/Inactive instead.
+    """
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        raise NotFoundException(f"Supplier '{supplier_id}' not found.")
+
+    from app.models.billing import VendorBill, Payment
+    from app.models.finance import AccountsPayable
+
+    check_labels = [
+        ("vendor-item mapping(s)", SupplierItem, supplier_id),
+        ("purchase order(s)", PurchaseOrder, supplier_id),
+        ("goods receive note(s)", GoodsReceiveNote, supplier_id),
+        ("requisition line(s)", PurchaseRequestItem, supplier_id),
+        ("smart requirement line(s)", SmartRequirementItem, supplier_id),
+        ("vendor bill(s)", VendorBill, supplier_id),
+        ("vendor payment(s)", Payment, supplier_id),
+        ("payable account(s)", AccountsPayable, supplier_id),
+        ("item master default supplier link(s)", Item, supplier_id),
+    ]
+
+    reasons: list[str] = []
+    for label, model, value in check_labels:
+        try:
+            if hasattr(model, "supplier_id") and getattr(model, "supplier_id") is not None:
+                count = db.query(func.count()).select_from(model).filter(getattr(model, "supplier_id") == value).scalar() or 0
+                if count:
+                    reasons.append(f"{count} {label}")
+        except Exception:
+            continue
+
+    if reasons:
+        raise BadRequestException(
+            message="Vendor cannot be deleted because it is referenced by existing records.",
+            details={"references": reasons, "deactivate_instead": True},
+        )
+
+    db.delete(supplier)
+    db.commit()
+    return {"message": "Vendor deleted successfully", "id": supplier_id}
+
+
 # ==============================================================================
 # Vendor-Item Mapping (SupplierItem) Endpoints
 # ==============================================================================

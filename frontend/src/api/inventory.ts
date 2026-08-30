@@ -25,6 +25,14 @@ export const inventoryApi = {
     const res = await apiClient.post<Category>('/inventory/categories', payload);
     return res.data;
   },
+  updateCategory: async (categoryId: string, payload: Partial<{ name: string; code: string; description?: string; is_active?: boolean }>): Promise<Category> => {
+    const res = await apiClient.put<Category>(`/inventory/categories/${categoryId}`, payload);
+    return res.data;
+  },
+  deleteCategory: async (categoryId: string): Promise<{ message: string } | { message: string; references?: string[]; deactivate_instead?: boolean }> => {
+    const res = await apiClient.delete(`/inventory/categories/${categoryId}`);
+    return res.data;
+  },
 
   // Units
   getUnits: async (): Promise<Unit[]> => {
@@ -33,6 +41,14 @@ export const inventoryApi = {
   },
   createUnit: async (payload: { name: string; symbol: string }): Promise<Unit> => {
     const res = await apiClient.post<Unit>('/inventory/units', payload);
+    return res.data;
+  },
+  updateUnit: async (unitId: string, payload: Partial<{ name: string; symbol: string; is_active?: boolean }>): Promise<Unit> => {
+    const res = await apiClient.put<Unit>(`/inventory/units/${unitId}`, payload);
+    return res.data;
+  },
+  deleteUnit: async (unitId: string): Promise<{ message: string } | { message: string; references?: string[]; deactivate_instead?: boolean }> => {
+    const res = await apiClient.delete(`/inventory/units/${unitId}`);
     return res.data;
   },
 
@@ -51,6 +67,10 @@ export const inventoryApi = {
   },
   updateItem: async (itemId: string, payload: Partial<ItemCreateInput>): Promise<Item> => {
     const res = await apiClient.put<Item>(`/inventory/items/${itemId}`, payload);
+    return res.data;
+  },
+  deleteItem: async (itemId: string): Promise<{ message: string } | { message: string; id: string; deactivated?: boolean; references?: string[]; deactivate_instead?: boolean }> => {
+    const res = await apiClient.delete(`/inventory/items/${itemId}`);
     return res.data;
   },
 

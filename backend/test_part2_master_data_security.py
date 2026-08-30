@@ -34,13 +34,14 @@ from app.models.user import User, Role, Permission, RolePermission, UserBranch
 from app.models.inventory import Category, Unit, UnitConversion, Item
 from app.models.procurement import Supplier, SupplierItem
 from app.models.audit import AuditLog
+from app.core.master_data_schema_bootstrap import ensure_master_data_schema
 
 client = TestClient(app)
 
 def run_tests():
-    print("=" * 75)
-    print("RUNNING PART 2: MASTER DATA AND SECURITY FOUNDATION TEST SUITE")
-    print("=" * 75)
+    print("=" * 75, flush=True)
+    print("RUNNING PART 2: MASTER DATA AND SECURITY FOUNDATION TEST SUITE", flush=True)
+    print("=" * 75, flush=True)
 
     passed = 0
     total = 0
@@ -50,9 +51,9 @@ def run_tests():
         total += 1
         if condition:
             passed += 1
-            print(f"  [PASS] {name}")
+            print(f"  [PASS] {name}", flush=True)
         else:
-            print(f"  [FAIL] {name}")
+            print(f"  [FAIL] {name}", flush=True)
             raise AssertionError(f"Test failed: {name}")
 
     # =========================================================================
@@ -109,6 +110,10 @@ def run_tests():
                 is_active=True,
             )
             db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+        else:
+            admin_user.is_active = True
             db.commit()
             db.refresh(admin_user)
 

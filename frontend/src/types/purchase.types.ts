@@ -28,16 +28,22 @@ export interface SupplierInvoiceUploadResult {
 
 export interface Supplier {
   id: string;
+  company_id?: string;
   name: string;
   code: string;
   contactPerson?: string;
+  contact_person?: string;
   email?: string;
   phone?: string;
+  whatsapp_number?: string;
   address?: string;
   taxNumber?: string;
+  gst_number?: string;
   paymentTerms?: string;
-  balance: number | string;
-  isActive: boolean;
+  payment_terms?: string;
+  balance?: number | string;
+  isActive?: boolean;
+  is_active?: boolean;
   _count?: { purchaseOrders: number; grns: number };
 }
 

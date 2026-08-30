@@ -36,11 +36,32 @@ import {
   Settings,
   Sparkles,
   ExternalLink,
+  Truck,
+  Tags,
+  Scale,
+  Package,
 } from 'lucide-react';
+import { MasterVendors } from './masterdata/MasterVendors';
+import { MasterCategories } from './masterdata/MasterCategories';
+import { MasterUnits } from './masterdata/MasterUnits';
+import { MasterItems } from './masterdata/MasterItems';
+import { MasterVendorItems } from './masterdata/MasterVendorItems';
+import { ConfirmModal, DeleteBtn } from './masterdata/ui';
+
+export type OrganizationSubTab =
+  | 'branches'
+  | 'vendors'
+  | 'categories'
+  | 'units'
+  | 'items'
+  | 'vendor_items'
+  | 'warehouses'
+  | 'departments'
+  | 'staff';
 
 export const OrganizationManager: React.FC = () => {
   const { currentOutlet, activeOutlet, setActiveOutlet, refreshOutlets } = useOutlet();
-  const [subTab, setSubTab] = useState<'branches' | 'warehouses' | 'departments' | 'staff'>('branches');
+  const [subTab, setSubTab] = useState<OrganizationSubTab>('branches');
 
   // Entity State
   const [overview, setOverview] = useState<OrganizationOverview | null>(null);
@@ -57,6 +78,8 @@ export const OrganizationManager: React.FC = () => {
   // Edit Modals State
   const [editingCompany, setEditingCompany] = useState<boolean>(false);
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+  const [deleteBranchTarget, setDeleteBranchTarget] = useState<Branch | null>(null);
+  const [deleteBranchReferences, setDeleteBranchReferences] = useState<string[]>([]);
 
   // Loading & Feedback State
   const [loading, setLoading] = useState<boolean>(true);
@@ -199,6 +222,43 @@ export const OrganizationManager: React.FC = () => {
       await refreshOutlets();
     } catch (err: any) {
       setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Branch update failed' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteBranch = async () => {
+    if (!deleteBranchTarget) return;
+    setActionLoading(true);
+    try {
+      const res: any = await organizationApi.deleteBranch(deleteBranchTarget.id);
+      const refs = res?.references as string[] | undefined;
+      if (refs && refs.length) {
+        setFeedback({
+          type: 'error',
+          message: `Cannot delete branch "${deleteBranchTarget.name}": ${refs.join(' · ')}. Set branch Inactive instead.`,
+        });
+      } else {
+        setFeedback({
+          type: 'success',
+          message: res?.message || `Branch "${deleteBranchTarget.name}" deleted successfully.`,
+        });
+      }
+      setDeleteBranchTarget(null);
+      setDeleteBranchReferences([]);
+      await loadAllData();
+      await refreshOutlets();
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      if (detail && typeof detail === 'object' && detail.references) {
+        setDeleteBranchReferences(detail.references);
+        setFeedback({
+          type: 'error',
+          message: `${detail.message || 'Cannot delete branch.'} ${detail.references.join(' · ')}`,
+        });
+      } else {
+        setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Failed to delete branch' });
+      }
     } finally {
       setActionLoading(false);
     }
@@ -366,13 +426,15 @@ export const OrganizationManager: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
             <span>Sync</span>
           </button>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#C79A3B] to-[#B8862D] text-white text-xs font-semibold shadow-md shadow-[#C79A3B]/20 transition-all hover:brightness-105 active:scale-95"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New {subTab === 'branches' ? 'Branch' : subTab === 'warehouses' ? 'Warehouse' : subTab === 'departments' ? 'Department' : 'Staff'}</span>
-          </button>
+          {['branches', 'warehouses', 'departments', 'staff'].includes(subTab) && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#C79A3B] to-[#B8862D] text-white text-xs font-semibold shadow-md shadow-[#C79A3B]/20 transition-all hover:brightness-105 active:scale-95"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New {subTab === 'branches' ? 'Branch' : subTab === 'warehouses' ? 'Warehouse' : subTab === 'departments' ? 'Department' : 'Staff'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -467,32 +529,44 @@ export const OrganizationManager: React.FC = () => {
 
       {/* Search and Sub-Tabs Navigation */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
-        <div className="flex border-b border-[rgba(45,45,45,0.08)] space-x-3 overflow-x-auto">
-          {(['branches', 'warehouses', 'departments', 'staff'] as const).map((tab) => (
+        <div className="flex border-b border-[rgba(45,45,45,0.08)] space-x-3 overflow-x-auto pb-1">
+          {([
+            { id: 'branches', label: '14+ Outlets' },
+            { id: 'vendors', label: 'Vendors / Suppliers' },
+            { id: 'categories', label: 'Item Categories' },
+            { id: 'units', label: 'Units' },
+            { id: 'items', label: 'Item Master' },
+            { id: 'vendor_items', label: 'Vendor Items & Rates' },
+            { id: 'warehouses', label: 'Warehouses' },
+            { id: 'departments', label: 'Departments' },
+            { id: 'staff', label: 'Staff Directory' },
+          ] as const).map((tab) => (
             <button
-              key={tab}
-              onClick={() => { setSubTab(tab); setSearchQuery(''); }}
-              className={`pb-2.5 text-xs font-bold uppercase tracking-wider transition-all border-b-2 whitespace-nowrap ${
-                subTab === tab
+              key={tab.id}
+              onClick={() => { setSubTab(tab.id as OrganizationSubTab); setSearchQuery(''); }}
+              className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 whitespace-nowrap ${
+                subTab === tab.id
                   ? 'border-[#C79A3B] text-[#B8862D]'
                   : 'border-transparent text-[#707070] hover:text-[#1C1C1C]'
               }`}
             >
-              {tab === 'branches' ? '14+ Outlets Matrix' : tab}
+              {tab.label}
             </button>
           ))}
         </div>
 
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
-          <input
-            type="text"
-            placeholder={`Search ${subTab}...`}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full sm:w-64 pl-8 pr-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
-          />
-        </div>
+        {['branches', 'warehouses', 'departments', 'staff'].includes(subTab) && (
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
+            <input
+              type="text"
+              placeholder={`Search ${subTab}...`}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full sm:w-64 pl-8 pr-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
+            />
+          </div>
+        )}
       </div>
 
       {/* Main Content Area */}
@@ -605,6 +679,12 @@ export const OrganizationManager: React.FC = () => {
                           <Edit3 className="w-3 h-3 text-[#707070]" />
                           <span>Edit</span>
                         </button>
+                        <DeleteBtn
+                          onClick={() => {
+                            setDeleteBranchTarget(b);
+                            setDeleteBranchReferences([]);
+                          }}
+                        />
                       </div>
 
                       {!isCurrent ? (
@@ -623,6 +703,21 @@ export const OrganizationManager: React.FC = () => {
               })}
             </div>
           )}
+
+          {/* TAB: Vendors Master */}
+          {subTab === 'vendors' && <MasterVendors />}
+
+          {/* TAB: Categories Master */}
+          {subTab === 'categories' && <MasterCategories />}
+
+          {/* TAB: Units Master */}
+          {subTab === 'units' && <MasterUnits />}
+
+          {/* TAB: Items Master */}
+          {subTab === 'items' && <MasterItems />}
+
+          {/* TAB: Vendor Items & Rates */}
+          {subTab === 'vendor_items' && <MasterVendorItems />}
 
           {/* TAB: Warehouses */}
           {subTab === 'warehouses' && (
@@ -1459,6 +1554,20 @@ export const OrganizationManager: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Branch Confirmation Modal */}
+      <ConfirmModal
+        open={Boolean(deleteBranchTarget)}
+        title="Delete Outlet / Branch"
+        message={`Are you sure you want to delete branch "${deleteBranchTarget?.name}"? If this outlet is referenced by warehouses, staff, purchase orders, requisitions, or transactions, backend dependency protection will block destructive deletion.`}
+        details={deleteBranchReferences}
+        loading={actionLoading}
+        onCancel={() => {
+          setDeleteBranchTarget(null);
+          setDeleteBranchReferences([]);
+        }}
+        onConfirm={handleDeleteBranch}
+      />
     </div>
   );
 };

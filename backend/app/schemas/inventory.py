@@ -26,6 +26,7 @@ class CategoryResponse(BaseModel):
     name: str
     code: str
     description: Optional[str] = None
+    is_active: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -44,12 +45,14 @@ class UnitCreate(UnitBase):
 class UnitUpdate(BaseModel):
     name: Optional[str] = None
     symbol: Optional[str] = None
+    is_active: Optional[bool] = None
 
 class UnitResponse(BaseModel):
     id: str
     company_id: str
     name: str
     symbol: str
+    is_active: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

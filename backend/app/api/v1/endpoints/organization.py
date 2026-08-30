@@ -3,7 +3,7 @@ from datetime import datetime, date
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Header
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 from app.core.database import get_db
 from app.core.auth import get_current_active_user, require_permission, require_outlet_scope
 from app.core.exceptions import (
@@ -636,3 +636,72 @@ def assign_user_role(
     user.role_id = role.id
     db.commit()
     return {"success": True, "message": f"Assigned role '{role.name}' to user '{user.username}'"}
+
+@router.delete("/branches/{branch_id}", status_code=status.HTTP_200_OK)
+def delete_branch(
+    branch_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Dependency-safe Outlet (Branch) deletion.
+
+    Hard deletion is blocked whenever the outlet is referenced by master or
+    transactional records (warehouses, departments, staff, requisitions, POs,
+    GRNs, closings, transfers, production, POS, cashier sessions, menus & more).
+    The caller is then asked to use Active/Inactive instead.
+    """
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise NotFoundException("Branch", branch_id)
+
+    def count_refs(model, attr: str) -> int:
+        try:
+            if hasattr(model, attr) and getattr(model, attr) is not None:
+                return int(db.query(func.count()).select_from(model).filter(getattr(model, attr) == branch_id).scalar() or 0)
+        except Exception:
+            return 0
+        return 0
+
+    # Import transactional models inline to keep module import graph stable.
+    from app.models.procurement import PurchaseRequest, PurchaseOrder, GoodsReceiveNote
+    from app.models.closing import OutletClosingRecord
+    from app.models.hr import Staff
+    from app.models.wastage import WastageEntry
+    from app.models.cashier import CashSession
+    from app.models.restaurant import RestaurantOrder, Menu
+    from app.models.recipe import ProductionOrder
+    from app.models.inventory import StockLedger, StockTransfer
+
+    check_labels = [
+        ("warehouse(s)", Warehouse, "branch_id"),
+        ("department(s)", Department, "branch_id"),
+        ("staff record(s)", Staff, "branch_id"),
+        ("user-outlet assignment(s)", UserBranch, "branch_id"),
+        ("purchase requisition(s)", PurchaseRequest, "branch_id"),
+        ("purchase order(s)", PurchaseOrder, "branch_id"),
+        ("goods receive note(s)", GoodsReceiveNote, "branch_id"),
+        ("outlet closing record(s)", OutletClosingRecord, "branch_id"),
+        ("wastage entr(ies)", WastageEntry, "branch_id"),
+        ("cashier session(s)", CashSession, "branch_id"),
+        ("POS order(s)", RestaurantOrder, "branch_id"),
+        ("menu(s)", Menu, "branch_id"),
+        ("production order(s)", ProductionOrder, "branch_id"),
+        ("stock ledger entr(ies)", StockLedger, "branch_id"),
+        ("store transfer(s)", StockTransfer, "source_branch_id"),
+    ]
+
+    reasons = [f"{count_refs(model, attr)} {label}" for label, model, attr in check_labels if count_refs(model, attr)]
+
+    if reasons:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Outlet cannot be deleted because it is referenced by existing records.",
+                "references": reasons,
+                "deactivate_instead": True,
+            },
+        )
+
+    db.delete(branch)
+    db.commit()
+    return {"message": "Outlet deleted successfully", "id": branch_id}

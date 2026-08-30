@@ -46,8 +46,10 @@ class Category(BaseModel):
     name = Column(String(100), nullable=False)
     code = Column(String(50), nullable=False, index=True)
     description = Column(String(255), nullable=True)
+    is_active = Column("isActive", Boolean, default=True, nullable=False)
 
     companyId = synonym("company_id")
+    isActive = synonym("is_active")
     items = relationship("Item", back_populates="category")
 
     __table_args__ = (
@@ -60,8 +62,10 @@ class Unit(BaseModel):
     company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(50), nullable=False)
     symbol = Column(String(20), nullable=False, index=True)
+    is_active = Column("isActive", Boolean, default=True, nullable=False)
 
     companyId = synonym("company_id")
+    isActive = synonym("is_active")
     items = relationship("Item", back_populates="unit")
 
     __table_args__ = (

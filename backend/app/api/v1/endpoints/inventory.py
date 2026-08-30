@@ -88,6 +88,8 @@ def get_categories(
     is_active: Optional[bool] = None,
 ):
     query = db.query(Category).filter(Category.company_id == current_user.company_id)
+    if is_active is not None:
+        query = query.filter(Category.is_active == is_active)
     categories = query.order_by(Category.name.asc()).all()
     return [
         CategoryResponse(
@@ -96,6 +98,7 @@ def get_categories(
             name=c.name,
             code=c.code,
             description=c.description,
+            is_active=c.is_active,
             created_at=c.created_at,
             updated_at=c.updated_at,
         )
@@ -133,6 +136,7 @@ def create_category(
         name=category.name,
         code=category.code,
         description=category.description,
+        is_active=category.is_active,
         created_at=category.created_at,
         updated_at=category.updated_at,
     )
@@ -155,6 +159,7 @@ def get_category(
         name=category.name,
         code=category.code,
         description=category.description,
+        is_active=category.is_active,
         created_at=category.created_at,
         updated_at=category.updated_at,
     )
@@ -179,6 +184,8 @@ def update_category(
         category.code = category_in.code.upper()
     if category_in.description is not None:
         category.description = category_in.description
+    if category_in.is_active is not None:
+        category.is_active = category_in.is_active
 
     db.commit()
     db.refresh(category)
@@ -188,6 +195,7 @@ def update_category(
         name=category.name,
         code=category.code,
         description=category.description,
+        is_active=category.is_active,
         created_at=category.created_at,
         updated_at=category.updated_at,
     )
@@ -209,7 +217,24 @@ def delete_category(
     if items_count > 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete category with {items_count} associated items",
+            detail={
+                "message": "Category cannot be deleted because it is referenced by existing records.",
+                "references": [f"{items_count} item(s) use this category"],
+                "deactivate_instead": True,
+            },
+        )
+
+    from app.models.closing import FoodCostCalculation
+
+    closing_count = db.query(FoodCostCalculation).filter(FoodCostCalculation.category_id == category_id).count()
+    if closing_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Category cannot be deleted because it is referenced by existing records.",
+                "references": [f"{closing_count} outlet closing food-cost line(s) use this category"],
+                "deactivate_instead": True,
+            },
         )
 
     db.delete(category)
@@ -225,16 +250,19 @@ def delete_category(
 def get_units(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    is_active: Optional[bool] = None,
 ):
-    units = db.query(Unit).filter(
-        Unit.company_id == current_user.company_id
-    ).order_by(Unit.name.asc()).all()
+    query = db.query(Unit).filter(Unit.company_id == current_user.company_id)
+    if is_active is not None:
+        query = query.filter(Unit.is_active == is_active)
+    units = query.order_by(Unit.name.asc()).all()
     return [
         UnitResponse(
             id=u.id,
             company_id=u.company_id,
             name=u.name,
             symbol=u.symbol,
+            is_active=u.is_active,
             created_at=u.created_at,
             updated_at=u.updated_at,
         )
@@ -261,6 +289,7 @@ def create_unit(
         company_id=current_user.company_id,
         name=unit_in.name,
         symbol=unit_in.symbol.lower(),
+        is_active=True,
     )
     db.add(unit)
     db.commit()
@@ -270,6 +299,7 @@ def create_unit(
         company_id=unit.company_id,
         name=unit.name,
         symbol=unit.symbol,
+        is_active=unit.is_active,
         created_at=unit.created_at,
         updated_at=unit.updated_at,
     )
@@ -291,6 +321,7 @@ def get_unit(
         company_id=unit.company_id,
         name=unit.name,
         symbol=unit.symbol,
+        is_active=unit.is_active,
         created_at=unit.created_at,
         updated_at=unit.updated_at,
     )
@@ -313,6 +344,8 @@ def update_unit(
         unit.name = unit_in.name
     if unit_in.symbol is not None:
         unit.symbol = unit_in.symbol.lower()
+    if unit_in.is_active is not None:
+        unit.is_active = unit_in.is_active
 
     db.commit()
     db.refresh(unit)
@@ -321,9 +354,78 @@ def update_unit(
         company_id=unit.company_id,
         name=unit.name,
         symbol=unit.symbol,
+        is_active=unit.is_active,
         created_at=unit.created_at,
         updated_at=unit.updated_at,
     )
+
+@router.delete("/units/{unit_id}")
+def delete_unit(
+    unit_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Dependency-safe unit deletion.
+
+    If the unit is referenced by any master/transactional record, hard deletion
+    is blocked with a clear reason and the caller is asked to deactivate instead.
+    """
+    unit = db.query(Unit).filter(
+        Unit.id == unit_id,
+        Unit.company_id == current_user.company_id,
+    ).first()
+    if not unit:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unit not found")
+
+    from app.models.procurement import SupplierItem
+    from app.models.recipe import RecipeItem
+    from app.models.wastage import WastageItem
+    from app.models.closing import ClosingStockItem
+
+    reasons: list = []
+    item_count = db.query(Item).filter(Item.unit_id == unit_id).count()
+    if item_count:
+        reasons.append(f"{item_count} item(s) use this unit")
+
+    conv_count = db.query(UnitConversion).filter(
+        or_(UnitConversion.from_unit_id == unit_id, UnitConversion.to_unit_id == unit_id)
+    ).count()
+    if conv_count:
+        reasons.append(f"{conv_count} unit conversion rule(s) reference this unit")
+
+    sup_unit_count = db.query(SupplierItem).filter(SupplierItem.purchase_unit_id == unit_id).count()
+    if sup_unit_count:
+        reasons.append(f"{sup_unit_count} vendor-item mapping(s) use this purchase unit")
+
+    ledger_count = db.query(StockLedger).filter(StockLedger.unit_id == unit_id).count()
+    if ledger_count:
+        reasons.append(f"{ledger_count} stock ledger entr(ies) reference this unit")
+
+    recipe_unit_count = db.query(RecipeItem).filter(RecipeItem.unit_id == unit_id).count()
+    if recipe_unit_count:
+        reasons.append(f"{recipe_unit_count} recipe/BOM line(s) reference this unit")
+
+    wastage_unit_count = db.query(WastageItem).filter(WastageItem.unit_id == unit_id).count()
+    if wastage_unit_count:
+        reasons.append(f"{wastage_unit_count} wastage record(s) reference this unit")
+
+    closing_unit_count = db.query(ClosingStockItem).filter(ClosingStockItem.unit_id == unit_id).count()
+    if closing_unit_count:
+        reasons.append(f"{closing_unit_count} outlet closing stock line(s) reference this unit")
+
+    if reasons:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Unit cannot be deleted because it is referenced by existing records.",
+                "references": reasons,
+                "deactivate_instead": True,
+            },
+        )
+
+    db.delete(unit)
+    db.commit()
+    return {"message": "Unit deleted successfully", "id": unit_id}
 
 @router.get("/unit-conversions", response_model=List[UnitConversionResponse])
 def get_unit_conversions(
@@ -738,10 +840,60 @@ def delete_item(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
-    # Soft delete
-    item.is_active = False
+    # ------------------------------------------------------------------
+    # Dependency-safe deletion:
+    # If the item is referenced by any transactional/master record we do
+    # NOT hard-delete. Instead we deactivate (Active/Inactive) and report
+    # the exact references that prevent destructive deletion.
+    # ------------------------------------------------------------------
+    from app.models.procurement import (
+        PurchaseRequestItem,
+        PurchaseOrderItem,
+        GoodsReceiveItem,
+        SupplierItem,
+        SmartRequirementItem,
+    )
+    from app.models.recipe import Recipe, RecipeItem, ProductionConsumption
+    from app.models.billing import VendorBillItem
+    from app.models.wastage import WastageItem
+    from app.models.closing import ClosingStockItem
+
+    ref_checks = [
+        ("stock balance(s)", db.query(StockBalance).filter(StockBalance.item_id == item_id).count()),
+        ("stock batch(es)", db.query(StockBatch).filter(StockBatch.item_id == item_id).count()),
+        ("stock ledger entr(ies)", db.query(StockLedger).filter(StockLedger.item_id == item_id).count()),
+        ("purchase requisition line(s)", db.query(PurchaseRequestItem).filter(PurchaseRequestItem.item_id == item_id).count()),
+        ("purchase order line(s)", db.query(PurchaseOrderItem).filter(PurchaseOrderItem.item_id == item_id).count()),
+        ("GRN line(s)", db.query(GoodsReceiveItem).filter(GoodsReceiveItem.item_id == item_id).count()),
+        ("recipe/BOM(s) as finished item", db.query(Recipe).filter(Recipe.finished_item_id == item_id).count()),
+        ("recipe/BOM ingredient line(s)", db.query(RecipeItem).filter(RecipeItem.raw_item_id == item_id).count()),
+        ("production consumption line(s)", db.query(ProductionConsumption).filter(ProductionConsumption.raw_item_id == item_id).count()),
+        ("store transfer line(s)", db.query(StockTransferItem).filter(StockTransferItem.item_id == item_id).count()),
+        ("wastage line(s)", db.query(WastageItem).filter(WastageItem.item_id == item_id).count()),
+        ("vendor-item mapping(s)", db.query(SupplierItem).filter(SupplierItem.item_id == item_id).count()),
+        ("vendor bill line(s)", db.query(VendorBillItem).filter(VendorBillItem.item_id == item_id).count()),
+        ("outlet closing stock line(s)", db.query(ClosingStockItem).filter(ClosingStockItem.item_id == item_id).count()),
+        ("stock count line(s)", db.query(StockCountItem).filter(StockCountItem.item_id == item_id).count()),
+        ("store location assignment(s)", db.query(StoreLocation).filter(StoreLocation.item_id == item_id).count()),
+        ("smart requirement line(s)", db.query(SmartRequirementItem).filter(SmartRequirementItem.item_id == item_id).count()),
+    ]
+    existing_refs = [f"{count} {label}" for label, count in ref_checks if count]
+
+    if existing_refs:
+        # Destructive deletion is blocked by backend. Deactivate instead.
+        item.is_active = False
+        db.commit()
+        return {
+            "message": "Item deactivated instead of deleted because it is referenced by existing records.",
+            "id": item_id,
+            "deactivated": True,
+            "references": existing_refs,
+            "deactivate_instead": True,
+        }
+
+    db.delete(item)
     db.commit()
-    return {"message": "Item deactivated successfully"}
+    return {"message": "Item deleted successfully", "id": item_id}
 
 
 # =============================================================

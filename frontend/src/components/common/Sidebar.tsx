@@ -122,7 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ...(isHeadOffice && isAdmin ? [{ id: 'multiOutlet' as WorkspaceId, label: 'Multi-Outlet Intelligence', icon: BarChart3, badge: 'HQ' }] : []),
         ...(isAdmin ? [{ id: 'supplierPerformance' as WorkspaceId, label: 'Supplier Performance', icon: Truck, badge: 'Procurement' }] : []),
         ...(isAdmin ? [{ id: 'approvals' as WorkspaceId, label: 'Approval Center', icon: CheckSquare, badge: 'Pending' }] : []),
-        { id: 'organization' as WorkspaceId, label: 'Outlets & Master Structure', icon: Building2, badge: null },
+        { id: 'organization' as WorkspaceId, label: 'Project Setup', icon: Building2, badge: null },
       ],
     },
     {

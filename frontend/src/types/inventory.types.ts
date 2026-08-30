@@ -16,6 +16,7 @@ export interface Category {
   name: string;
   code: string;
   description?: string;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -25,6 +26,7 @@ export interface Unit {
   company_id?: string;
   name: string;
   symbol: string;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 }
