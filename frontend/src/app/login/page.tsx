@@ -27,7 +27,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.push('/');
+      router.replace('/');
     }
   }, [isLoading, isAuthenticated, router]);
 
@@ -41,7 +41,7 @@ export default function LoginPage() {
       
       if (result.success) {
         console.log('[Auth] Backend authentication successful');
-        router.push('/');
+        router.replace('/');
       } else {
         console.error('[Auth] Backend authentication error:', result.error);
         setError(result.error || 'Google login failed');

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useOutlet } from '../../context/OutletContext';
 import { usePWA } from '../../context/PWAContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   Building2,
   ChevronDown,
@@ -15,6 +16,7 @@ import {
   Menu,
   X,
   Check,
+  LogOut,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -24,6 +26,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const { outlets, activeOutlet, setActiveOutlet, isHeadOffice } = useOutlet();
   const { isInstallable, installPWA, isOnline, updateAvailable, applyUpdate } = usePWA();
+  const { logout, user } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   return (
@@ -187,6 +190,18 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
               <ShieldCheck className="w-3.5 h-3.5 text-[#C79A3B]" />
               <span>{isHeadOffice ? 'HQ Scope' : 'Restricted'}</span>
             </div>
+
+            {/* Logout Action */}
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="flex items-center gap-1 bg-[#D9534F]/10 hover:bg-[#D9534F]/20 text-[#D9534F] border border-[#D9534F]/30 px-2 sm:px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all shadow-xs active:scale-95 shrink-0"
+              title={`Logged in as ${user?.email || 'Admin'} · Click to Logout`}
+              aria-label="Logout"
+            >
+              <LogOut className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
           </div>
         </div>
       </div>

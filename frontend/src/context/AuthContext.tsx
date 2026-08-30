@@ -18,14 +18,27 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('apex_user_profile');
+        if (cached) return JSON.parse(cached);
+      } catch {}
+    }
+    return null;
+  });
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('apex_auth_token');
     }
     return null;
   });
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!token);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return Boolean(localStorage.getItem('apex_auth_token'));
+    }
+    return false;
+  });
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const fetchUserProfile = useCallback(async (authToken?: string) => {
@@ -48,25 +61,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsAuthenticated(true);
         setToken(activeToken);
 
-        // Sync default active branch UUID if set
-        const activeBranch = res.data.active_branch || res.data.activeBranch;
-        if (activeBranch && typeof window !== 'undefined') {
-          if (!localStorage.getItem('apex_active_outlet_id')) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('apex_user_profile', JSON.stringify(res.data));
+          const activeBranch = res.data.active_branch || res.data.activeBranch;
+          if (activeBranch && !localStorage.getItem('apex_active_outlet_id')) {
             localStorage.setItem('apex_active_outlet_id', activeBranch.id);
             localStorage.setItem('apex_active_outlet_code', activeBranch.code);
           }
         }
       }
     } catch (err: any) {
-      console.warn('[Auth] Failed to restore session from token:', err?.response?.data || err.message);
-      // If token expired, clear local storage
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('apex_auth_token');
-        localStorage.removeItem('apex_refresh_token');
+      console.warn('[Auth] Session check response:', err?.response?.data || err.message);
+      if (err?.response?.status === 401) {
+        // Token is definitively invalid/expired
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('apex_auth_token');
+          localStorage.removeItem('apex_refresh_token');
+          localStorage.removeItem('apex_user_profile');
+        }
+        setUser(null);
+        setToken(null);
+        setIsAuthenticated(false);
+      } else {
+        // Network / offline error — preserve authenticated session from local cache
+        if (typeof window !== 'undefined') {
+          const cachedProfile = localStorage.getItem('apex_user_profile');
+          if (cachedProfile && activeToken) {
+            try {
+              setUser(JSON.parse(cachedProfile));
+              setIsAuthenticated(true);
+              setToken(activeToken);
+            } catch {}
+          }
+        }
       }
-      setUser(null);
-      setToken(null);
-      setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
@@ -98,6 +126,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (data.user) {
           setUser(data.user);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('apex_user_profile', JSON.stringify(data.user));
+          }
           const activeBranch = data.user.active_branch || data.user.activeBranch;
           if (activeBranch && typeof window !== 'undefined') {
             localStorage.setItem('apex_active_outlet_id', activeBranch.id);
@@ -138,6 +169,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsAuthenticated(true);
         if (data.user) {
           setUser(data.user);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('apex_user_profile', JSON.stringify(data.user));
+          }
         } else {
           await fetchUserProfile(accessToken);
         }
@@ -159,12 +193,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (typeof window !== 'undefined') {
         localStorage.removeItem('apex_auth_token');
         localStorage.removeItem('apex_refresh_token');
+        localStorage.removeItem('apex_user_profile');
         localStorage.removeItem('apex_active_outlet_id');
         localStorage.removeItem('apex_active_outlet_code');
+        localStorage.removeItem('apex_active_outlet_name');
+        localStorage.removeItem('apex_active_outlet_type');
       }
       setToken(null);
       setUser(null);
       setIsAuthenticated(false);
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
     }
   };
 

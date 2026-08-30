@@ -29,6 +29,7 @@ import {
   Sparkles,
   ShieldCheck,
   ChevronRight,
+  LogOut,
 } from 'lucide-react';
 
 interface OutletDashboardProps {
@@ -38,7 +39,7 @@ interface OutletDashboardProps {
 
 export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setActiveWorkspace }) => {
   const { activeOutlet, closingInfo, refreshOutlets } = useOutlet();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const userRole = typeof user?.role === 'object' ? user.role.name : (user?.role || 'OUTLET_STAFF');
 
   const [dashboardData, setDashboardData] = useState<OutletDashboardResponse | null>(null);
@@ -295,6 +296,17 @@ export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setA
               title="Refresh Live Outlet Data"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-[#B8862D]' : ''}`} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#D9534F]/10 hover:bg-[#D9534F]/20 text-[#D9534F] border border-[#D9534F]/30 text-xs font-bold transition-all shadow-xs active:scale-[0.98]"
+              title="Sign Out of Outlet Session"
+              aria-label="Logout"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>

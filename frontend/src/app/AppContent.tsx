@@ -59,7 +59,7 @@ export const AppContent = () => {
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
-      router.push('/login');
+      router.replace('/login');
     }
   }, [authLoading, isAuthenticated, router]);
 
@@ -84,7 +84,14 @@ export const AppContent = () => {
   }, [fetchHealth, isAuthenticated]);
 
   if (authLoading || !isAuthenticated) {
-    return <div className="min-h-screen flex items-center justify-center bg-[#F5F3EE]">Loading...</div>;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#F5F3EE] p-4 text-center">
+        <div className="w-12 h-12 mb-3 bg-[#C79A3B] rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-md animate-pulse">
+          CB
+        </div>
+        <p className="text-xs font-semibold text-[#707070] font-['Outfit']">Authenticating session...</p>
+      </div>
+    );
   }
 
   return (

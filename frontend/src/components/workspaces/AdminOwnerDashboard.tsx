@@ -29,6 +29,7 @@ import {
   Bot,
   Wallet,
   X,
+  LogOut,
 } from 'lucide-react';
 import { StatCard, Badge, Button, EmptyState, AlertBanner, FeedbackState } from '@/components/ui';
 import { LowStockAlertItem, InventoryValuationResponse, ExecutiveDashboardResponse } from '@/types/reports.types';
@@ -90,7 +91,7 @@ const formatQty = (val?: number | null) => {
 };
 export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setActiveWorkspace }) => {
   const { outlets, activeOutlet } = useOutlet();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { isOnline } = usePWA();
 
   const adminName =
@@ -312,16 +313,27 @@ return (
               </span>
             </div>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleRefresh}
-            loading={refreshing}
-            icon={<RefreshCw className="w-3.5 h-3.5 text-[#B8862D]" />}
-            className="self-start sm:self-auto"
-          >
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRefresh}
+              loading={refreshing}
+              icon={<RefreshCw className="w-3.5 h-3.5 text-[#B8862D]" />}
+            >
+              Refresh
+            </Button>
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#D9534F]/10 hover:bg-[#D9534F]/20 text-[#D9534F] border border-[#D9534F]/30 text-xs font-bold transition-all active:scale-[0.98] shadow-xs"
+              title="Sign Out of Admin Session"
+              aria-label="Logout"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Logout</span>
+            </button>
+          </div>
         </div>
       </div>
 

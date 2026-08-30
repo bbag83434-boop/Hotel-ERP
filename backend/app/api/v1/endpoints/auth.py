@@ -254,7 +254,12 @@ def get_current_user_profile(
     return build_user_profile(current_user, db, outlet_id)
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
-def logout(current_user: User = Depends(get_current_active_user)):
+def logout(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    current_user.refresh_token = None
+    db.commit()
     return {
         "success": True,
         "message": "Successfully logged out of active session"

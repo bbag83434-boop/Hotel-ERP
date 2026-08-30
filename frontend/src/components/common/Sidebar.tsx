@@ -33,6 +33,7 @@ import {
   Banknote,
   MessageCircle,
   FileText,
+  LogOut,
 } from 'lucide-react';
 
 export type WorkspaceId =
@@ -87,7 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { activeOutlet, isHeadOffice } = useOutlet();
   const { isOnline } = usePWA();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   const userRole = typeof user?.role === 'object' ? user.role.name : (user?.role || '');
   const isAdmin = ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN'].includes(
@@ -279,13 +280,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </div>
 
-      {/* Footer / System Meta */}
-      <div className="p-3 border-t border-[rgba(45,45,45,0.06)] text-[10px] text-[#707070] flex items-center justify-between">
-        <span>FastAPI + Neon PostgreSQL</span>
-        <span className="flex items-center gap-1 text-[#2E8B57] font-semibold">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#2E8B57] animate-pulse" />
-          Ready
-        </span>
+      {/* User Session & Logout */}
+      <div className="p-3 border-t border-[rgba(45,45,45,0.06)] bg-white/60 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-[#1C1C1C] truncate font-['Outfit']">
+              {user?.first_name || user?.firstName || 'Admin'} {user?.last_name || user?.lastName || ''}
+            </p>
+            <p className="text-[10px] text-[#707070] truncate">{user?.email || 'bbag83434@gmail.com'}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="p-1.5 rounded-lg bg-[#D9534F]/10 hover:bg-[#D9534F]/20 text-[#D9534F] border border-[#D9534F]/30 transition-all active:scale-95 shrink-0"
+            title="Logout / Sign Out"
+            aria-label="Logout"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <div className="flex items-center justify-between text-[10px] text-[#707070] pt-1 border-t border-[rgba(45,45,45,0.04)]">
+          <span>v2.0 Live Architecture</span>
+          <span className="flex items-center gap-1 text-[#2E8B57] font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2E8B57] animate-pulse" />
+            Active
+          </span>
+        </div>
       </div>
     </div>
   );
