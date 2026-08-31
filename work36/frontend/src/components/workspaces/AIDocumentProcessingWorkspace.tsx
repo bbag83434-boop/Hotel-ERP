@@ -1,0 +1,21 @@
+'use client';
+import React, { useEffect, useState } from 'react';
+import { FileText, Upload, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { aiDocumentsApi } from '@/api/aiDocuments';
+import { useOutlet } from '@/context/OutletContext';
+
+const ACCEPT='application/pdf,image/jpeg,image/png';
+function toBase64(file: File): Promise<string>{ return new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(String(r.result).split(',')[1]||''); r.onerror=reject; r.readAsDataURL(file); }); }
+export default function AIDocumentProcessingWorkspace(){
+ const {activeOutlet}=useOutlet(); const [file,setFile]=useState<File|null>(null); const [loading,setLoading]=useState(false); const [result,setResult]=useState<any>(null); const [rows,setRows]=useState<any[]>([]); const [error,setError]=useState('');
+ const load=async()=>{try{const r=await aiDocumentsApi.list();setRows(r.data||[])}catch(e:any){setError(e?.response?.data?.detail||'Unable to load document history')}}; useEffect(()=>{load()},[]);
+ const process=async()=>{if(!file)return;setLoading(true);setError('');setResult(null);try{const type=file.type||'application/octet-stream';if(!ACCEPT.split(',').includes(type))throw new Error('Only PDF, JPG and PNG are supported.');const b64=await toBase64(file);const r=await aiDocumentsApi.upload({branch_id:activeOutlet?.id||undefined,document_type:'SUPPLIER_INVOICE',file_name:file.name,file_type:type,file_base64:b64,auto_extract:true});setResult(r.data);await load()}catch(e:any){setError(e?.response?.data?.detail||e.message||'Document processing failed')}finally{setLoading(false)}};
+ return <div className="space-y-4">
+  <div className="rounded-2xl border border-white/10 bg-white/[.04] p-5"><div className="flex items-start justify-between gap-3"><div><h2 className="text-xl font-semibold flex items-center gap-2"><FileText size={21}/>AI Invoice / Document Processing</h2><p className="text-sm text-white/60 mt-1">Upload a supplier invoice for guarded extraction. AI never posts a bill automatically.</p></div><ShieldCheck className="text-emerald-400"/></div>
+   <div className="mt-5 rounded-xl border border-dashed border-white/15 p-5"><input id="ai-doc-file" type="file" accept={ACCEPT} onChange={e=>setFile(e.target.files?.[0]||null)} className="block w-full text-sm"/><div className="mt-3 text-xs text-white/50">Maximum 10 MB. Scanned images require optional local OCR; otherwise the file is retained for review.</div><button onClick={process} disabled={!file||loading} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white text-black px-4 py-2 font-medium disabled:opacity-40">{loading?<RefreshCw className="animate-spin" size={16}/>:<Upload size={16}/>} {loading?'Processing…':'Upload & Extract'}</button></div>
+  </div>
+  {error&&<div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm flex gap-2"><AlertTriangle size={17}/>{error}</div>}
+  {result&&<div className="rounded-2xl border border-white/10 bg-white/[.04] p-5"><h3 className="font-semibold">Result — {result.status}</h3><div className="grid grid-cols-2 gap-3 mt-4 text-sm">{Object.entries(result.extracted_data||{}).map(([k,v])=><div key={k} className="rounded-xl bg-black/20 p-3"><div className="text-white/50 text-xs">{k}</div><div className="mt-1 break-words">{typeof v==='object'?JSON.stringify(v):String(v)}</div></div>)}</div>{result.provider&&<div className="text-xs text-white/40 mt-3">Provider: {result.provider} · Model: {result.model}</div>}</div>}
+  <div className="rounded-2xl border border-white/10 bg-white/[.04] p-5"><div className="flex justify-between items-center"><h3 className="font-semibold">Processing History</h3><button onClick={load} className="text-sm inline-flex items-center gap-1"><RefreshCw size={14}/>Refresh</button></div><div className="mt-3 space-y-2">{rows.length?rows.map(r=><div key={r.id} className="flex justify-between gap-3 rounded-xl bg-black/20 p-3 text-sm"><div><div>{r.file_name}</div><div className="text-xs text-white/40">{r.document_type} · {r.provider||'deterministic/manual'}</div></div><span className="text-xs rounded-full px-2 py-1 bg-white/10">{r.status}</span></div>):<div className="text-sm text-white/40 py-5 text-center">No documents processed.</div>}</div></div>
+ </div>
+}

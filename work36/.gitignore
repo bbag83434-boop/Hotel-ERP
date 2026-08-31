@@ -1,0 +1,53 @@
+# Environment files
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+backend/.env
+frontend/.env
+!.env.example
+!**/.env.example
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Build output
+frontend/dist/
+dist/
+out/
+frontend/out/
+.next/
+frontend/.next/
+
+# Allow backend server.js entrypoint wrappers for Render backend
+!backend/dist/
+!backend/dist/server.js
+!/dist/
+!/dist/server.js
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Uploaded Files
+uploads/
+backend/uploads/
+
+# Build Info
+*.tsbuildinfo
+
+# Antigravity CLI App State
+.gemini/
