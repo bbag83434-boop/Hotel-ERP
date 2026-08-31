@@ -1,0 +1,31 @@
+{
+  "name": "hotel-erp-frontend",
+  "private": true,
+  "version": "2.0.0",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build && node -e \"const fs=require('fs'); if(fs.existsSync('out')){fs.cpSync('out','dist',{recursive:true});console.log('✅ Generated Render publish directory: dist');}\"",
+    "start": "npx -y serve dist -l 3000 || npx -y serve out -l 3000 || next start -p 3000"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.456.0",
+    "next": "^14.2.24",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.4",
+    "serve": "^14.2.4",
+    "tailwind-merge": "^2.5.4",
+    "zustand": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3"
+  }
+}

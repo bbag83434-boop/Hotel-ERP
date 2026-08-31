@@ -1,0 +1,42 @@
+services:
+  # 1. Python + FastAPI Backend Web Service (Existing Render Service: Hotel-ERP)
+  - type: web
+    name: Hotel-ERP
+    runtime: python
+    env: python
+    rootDir: backend
+    buildCommand: python -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r requirements.txt
+    startCommand: .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ENVIRONMENT
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: BACKEND_CORS_ORIGINS
+        sync: false
+
+  # 2. Next.js App Router + Tailwind CSS + PWA Frontend Web Service (Hotel-ERP-Frontend)
+  - type: web
+    name: Hotel-ERP-Frontend
+    runtime: node
+    env: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: NEXT_PUBLIC_API_URL
+        sync: false

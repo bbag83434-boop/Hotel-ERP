@@ -1,0 +1,19 @@
+import uuid
+from datetime import datetime
+from sqlalchemy import Column, String, DateTime
+from app.core.database import Base
+
+class BaseModel(Base):
+    __abstract__ = True
+    
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    created_at = Column("createdAt", DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    @property
+    def createdAt(self):
+        return self.created_at
+
+    @property
+    def updatedAt(self):
+        return self.updated_at
