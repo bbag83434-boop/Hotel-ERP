@@ -88,8 +88,8 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                 />
                 <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 w-auto sm:w-80 max-h-[80vh] sm:max-h-96 overflow-y-auto bg-white border border-[rgba(45,45,45,0.12)] rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
                   <div className="flex items-center justify-between px-3 py-2 border-b border-[rgba(45,45,45,0.06)]">
-                    <span className="text-[10px] font-bold text-[#707070] uppercase tracking-wider">
-                      Select Active Outlet ({outlets.length})
+                    <span className="text-[10px] font-semibold text-[#707070]">
+                      Select active outlet ({outlets.length})
                     </span>
                     <button
                       type="button"
@@ -115,7 +115,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                               setActiveOutlet(outlet);
                               setDropdownOpen(false);
                             }}
-                            className={`w-full text-left px-3 py-2.5 rounded-xl text-xs flex items-center justify-between transition-colors ${
+                            className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors ${
                               isSelected
                                 ? 'bg-[#F1E4C5] text-[#B8862D] font-bold'
                                 : 'text-[#1C1C1C] hover:bg-[#FAF8F5]'
@@ -129,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(45,45,45,0.05)] text-[#707070]">
-                                {outlet.type.replace('_', ' ')}
+                                {outlet.type.replace(/_/g, ' ').toLowerCase()}
                               </span>
                               {isSelected && <Check className="w-3.5 h-3.5 text-[#B8862D]" />}
                             </div>
@@ -138,6 +138,19 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                       })
                     )}
                   </div>
+                  {activeOutlet?.id && (
+                    <div className="pt-1.5 mt-1 border-t border-[rgba(45,45,45,0.06)] px-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDropdownOpen(false);
+                        }}
+                        className="w-full text-center py-1 text-[11px] text-[#C9A24B] hover:text-[#B8862D] font-medium transition-colors"
+                      >
+                        Single-outlet cockpit
+                      </button>
+                    </div>
+                  )}
                 </div>
               </>
             )}

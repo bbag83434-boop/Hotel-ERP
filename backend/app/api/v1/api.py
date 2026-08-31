@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, auth, users, organization, hr, inventory, recipe, procurement, wastage, reports, ai, orders, billing, customer_support, maintenance, beverage, finance, hotel, cashier_shift, expense, ai_provider, ai_tools, notifications, ai_document, whatsapp
+from app.api.v1.endpoints import health, auth, users, organization, hr, inventory, recipe, procurement, wastage, reports, ai, orders, billing, customer_support, maintenance, beverage, finance, hotel, cashier_shift, expense, ai_provider, ai_tools, notifications, ai_document, whatsapp, dashboard
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication & RBAC"])
@@ -20,6 +20,7 @@ api_router.include_router(beverage.router, prefix="/beverage", tags=["Beverage C
 api_router.include_router(finance.router, prefix="/finance", tags=["Accounts & Finance"])
 api_router.include_router(hotel.router, prefix="/hotel", tags=["Hotel Operations"])
 api_router.include_router(health.router, prefix="/health", tags=["Health & Diagnostics"])
+api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 
 
 

@@ -51,3 +51,13 @@ export interface AIAssistantResponse {
   intent: string;
   timestamp: string;
 }
+
+export interface DailyTrendItem {
+  date: string;
+  sales: number;
+  purchase: number;
+}
+
+export interface DashboardTrendResponse {
+  trend: DailyTrendItem[];
+}
