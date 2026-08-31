@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_, or_
 
 from app.core.database import get_db
-from app.api.v1.endpoints.auth import get_current_active_user
+from app.core.auth import get_current_active_user, require_head_office_role
 from app.models.user import User, Role, UserBranch
 from app.models.organization import Branch, Warehouse
 from app.models.inventory import Item, Unit, StockBalance, StockLedger
@@ -367,6 +367,7 @@ def approve_wastage_entry(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    require_head_office_role(current_user, db)
     entry = db.query(WastageEntry).filter(
         WastageEntry.id == entry_id,
         WastageEntry.company_id == current_user.company_id
@@ -378,6 +379,9 @@ def approve_wastage_entry(
 
     if entry.status not in [WastageStatus.PENDING_APPROVAL, WastageStatus.DRAFT]:
         raise BadRequestException(f"Cannot approve: entry is currently in '{entry.status}' status.")
+
+    if entry.reported_by_id == current_user.id:
+        raise ForbiddenException("A wastage reporter cannot approve their own entry.")
 
     # Deduct stock and record ledger entries
     for item in entry.items:
@@ -451,6 +455,7 @@ def reject_wastage_entry(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    require_head_office_role(current_user, db)
     entry = db.query(WastageEntry).filter(
         WastageEntry.id == entry_id,
         WastageEntry.company_id == current_user.company_id

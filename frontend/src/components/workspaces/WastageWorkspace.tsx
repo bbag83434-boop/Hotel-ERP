@@ -2,8 +2,26 @@
 
 import React, { useState, useEffect } from 'react';
 import { useOutlet } from '@/context/OutletContext';
+import { useAuth } from '@/context/AuthContext';
 import { wastageApi } from '@/api/wastage';
 import { inventoryApi } from '@/api/inventory';
+
+const HQ_APPROVER_ROLES = [
+  'SUPER_ADMIN',
+  'OWNER',
+  'HQ_ADMIN',
+  'HEAD_OFFICE_ADMIN',
+  'CENTRAL_PURCHASE_MANAGER',
+  'GENERAL_MANAGER',
+  'DIRECTOR',
+];
+
+const isHqApprover = (user: any): boolean => {
+  if (!user) return false;
+  const roleName = typeof user.role === 'string' ? user.role : user.role?.name;
+  if (!roleName) return false;
+  return HQ_APPROVER_ROLES.includes(roleName.trim().toUpperCase());
+};
 import {
   AlertTriangle,
   Trash2,
@@ -37,6 +55,7 @@ import { Badge, Button, StatCard, SearchInput, AlertBanner, EmptyState, Modal } 
 
 export const WastageWorkspace: React.FC = () => {
   const { activeOutlet } = useOutlet();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'entries' | 'log_new' | 'analytics'>('entries');
   const [entries, setEntries] = useState<WastageEntry[]>([]);
   const [analytics, setAnalytics] = useState<WastageAnalytics | null>(null);
@@ -470,23 +489,38 @@ export const WastageWorkspace: React.FC = () => {
                             <div className="flex items-center justify-end gap-1.5">
                               {e.status === 'PENDING_APPROVAL' && (
                                 <>
-                                  <button
-                                    onClick={() => handleApprove(e.id)}
-                                    title="Authorize Wastage & Deduct Stock"
-                                    className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 transition-all active:scale-95"
-                                  >
-                                    <Check className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setSelectedEntry(e);
-                                      setRejectionModalOpen(true);
-                                    }}
-                                    title="Reject Wastage Record"
-                                    className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-all active:scale-95"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
+                                  {isHqApprover(user) ? (
+                                    <>
+                                      <button
+                                        onClick={() => handleApprove(e.id)}
+                                        disabled={e.reported_by_id === user?.id}
+                                        title={
+                                          e.reported_by_id === user?.id
+                                            ? 'Cannot approve own wastage entry (Self-approval blocked)'
+                                            : 'Authorize Wastage & Deduct Stock'
+                                        }
+                                        className={`p-1.5 rounded-lg border transition-all ${
+                                          e.reported_by_id === user?.id
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                            : 'bg-green-50 hover:bg-green-100 text-green-700 border-green-200 active:scale-95'
+                                        }`}
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setSelectedEntry(e);
+                                          setRejectionModalOpen(true);
+                                        }}
+                                        title="Reject Wastage Record"
+                                        className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-all active:scale-95"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <span className="text-[11px] text-[#9A9A9E] italic">Pending HQ Approval</span>
+                                  )}
                                 </>
                               )}
                               {e.status === 'DRAFT' && (

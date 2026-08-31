@@ -6,7 +6,7 @@ from sqlalchemy import text
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.core.exceptions import UnauthorizedException, ForbiddenException
-from app.models.user import User, RolePermission, Permission
+from app.models.user import User, RolePermission, Permission, Role
 from app.models.organization import Branch
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -88,3 +88,41 @@ def require_outlet_scope(
         raise ForbiddenException(f"Access denied: User is not authorized for outlet scope '{outlet_id}'")
 
     return outlet_id
+
+
+# ==============================================================================
+# Head Office Approver Roles & Authorization Guard
+# ==============================================================================
+
+HQ_APPROVER_ROLES = {
+    "SUPER_ADMIN",
+    "OWNER",
+    "HQ_ADMIN",
+    "HEAD_OFFICE_ADMIN",
+    "CENTRAL_PURCHASE_MANAGER",
+    "GENERAL_MANAGER",
+    "DIRECTOR",
+}
+
+def require_head_office_role(current_user: User, db: Session) -> Role:
+    """
+    Validates that current_user has an authorized Head Office approver role.
+    Strictly checks exact case-insensitive normalized role name against HQ_APPROVER_ROLES.
+    Does NOT use UserBranch assignment as an alternative.
+    Fails closed with HTTP 403 Forbidden if user has no role or is not whitelisted.
+    """
+    if not current_user or not current_user.role_id:
+        raise ForbiddenException("Access denied: User has no valid role assigned.")
+
+    role = current_user.role or db.query(Role).filter(Role.id == current_user.role_id).first()
+    if not role or not role.name:
+        raise ForbiddenException("Access denied: User role could not be resolved.")
+
+    normalized_role = role.name.strip().upper()
+    if normalized_role not in HQ_APPROVER_ROLES:
+        raise ForbiddenException(
+            f"Access denied: Role '{role.name}' is not authorized to perform approval or rejection actions. Head Office authorization required."
+        )
+
+    return role
+

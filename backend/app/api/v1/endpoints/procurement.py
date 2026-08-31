@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, desc, func
 
 from app.core.database import get_db
-from app.core.auth import get_current_active_user, require_permission, require_outlet_scope
+from app.core.auth import get_current_active_user, require_permission, require_outlet_scope, require_head_office_role
 from app.core.exceptions import (
     NotFoundException,
     BadRequestException,
@@ -958,7 +958,9 @@ def approve_purchase_request(
 ):
     """
     Approves a Purchase Request, enabling it for supplier consolidation or direct PO issuance.
+    Strictly restricted to authorized Head Office roles.
     """
+    require_head_office_role(current_user, db)
     req = db.query(PurchaseRequest).filter(PurchaseRequest.id == request_id).first()
     if not req:
         raise NotFoundException(f"Purchase Request '{request_id}' not found.")
@@ -996,7 +998,11 @@ def reject_purchase_request(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Rejects a Purchase Request with required reason."""
+    """
+    Rejects a Purchase Request with required reason.
+    Strictly restricted to authorized Head Office roles.
+    """
+    require_head_office_role(current_user, db)
     req = db.query(PurchaseRequest).filter(PurchaseRequest.id == request_id).first()
     if not req:
         raise NotFoundException(f"Purchase Request '{request_id}' not found.")
