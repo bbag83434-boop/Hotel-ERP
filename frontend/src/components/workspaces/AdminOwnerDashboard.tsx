@@ -114,7 +114,7 @@ const CustomChartTooltip = ({ active, payload, label }: any) => {
 };
 
 export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setActiveWorkspace }) => {
-  const { outlets, activeOutlet } = useOutlet();
+  const { outlets, activeOutlet, isHeadOffice } = useOutlet();
   const { user, logout } = useAuth();
 
   const [trendData, setTrendData] = useState<DailyTrendItem[]>([]);
@@ -143,11 +143,13 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
     else setLoading(true);
     setError(null);
 
+    const targetBranchId = (!isHeadOffice && activeOutlet?.id) ? activeOutlet.id : undefined;
+
     try {
       const [trendRes, execRes, invRes] = await Promise.allSettled([
-        dashboardApi.getTrend(30),
-        reportsApi.getExecutiveSummary({ startDate: todayStart(), endDate: todayEnd() }),
-        reportsApi.getInventoryValuation(),
+        dashboardApi.getTrend(30, targetBranchId),
+        reportsApi.getExecutiveSummary({ startDate: todayStart(), endDate: todayEnd(), branchId: targetBranchId }),
+        reportsApi.getInventoryValuation({ branchId: targetBranchId }),
       ]);
 
       if (trendRes.status === 'fulfilled') {
@@ -162,7 +164,9 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
 
       // Fetch AI stock recommendations from existing endpoint
       try {
-        const aiRes = await apiClient.get('/ai/recommendations/stock');
+        const aiRes = await apiClient.get('/ai/recommendations/stock', {
+          params: targetBranchId ? { branch_id: targetBranchId } : {},
+        });
         if (aiRes.data?.recommendations) {
           setAiRecs(aiRes.data.recommendations);
         } else if (Array.isArray(aiRes.data)) {
@@ -177,7 +181,7 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [isHeadOffice, activeOutlet?.id]);
 
   useEffect(() => {
     loadData();
@@ -207,7 +211,7 @@ export const AdminOwnerDashboard: React.FC<AdminOwnerDashboardProps> = ({ setAct
               CB Hotel Management
             </h1>
             <p className="text-[10px] text-[#9A9A9E] truncate">
-              {activeOutlet?.name || 'Head office view'}
+              {isHeadOffice ? 'Head Office & Central Commissary' : (activeOutlet?.name || 'Head Office scope')}
             </p>
           </div>
         </div>

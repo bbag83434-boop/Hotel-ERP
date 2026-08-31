@@ -37,7 +37,7 @@ export default function ApprovalCenterWorkspace() {
         procurementApi.getPurchaseRequests({ branch_id, status_filter: 'PENDING_APPROVAL' }).catch(() => []),
         procurementApi.getPurchaseOrders({ branch_id, status_filter: 'PENDING_APPROVAL' }).catch(() => []),
         procurementApi.getGoodsReceiveNotes({ branch_id, status_filter: 'PENDING_APPROVAL' }).catch(() => []),
-        apiClient.get('/wastage/entries', { params: { branch_id, status_filter: 'PENDING_APPROVAL' } }).then(unwrap).catch(() => []),
+        apiClient.get('/wastage/entries', { params: { branch_id, status: 'PENDING_APPROVAL' } }).then(unwrap).catch(() => []),
         apiClient.get('/hr/leaves', { params: { branch_id, status: 'PENDING' } }).then(unwrap).catch(() => []),
       ]);
       const next: ApprovalItem[] = [
@@ -70,7 +70,7 @@ export default function ApprovalCenterWorkspace() {
       if (item.type === 'WASTAGE') action === 'APPROVE' ? await apiClient.post(`/wastage/entries/${item.id}/approve`, {}) : await apiClient.post(`/wastage/entries/${item.id}/reject`, { rejection_reason: 'Rejected from Approval Center' });
       if (item.type === 'LEAVE') await apiClient.put(`/hr/leaves/${item.id}`, { status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED' });
       setMessage(`${item.title} ${action === 'APPROVE' ? 'approved' : 'rejected'}.`); await load();
-    } catch (e:any) { setMessage(e?.response?.data?.detail || e?.response?.data?.message || 'Approval action failed.'); }
+    } catch (e:any) { setMessage(e?.response?.data?.error?.message || e?.response?.data?.detail || e?.response?.data?.message || 'Approval action failed.'); }
     finally { setActing(null); }
   };
 

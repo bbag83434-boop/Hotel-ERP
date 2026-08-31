@@ -34,10 +34,11 @@ export const reportsApi = {
     });
     return res.data;
   },
-  getExecutiveSummary: async (params?: { startDate?: string; endDate?: string }): Promise<ExecutiveDashboardResponse> => {
+  getExecutiveSummary: async (params?: { startDate?: string; endDate?: string; branchId?: string }): Promise<ExecutiveDashboardResponse> => {
     const res = await axios.get(`${API_BASE}/reports/executive-summary`, {
       ...getAuthHeaders(),
       params: {
+        branch_id: params?.branchId,
         start_date: params?.startDate,
         end_date: params?.endDate,
       },

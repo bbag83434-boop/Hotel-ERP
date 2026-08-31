@@ -44,12 +44,13 @@ def _check_dashboard_access(current_user: User, db: Session):
 @router.get("/trend", response_model=DashboardTrendResponse)
 def get_sales_vs_purchase_trend(
     days: int = Query(30, ge=1, le=365, description="Number of days for sales vs purchase trend"),
+    branch_id: Optional[str] = Query(None, description="Optional branch ID to filter by specific outlet"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """
     Consolidated 30-day (or custom duration) Sales vs Purchase daily trend.
-    Aggregated across all outlets for HEAD_OFFICE scope.
+    Aggregated across all outlets for HEAD_OFFICE scope or filtered by branch_id when provided.
     Fills missing dates with 0.0 for a continuous chart series.
     """
     _check_dashboard_access(current_user, db)
@@ -61,19 +62,23 @@ def get_sales_vs_purchase_trend(
     start_datetime = datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0)
     end_datetime = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, 999999)
 
-    # 1. Query Sales aggregated across all company branches
-    sales_query = db.query(
-        func.date(RestaurantOrder.created_at).label("day"),
-        func.sum(RestaurantOrder.total_amount).label("total_sales")
-    ).filter(
+    # 1. Query Sales (filtered by branch_id if provided, otherwise all company branches)
+    sales_filters = [
         RestaurantOrder.company_id == current_user.company_id,
         RestaurantOrder.created_at >= start_datetime,
         RestaurantOrder.created_at <= end_datetime,
         RestaurantOrder.status != OrderStatus.CANCELLED.value,
         RestaurantOrder.status != OrderStatus.CANCELLED
-    ).group_by(func.date(RestaurantOrder.created_at)).all()
+    ]
+    if branch_id:
+        sales_filters.append(RestaurantOrder.branch_id == branch_id)
 
-    # 2. Query Purchases aggregated across all company branches
+    sales_query = db.query(
+        func.date(RestaurantOrder.created_at).label("day"),
+        func.sum(RestaurantOrder.total_amount).label("total_sales")
+    ).filter(*sales_filters).group_by(func.date(RestaurantOrder.created_at)).all()
+
+    # 2. Query Purchases (filtered by branch_id if provided, otherwise all company branches)
     approved_statuses = [
         POStatus.APPROVED,
         POStatus.ISSUED,
@@ -85,15 +90,19 @@ def get_sales_vs_purchase_trend(
         POStatus.PARTIALLY_RECEIVED.value
     ]
 
-    purchase_query = db.query(
-        func.date(PurchaseOrder.order_date).label("day"),
-        func.sum(PurchaseOrder.total_amount).label("total_purchase")
-    ).filter(
+    purchase_filters = [
         PurchaseOrder.company_id == current_user.company_id,
         PurchaseOrder.order_date >= start_datetime,
         PurchaseOrder.order_date <= end_datetime,
         PurchaseOrder.status.in_(approved_statuses)
-    ).group_by(func.date(PurchaseOrder.order_date)).all()
+    ]
+    if branch_id:
+        purchase_filters.append(PurchaseOrder.branch_id == branch_id)
+
+    purchase_query = db.query(
+        func.date(PurchaseOrder.order_date).label("day"),
+        func.sum(PurchaseOrder.total_amount).label("total_purchase")
+    ).filter(*purchase_filters).group_by(func.date(PurchaseOrder.order_date)).all()
 
     # Build continuous chronological dictionary for the requested date window
     date_map = {}

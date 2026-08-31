@@ -113,13 +113,14 @@ def _parse_date_range(start_date: Optional[datetime], end_date: Optional[datetim
 # ==============================================================================
 @router.get("/executive-summary", response_model=ExecutiveDashboardResponse)
 def get_executive_summary(
+    branch_id: Optional[str] = Query(None, description="Optional branch ID to filter executive summary by specific outlet"),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     start_date, end_date = _parse_date_range(start_date, end_date, default_days=30)
-    scoped_branches = _check_user_branch_access(current_user, None, db)
+    scoped_branches = _check_user_branch_access(current_user, branch_id, db)
 
     # 1. Query branches in scope
     branch_query = db.query(Branch).filter(Branch.company_id == current_user.company_id, Branch.is_active == True)
