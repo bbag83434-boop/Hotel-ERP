@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional
+import json
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -178,7 +179,7 @@ def create_order(
         action="CREATE",
         entity_type="RestaurantOrder",
         entity_id=order.id,
-        details=f"source={payload.source.value};orderNumber={order_number};externalOrderId={payload.external_order_id or ''}",
+        details=json.dumps({"source": payload.source.value, "order_number": order_number, "external_order_id": payload.external_order_id or ""}),
     ))
     db.commit()
     db.refresh(order)
@@ -320,7 +321,7 @@ def update_kds_status(
         action="KDS_STATUS",
         entity_type="RestaurantOrder",
         entity_id=order.id,
-        details=f"orderNumber={order.order_number};status={new_status}",
+        details=json.dumps({"order_number": order.order_number, "status": new_status}),
     ))
     db.commit()
     db.refresh(order)
@@ -478,7 +479,7 @@ def complete_order(
         action="COMPLETE",
         entity_type="RestaurantOrder",
         entity_id=order.id,
-        details=f"Auto stock deduction;warehouse={warehouse.id};orderNumber={order.order_number}",
+        details=json.dumps({"action": "Auto stock deduction", "warehouse_id": warehouse.id, "order_number": order.order_number}),
     ))
     db.commit()
     db.refresh(order)

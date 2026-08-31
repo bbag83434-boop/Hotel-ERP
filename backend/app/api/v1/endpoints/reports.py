@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_, or_
 
 from app.core.database import get_db
+from app.core.auth import HQ_APPROVER_ROLES
 from app.api.v1.endpoints.auth import get_current_active_user
 from app.models.user import User, Role, UserBranch
 from app.models.organization import Branch, Warehouse, Company
@@ -1035,8 +1036,8 @@ def get_outlet_dashboard(
     if current_user.role_id:
         role_obj = db.query(Role).filter(Role.id == current_user.role_id).first()
         if role_obj:
-            role_name = role_obj.name.upper()
-            if any(r in role_name for r in ["ADMIN", "SUPER", "DIRECTOR", "OWNER", "HQ", "GENERAL_MANAGER", "AREA", "CENTRAL"]):
+            role_name = role_obj.name.strip().upper()
+            if role_name in HQ_APPROVER_ROLES:
                 is_super_or_admin = True
 
     target_branch_id = branch_id

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, desc, func
 
 from app.core.database import get_db
-from app.core.auth import get_current_active_user, require_permission, require_outlet_scope, require_head_office_role
+from app.core.auth import get_current_active_user, require_permission, require_outlet_scope, require_head_office_role, HQ_APPROVER_ROLES
 from app.core.exceptions import (
     NotFoundException,
     BadRequestException,
@@ -170,7 +170,12 @@ def log_procurement_audit(
 
 def check_user_outlet_access(user: User, branch_id: str, db: Session):
     """Verifies that user is authorized for the given branch/outlet."""
-    if user.role and user.role.name in ["SUPER_ADMIN", "OWNER", "HQ_ADMIN", "CENTRAL_PURCHASE_MANAGER"]:
+    role = user.role
+    if not role and user.role_id:
+        role = db.query(User).filter(User.id == user.id).first()
+        from app.models.user import Role as RoleModel
+        role = db.query(RoleModel).filter(RoleModel.id == user.role_id).first()
+    if role and role.name and role.name.strip().upper() in HQ_APPROVER_ROLES:
         return True
     
     user_branch = db.query(UserBranch).filter(

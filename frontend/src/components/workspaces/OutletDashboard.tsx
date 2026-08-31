@@ -4,11 +4,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useOutlet } from '@/context/OutletContext';
 import { useAuth } from '@/context/AuthContext';
 import { reportsApi } from '@/api/reports';
+import { procurementApi } from '@/api/procurement';
+import { inventoryApi } from '@/api/inventory';
 import {
   OutletDashboardResponse,
   LowStockAlertItem,
   OutletActivityItem,
 } from '@/types/reports.types';
+import { SmartRequirementDraft, SmartRequirementItem } from '@/types/purchase.types';
+import { Item as CatalogItem } from '@/types/inventory.types';
 import { WorkspaceId } from '@/components/common/Sidebar';
 import {
   Building2,
@@ -30,6 +34,13 @@ import {
   ShieldCheck,
   ChevronRight,
   LogOut,
+  Plus,
+  Edit3,
+  Save,
+  Send,
+  Check,
+  X,
+  Layers,
 } from 'lucide-react';
 
 interface OutletDashboardProps {
@@ -46,6 +57,61 @@ export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setA
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+
+  // AI Purchase Assistant State
+  const [smartDraft, setSmartDraft] = useState<SmartRequirementDraft | null>(null);
+  const [smartItems, setSmartItems] = useState<SmartRequirementItem[]>([]);
+  const [loadingSmart, setLoadingSmart] = useState<boolean>(false);
+  const [savingSmart, setSavingSmart] = useState<boolean>(false);
+  const [confirmingSmart, setConfirmingSmart] = useState<boolean>(false);
+  const [smartSuccessMsg, setSmartSuccessMsg] = useState<string | null>(null);
+  const [smartErrorMsg, setSmartErrorMsg] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [selectedItemId, setSelectedItemId] = useState<string>('');
+  const [addQty, setAddQty] = useState<string>('10');
+
+  const targetOutletId = branchId || (activeOutlet?.id !== 'all' ? activeOutlet?.id : undefined);
+
+  const loadSmartRequirementDraft = useCallback(async (bId?: string) => {
+    const effectiveBranchId = bId || targetOutletId;
+    if (!effectiveBranchId) return;
+    setLoadingSmart(true);
+    setSmartErrorMsg(null);
+    try {
+      let draft: SmartRequirementDraft | null = null;
+      try {
+        draft = await procurementApi.getSmartRequirementDraft(effectiveBranchId);
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          draft = await procurementApi.generateSmartRequirement({ branch_id: effectiveBranchId });
+        } else {
+          throw err;
+        }
+      }
+      if (draft) {
+        setSmartDraft(draft);
+        setSmartItems(draft.items || []);
+      }
+    } catch (err: any) {
+      console.warn('Could not load smart requirement draft:', err);
+      setSmartErrorMsg(err?.response?.data?.detail || 'Unable to load AI purchase recommendations.');
+    } finally {
+      setLoadingSmart(false);
+    }
+  }, [targetOutletId]);
+
+  const loadCatalogItems = useCallback(async () => {
+    try {
+      const items = await inventoryApi.getItems({ is_active: true });
+      setCatalogItems(items || []);
+      if (items && items.length > 0) {
+        setSelectedItemId(items[0].id);
+      }
+    } catch (err) {
+      console.warn('Could not load catalog items for assistant:', err);
+    }
+  }, []);
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -71,12 +137,171 @@ export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setA
   useEffect(() => {
     setLoading(true);
     fetchDashboardData();
-  }, [fetchDashboardData]);
+    if (targetOutletId) {
+      loadSmartRequirementDraft(targetOutletId);
+    }
+    loadCatalogItems();
+  }, [fetchDashboardData, loadSmartRequirementDraft, loadCatalogItems, targetOutletId]);
 
   const handleManualRefresh = () => {
     setRefreshing(true);
     fetchDashboardData();
+    if (targetOutletId) {
+      loadSmartRequirementDraft(targetOutletId);
+    }
     refreshOutlets();
+  };
+
+  // AI Assistant: Update Quantity
+  const handleItemQtyChange = async (itemId: string, newQty: number) => {
+    const updated = smartItems.map((item) =>
+      item.item_id === itemId
+        ? { ...item, final_order_qty: Math.max(0, newQty), is_user_modified: true }
+        : item
+    );
+    setSmartItems(updated);
+    if (smartDraft?.id) {
+      setSavingSmart(true);
+      try {
+        const saved = await procurementApi.updateSmartRequirementDraftItems(smartDraft.id, {
+          items: updated,
+        });
+        setSmartDraft(saved);
+      } catch (err: any) {
+        console.error('Failed to auto-save item quantity:', err);
+      } finally {
+        setSavingSmart(false);
+      }
+    }
+  };
+
+  // AI Assistant: Remove Item
+  const handleRemoveItem = async (itemId: string) => {
+    const updated = smartItems.filter((item) => item.item_id !== itemId);
+    setSmartItems(updated);
+    if (smartDraft?.id) {
+      setSavingSmart(true);
+      try {
+        const saved = await procurementApi.updateSmartRequirementDraftItems(smartDraft.id, {
+          items: updated,
+        });
+        setSmartDraft(saved);
+      } catch (err: any) {
+        console.error('Failed to remove item from draft:', err);
+      } finally {
+        setSavingSmart(false);
+      }
+    }
+  };
+
+  // AI Assistant: Add Item to Draft
+  const handleAddItemToDraft = async () => {
+    if (!selectedItemId || !smartDraft?.id) return;
+    const catItem = catalogItems.find((c) => c.id === selectedItemId);
+    if (!catItem) return;
+
+    const qty = Number(addQty) || 1;
+    const existingIndex = smartItems.findIndex((i) => i.item_id === selectedItemId);
+    let updated: SmartRequirementItem[];
+
+    if (existingIndex >= 0) {
+      updated = [...smartItems];
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        final_order_qty: Number(updated[existingIndex].final_order_qty || 0) + qty,
+        is_user_modified: true,
+      };
+    } else {
+      const newItem: SmartRequirementItem = {
+        item_id: catItem.id,
+        item_name: catItem.name,
+        item_code: catItem.code,
+        unit_symbol: (catItem as any)?.unit?.symbol || (catItem as any)?.unit_symbol || 'units',
+        supplier_id: (catItem as any)?.supplier_id || undefined,
+        current_stock: 0,
+        min_stock: (catItem as any)?.min_stock_level || (catItem as any)?.min_stock || 0,
+        target_stock: ((catItem as any)?.min_stock_level || (catItem as any)?.min_stock || 0) * 2,
+        pending_incoming: 0,
+        daily_consumption: 0,
+        short_qty: qty,
+        system_suggested_qty: qty,
+        final_order_qty: qty,
+        priority: 'MEDIUM',
+        is_user_modified: true,
+        is_manually_added: true,
+        reason: 'Manually added by outlet operator for urgent replenishment',
+      };
+      updated = [newItem, ...smartItems];
+    }
+
+    setSmartItems(updated);
+    setShowAddModal(false);
+    setAddQty('10');
+
+    setSavingSmart(true);
+    try {
+      const saved = await procurementApi.updateSmartRequirementDraftItems(smartDraft.id, {
+        items: updated,
+      });
+      setSmartDraft(saved);
+    } catch (err: any) {
+      console.error('Failed to save added item:', err);
+    } finally {
+      setSavingSmart(false);
+    }
+  };
+
+  // AI Assistant: Regenerate
+  const handleRegenerateRecommendations = async () => {
+    if (!targetOutletId) return;
+    setLoadingSmart(true);
+    setSmartSuccessMsg(null);
+    setSmartErrorMsg(null);
+    try {
+      const draft = await procurementApi.generateSmartRequirement({
+        branch_id: targetOutletId,
+        force_regenerate: true,
+      });
+      setSmartDraft(draft);
+      setSmartItems(draft.items || []);
+      setSmartSuccessMsg('AI Replenishment recommendations updated from live stock & consumption.');
+    } catch (err: any) {
+      setSmartErrorMsg(err?.response?.data?.detail || 'Failed to regenerate recommendations.');
+    } finally {
+      setLoadingSmart(false);
+    }
+  };
+
+  // AI Assistant: One-Click Create PO / Indent
+  const handleOneClickCreatePO = async () => {
+    if (!smartDraft?.id) return;
+    const activeItems = smartItems.filter((i) => Number(i.final_order_qty) > 0);
+    if (activeItems.length === 0) {
+      setSmartErrorMsg('Cannot create PO: Please ensure at least one item has an order quantity greater than 0.');
+      return;
+    }
+
+    setConfirmingSmart(true);
+    setSmartSuccessMsg(null);
+    setSmartErrorMsg(null);
+    try {
+      const result = await procurementApi.confirmSmartRequirementDraft(smartDraft.id, {
+        notes: `AI Purchase Order created from outlet cockpit on ${new Date().toLocaleDateString()}`,
+      });
+      setSmartSuccessMsg(
+        result?.message || `Purchase Order / Indent (${result?.request_number || 'Confirmed'}) successfully created with ${activeItems.length} items.`
+      );
+      // Refresh dashboard metrics
+      fetchDashboardData();
+      // Reload draft (which will now show as confirmed or allow next cycle)
+      if (targetOutletId) {
+        loadSmartRequirementDraft(targetOutletId);
+      }
+    } catch (err: any) {
+      setSmartErrorMsg(err?.response?.data?.detail || 'Failed to create Purchase Order. Please try again.');
+    } finally {
+      setConfirmingSmart(false);
+    }
   };
 
   // Format currency in INR
@@ -485,63 +710,180 @@ export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setA
       </div>
 
       {/* ========================================================================= */}
-      {/* 4. LOWER SECTION: URGENT LOW STOCK ALERTS & RECENT ACTIVITY FEED          */}
+      {/* 4. LOWER SECTION: OUTLET AI PURCHASE ASSISTANT & OPERATIONAL FEED         */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-        {/* Left (7 cols): Low Stock Action Widget */}
-        <div className="lg:col-span-7 bg-white border border-[rgba(45,45,45,0.08)] rounded-2xl p-4 sm:p-5 space-y-3 shadow-xs">
-          <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
+        {/* Left (7 cols): Interactive Outlet AI Purchase Order Assistant */}
+        <div className="lg:col-span-7 bg-white border border-[rgba(45,45,45,0.08)] rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3 gap-2">
             <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-600" />
-              <h3 className="text-xs sm:text-sm font-bold text-[#1C1C1C] font-['Outfit']">Urgent Stock Replenishment</h3>
+              <div className="w-7 h-7 rounded-lg bg-[#F1E4C5] text-[#B8862D] flex items-center justify-center">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-bold text-[#1C1C1C] font-['Outfit']">
+                  Outlet AI Purchase Assistant
+                </h3>
+                <span className="text-[10px] text-[#707070]">
+                  Deterministic replenishment for {outlet?.name || 'this outlet'}
+                </span>
+              </div>
             </div>
-            <button
-              onClick={() => setActiveWorkspace?.('purchase')}
-              className="text-xs font-bold text-[#B8862D] hover:underline flex items-center gap-1"
-            >
-              Raise PR <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                className="px-2.5 py-1 rounded-lg border border-[rgba(45,45,45,0.15)] hover:bg-[#FAF8F5] text-xs font-bold text-[#1C1C1C] flex items-center gap-1 transition-all"
+              >
+                <Plus className="w-3.5 h-3.5 text-[#B8862D]" />
+                <span>Add Item</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleRegenerateRecommendations}
+                disabled={loadingSmart}
+                className="p-1.5 rounded-lg border border-[rgba(45,45,45,0.15)] hover:bg-[#FAF8F5] text-[#707070] hover:text-[#1C1C1C] transition-all disabled:opacity-50"
+                title="Regenerate AI recommendations from live stock"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingSmart ? 'animate-spin text-[#B8862D]' : ''}`} />
+              </button>
+            </div>
           </div>
 
-          {stock && stock.lowStockItems && stock.lowStockItems.length > 0 ? (
-            <div className="divide-y divide-[rgba(45,45,45,0.06)] overflow-hidden">
-              {stock.lowStockItems.slice(0, 5).map((item: LowStockAlertItem) => (
-                <div key={item.itemId} className="py-2.5 flex items-center justify-between gap-3 text-xs">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[#B8862D] text-[10px] font-bold bg-[#FAF8F5] px-1.5 py-0.5 rounded border border-[rgba(45,45,45,0.08)]">
-                        [{item.code}]
-                      </span>
-                      <span className="font-bold text-[#1C1C1C] truncate">{item.name}</span>
-                    </div>
-                    <div className="text-[#707070] text-[11px] mt-0.5">
-                      Category: {item.categoryName} · Cost: {formatCurrency(item.costPrice)}
-                    </div>
-                  </div>
+          {/* Feedback messages */}
+          {smartSuccessMsg && (
+            <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="flex-1">{smartSuccessMsg}</span>
+              <button onClick={() => setSmartSuccessMsg(null)} className="text-emerald-700 hover:text-emerald-900">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
-                  <div className="text-right shrink-0">
-                    <div className="font-bold text-amber-800 font-mono">
-                      {item.currentStock} {item.unitSymbol}
-                    </div>
-                    <div className="text-[10px] text-[#707070]">
-                      Min: {item.minStockLevel} {item.unitSymbol}
-                    </div>
-                  </div>
+          {smartErrorMsg && (
+            <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-medium flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span className="flex-1">{smartErrorMsg}</span>
+              <button onClick={() => setSmartErrorMsg(null)} className="text-red-700 hover:text-red-900">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
-                  <button
-                    onClick={() => setActiveWorkspace?.('purchase')}
-                    className="px-2.5 py-1 bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white rounded-lg text-[11px] font-bold transition-all shadow-xs"
+          {/* AI Recommended Replenishment Items List */}
+          {loadingSmart && smartItems.length === 0 ? (
+            <div className="py-8 text-center text-xs text-[#707070] space-y-2">
+              <RefreshCw className="w-5 h-5 mx-auto text-[#B8862D] animate-spin" />
+              <p>Analyzing outlet stock ledger, consumption & reorder targets…</p>
+            </div>
+          ) : smartItems.length > 0 ? (
+            <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+              {smartItems.map((item) => {
+                const isCritical = item.priority === 'CRITICAL';
+                const isHigh = item.priority === 'HIGH';
+                const hasSupplier = Boolean(item.supplier_name || item.supplier_id);
+
+                return (
+                  <div
+                    key={item.item_id}
+                    className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] hover:border-[#C79A3B]/40 transition-all flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 text-xs"
                   >
-                    Order
-                  </button>
-                </div>
-              ))}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[#B8862D] text-[10px] font-bold bg-white px-1.5 py-0.5 rounded border border-[rgba(45,45,45,0.08)]">
+                          [{item.item_code || 'SKU'}]
+                        </span>
+                        <span className="font-bold text-[#1C1C1C] truncate">{item.item_name}</span>
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                            isCritical
+                              ? 'bg-red-100 text-red-700 border border-red-200'
+                              : isHigh
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-blue-100 text-blue-700 border border-blue-200'
+                          }`}
+                        >
+                          {item.priority}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-[#707070]">
+                        <span>
+                          Stock: <strong className="text-[#1C1C1C]">{item.current_stock}</strong> / Min:{' '}
+                          {item.min_stock} {item.unit_symbol}
+                        </span>
+                        <span>·</span>
+                        {hasSupplier ? (
+                          <span className="text-[#2E8B57] font-medium">
+                            Vendor: {item.supplier_name || 'Mapped Vendor'}
+                          </span>
+                        ) : (
+                          <span className="text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200 text-[10px] font-semibold">
+                            No vendor mapped
+                          </span>
+                        )}
+                        {item.is_manually_added && (
+                          <span className="text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded border border-purple-200 text-[10px] font-semibold">
+                            Manual Add
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                      <div className="flex items-center gap-1 bg-white border border-[rgba(45,45,45,0.15)] rounded-lg px-2 py-1">
+                        <label className="text-[10px] text-[#707070] font-semibold">Order:</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={item.final_order_qty}
+                          onChange={(e) => handleItemQtyChange(item.item_id, parseFloat(e.target.value) || 0)}
+                          className="w-16 text-right text-xs font-bold text-[#1C1C1C] focus:outline-hidden font-mono"
+                        />
+                        <span className="text-[10px] text-[#707070] font-mono">{item.unit_symbol}</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveItem(item.item_id)}
+                        className="p-1.5 rounded-lg text-[#707070] hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="Remove from PO list"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ) : (
-            <div className="py-8 text-center text-[#707070] space-y-1">
-              <CheckCircle2 className="w-7 h-7 mx-auto text-[#2E8B57] mb-1.5" />
-              <p className="text-xs sm:text-sm text-[#1C1C1C] font-bold">All item inventory levels optimal</p>
-              <p className="text-[11px]">No SKUs currently below minimum replenishment thresholds.</p>
+            <div className="py-8 text-center text-[#707070] space-y-1.5">
+              <CheckCircle2 className="w-7 h-7 mx-auto text-[#2E8B57] mb-1" />
+              <p className="text-xs sm:text-sm text-[#1C1C1C] font-bold">Outlet inventory levels optimal</p>
+              <p className="text-[11px]">No items currently require replenishment. Use "+ Add Item" for special orders.</p>
+            </div>
+          )}
+
+          {/* AI PO Confirmation Action Footer */}
+          {smartItems.length > 0 && (
+            <div className="border-t border-[rgba(45,45,45,0.06)] pt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-xs text-[#707070]">
+                <span>{smartItems.filter((i) => Number(i.final_order_qty) > 0).length} items prepared</span>
+                {savingSmart && <span className="text-[#B8862D] ml-2 text-[11px] animate-pulse">Saving…</span>}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOneClickCreatePO}
+                disabled={confirmingSmart || smartItems.filter((i) => Number(i.final_order_qty) > 0).length === 0}
+                className="px-4 py-2 bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <ShoppingCart className="w-4 h-4 text-[#C79A3B]" />
+                <span>{confirmingSmart ? 'Creating PO…' : 'Create Purchase Order / Indent'}</span>
+              </button>
             </div>
           )}
         </div>
@@ -559,7 +901,7 @@ export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setA
           </div>
 
           {dashboardData?.recentActivities && dashboardData.recentActivities.length > 0 ? (
-            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
               {dashboardData.recentActivities.map((act: OutletActivityItem) => (
                 <div
                   key={act.id}
@@ -593,6 +935,76 @@ export const OutletDashboard: React.FC<OutletDashboardProps> = ({ branchId, setA
           )}
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* 5. ADD ITEM MODAL FOR AI PURCHASE ASSISTANT                               */}
+      {/* ========================================================================= */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white border border-[rgba(45,45,45,0.1)] rounded-2xl p-5 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.06)] pb-3">
+              <div className="flex items-center gap-2">
+                <Plus className="w-4 h-4 text-[#B8862D]" />
+                <h4 className="text-sm font-bold text-[#1C1C1C] font-['Outfit']">Add Item to Purchase Order</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="text-[#707070] hover:text-[#1C1C1C]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Select Item from Catalog</label>
+                <select
+                  value={selectedItemId}
+                  onChange={(e) => setSelectedItemId(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-[rgba(45,45,45,0.15)] bg-white text-[#1C1C1C] font-medium focus:outline-hidden"
+                >
+                  {catalogItems.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      [{c.code}] {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#707070] font-semibold mb-1">Order Quantity</label>
+                <input
+                  type="number"
+                  min="0.1"
+                  step="any"
+                  value={addQty}
+                  onChange={(e) => setAddQty(e.target.value)}
+                  placeholder="e.g. 10"
+                  className="w-full p-2.5 rounded-xl border border-[rgba(45,45,45,0.15)] bg-white text-[#1C1C1C] font-bold focus:outline-hidden"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(45,45,45,0.06)]">
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="px-3.5 py-1.5 rounded-xl border border-[rgba(45,45,45,0.15)] hover:bg-[#FAF8F5] text-xs font-bold text-[#707070]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddItemToDraft}
+                className="px-4 py-1.5 rounded-xl bg-[#1C1C1C] hover:bg-[#2D2D2D] text-white text-xs font-bold shadow-xs"
+              >
+                Add Item
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
