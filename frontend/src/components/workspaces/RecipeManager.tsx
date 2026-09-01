@@ -219,6 +219,45 @@ export default function RecipeManager({
       );
     }
   };
+  const {
+    totalRecipeCost: dynamicTotalRecipeCost,
+    finishedSellingPrice: dynamicSellingPrice,
+    costPerYield: dynamicCostPerYield,
+    margin: dynamicMargin,
+    marginPct: dynamicMarginPct,
+  } = useMemo(() => {
+    let totalCost = 0;
+    ings.forEach((x) => {
+      const item = raw.find((i) => i.id === x.raw_item_id);
+      const rate = Number(item?.cost_price || (item as any)?.costPrice || 0);
+      const yield_factor = (Number(x.usable_yield) || 100) / 100;
+      let gross_qty = Number(x.gross_quantity) || 0;
+      if (!gross_qty || gross_qty <= 0) {
+        gross_qty = (Number(x.quantity) || 0) / yield_factor;
+      }
+      totalCost += gross_qty * rate;
+    });
+
+    const yieldQty = Number(form.yield_qty) || 1;
+    const cpu = totalCost / yieldQty;
+
+    const finItem = finished.find((i) => i.id === form.finished_item_id);
+    const sp = Number(
+      finItem?.selling_price || (finItem as any)?.sellingPrice || 0,
+    );
+
+    const m = sp - cpu;
+    const mp = sp > 0 ? ((m / sp) * 100).toFixed(1) : "0.0";
+
+    return {
+      totalRecipeCost: totalCost,
+      finishedSellingPrice: sp,
+      costPerYield: cpu,
+      margin: m,
+      marginPct: mp,
+    };
+  }, [ings, form.yield_qty, form.finished_item_id, raw, finished]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -576,6 +615,27 @@ export default function RecipeManager({
                     Remove
                   </button>
                 </div>
+                {(() => {
+                  const item = raw.find((i) => i.id === x.raw_item_id);
+                  const rate = Number(item?.cost_price || (item as any)?.costPrice || 0);
+                  const yield_factor = (Number(x.usable_yield) || 100) / 100;
+                  let gross_qty = Number(x.gross_quantity) || 0;
+                  if (!gross_qty || gross_qty <= 0) {
+                    gross_qty = (Number(x.quantity) || 0) / yield_factor;
+                  }
+                  const ingredientCost = gross_qty * rate;
+                  const unitSymbol = (item as any)?.unit?.symbol || (item as any)?.unitSymbol || "unit";
+                  return (
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-black/5 text-[10px] text-[#707070]">
+                      <span>
+                        Actual Rate: <b className="text-[#1C1C1C]">₹{rate.toFixed(2)}/{unitSymbol}</b>
+                      </span>
+                      <span>
+                        Ingredient Cost: <b className="text-[#2E8B57]">₹{ingredientCost.toFixed(2)}</b>
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -589,8 +649,54 @@ export default function RecipeManager({
             className="mt-1 w-full px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-black/10 text-xs"
           />
         </label>
+
+        {/* Dynamic Costing Summary Panel */}
+        <div className="p-4 rounded-xl bg-[#FAF8F5] border border-black/10 mt-2">
+          <h4 className="font-bold text-xs mb-3 text-[#1C1C1C] flex items-center gap-2">
+            <Calculator className="w-4 h-4 text-[#C79A3B]" />
+            Live Recipe Costing & Margin
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-4 gap-x-2 text-center">
+            <div>
+              <span className="text-[10px] text-[#707070] block">Total Recipe Cost</span>
+              <b className="text-[#1C1C1C]">₹{dynamicTotalRecipeCost.toFixed(2)}</b>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#707070] block">Recipe Yield</span>
+              <b className="text-[#1C1C1C]">{Number(form.yield_qty || 1)}</b>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#707070] block">Cost Per Finished Unit</span>
+              <b className="text-[#1C1C1C]">₹{dynamicCostPerYield.toFixed(2)}</b>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#707070] block">Selling Price / Unit</span>
+              <b className="text-[#1C1C1C]">₹{dynamicSellingPrice.toFixed(2)}</b>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#707070] block">Gross Margin / Unit</span>
+              <b className={dynamicMargin > 0 ? "text-[#2E8B57]" : "text-red-600"}>
+                ₹{dynamicMargin.toFixed(2)}
+              </b>
+            </div>
+            <div>
+              <span className="text-[10px] text-[#707070] block">Margin %</span>
+              <div className="flex items-center justify-center gap-1">
+                <b className={dynamicMargin > 0 ? "text-[#2E8B57]" : "text-red-600"}>
+                  {dynamicMarginPct}%
+                </b>
+                {dynamicSellingPrice > 0 && (dynamicMargin / dynamicSellingPrice) < 0.20 && (
+                  <span title="Low Margin Warning (< 20%)">
+                    <AlertTriangle className="w-3 h-3 text-red-500" />
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {err && (
-          <div className="p-3 rounded-xl bg-red-50 text-red-700 text-xs">
+          <div className="p-3 rounded-xl bg-red-50 text-red-700 text-xs mt-2">
             {err}
           </div>
         )}
