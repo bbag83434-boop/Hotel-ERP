@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useOutlet } from '@/context/OutletContext';
 import { usePWA } from '@/context/PWAContext';
+import { ShieldCheck } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { SystemHealth } from '@/types';
 import Header from '@/components/common/Header';
@@ -19,6 +20,7 @@ import InventoryManager from '@/components/inventory/InventoryManager';
 import TransfersWorkspace from '@/components/workspaces/TransfersWorkspace';
 import PurchaseWorkspace from '@/components/workspaces/PurchaseWorkspace';
 import ProductionWorkspace from '@/components/workspaces/ProductionWorkspace';
+import KitchenOrdersWorkspace from '@/components/workspaces/KitchenOrdersWorkspace';
 import WastageWorkspace from '@/components/workspaces/WastageWorkspace';
 import HRWorkspace from '@/components/workspaces/HRWorkspace';
 import ClosingWorkspace from '@/components/workspaces/ClosingWorkspace';
@@ -49,13 +51,20 @@ import AIWastageSalesIntelligenceWorkspace from '@/components/workspaces/AIWasta
 import WhatsAppBusinessWorkspace from '@/components/workspaces/WhatsAppBusinessWorkspace';
 
 export const AppContent = () => {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const router = useRouter();
   const { activeOutlet } = useOutlet();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [loadingHealth, setLoadingHealth] = useState<boolean>(true);
+  const [purchaseInitialTab, setPurchaseInitialTab] = useState<'needs' | 'receiving' | 'my_bills'>('needs');
+
+  const userRole = typeof user?.role === 'object' ? (user.role.name || '') : (user?.role || '');
+  const isManagement =
+    ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN',
+     'CENTRAL_PURCHASE_MANAGER', 'CENTRAL_STORE_MANAGER', 'DESSERT_KITCHEN_HEAD',
+     'GENERAL_MANAGER', 'DIRECTOR', 'KITCHEN_CHEF', 'PRODUCTION_MANAGER'].includes(userRole.toUpperCase());
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -83,6 +92,14 @@ export const AppContent = () => {
     }
   }, [fetchHealth, isAuthenticated]);
 
+  // Normal outlet users cannot access the Admin/Executive Dashboard.
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
+    if (!isManagement && activeWorkspace === 'dashboard') {
+      setActiveWorkspace('purchase');
+    }
+  }, [authLoading, isAuthenticated, isManagement, activeWorkspace]);
+
   if (authLoading || !isAuthenticated) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#F5F3EE] p-4 text-center">
@@ -101,6 +118,9 @@ export const AppContent = () => {
         setActiveWorkspace={setActiveWorkspace}
         mobileOpen={mobileSidebarOpen}
         setMobileOpen={setMobileSidebarOpen}
+        isManagement={isManagement}
+        activePurchaseTab={purchaseInitialTab}
+        onPurchaseInitialTab={setPurchaseInitialTab}
       />
 
       <div className="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden">
@@ -172,7 +192,16 @@ export const AppContent = () => {
 
           {activeWorkspace === 'purchase' && (
             <div className="w-full min-w-0">
-              <PurchaseWorkspace onNavigateWorkspace={setActiveWorkspace} />
+              <PurchaseWorkspace
+                onNavigateWorkspace={setActiveWorkspace}
+                initialTab={purchaseInitialTab}
+              />
+            </div>
+          )}
+
+          {activeWorkspace === 'kitchenOrders' && (
+            <div className="w-full min-w-0">
+              <KitchenOrdersWorkspace initialView={isManagement ? 'kitchen' : 'outlet'} />
             </div>
           )}
 
@@ -289,6 +318,21 @@ export const AppContent = () => {
               <AIAssistantWorkspace activeOutlet={activeOutlet} />
             </div>
           )}
+
+          {!isManagement &&
+            activeWorkspace !== 'purchase' &&
+            activeWorkspace !== 'kitchenOrders' && (
+              <div className="w-full min-w-0">
+                <div className="p-12 text-center rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
+                  <ShieldCheck className="w-10 h-10 text-red-500 mx-auto mb-3 opacity-70" />
+                  <h3 className="text-sm font-bold text-[#1C1C1C]">Access Restricted</h3>
+                  <p className="text-xs text-[#707070] mt-1 max-w-sm mx-auto">
+                    This module is available to management users only. As an outlet user you can access
+                    Purchase / Needs, Receiving, My Bills and Kitchen Orders.
+                  </p>
+                </div>
+              </div>
+            )}
         </main>
 
         <BottomNav

@@ -50,6 +50,7 @@ from app.models.closing import (
     ClosingStatus,
 )
 from app.models.recipe import Recipe, RecipeItem, ProductionOrder, ProductionConsumption, ProductionStatus
+from app.models.kitchen_order import KitchenOrder, KitchenOrderStatus
 from app.models.wastage import WastageEntry, WastageItem, WastageReasonCode, WastageStatus
 from app.models.restaurant import DiningTable, Floor, Menu, MenuCategory, MenuItem, RestaurantOrder, OrderItem, OrderStatus
 from app.models.customer import Customer, CustomerAddress, LoyaltyTransaction, QRSession, CustomerType, LoyaltyTransactionType

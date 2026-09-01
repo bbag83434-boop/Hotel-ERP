@@ -46,6 +46,7 @@ export type WorkspaceId =
   | 'cashierShift'
   | 'kds'
   | 'purchase'
+  | 'kitchenOrders'
   | 'production'
   | 'transfers'
   | 'wastage'
@@ -73,11 +74,18 @@ export type WorkspaceId =
   | 'aiWastageSales'
   | 'whatsappBusiness';
 
+// Outlet-scope sidebar flow ids that map onto PurchaseWorkspace tabs or the
+// KitchenOrders module (kept internal to the Sidebar for scoped navigation).
+export type OutletPurchasingId = 'purchase_needs' | 'purchase_receiving' | 'purchase_my_bills';
+
 interface SidebarProps {
   activeWorkspace: WorkspaceId;
   setActiveWorkspace: (workspace: WorkspaceId) => void;
   mobileOpen?: boolean;
   setMobileOpen?: (open: boolean) => void;
+  onPurchaseInitialTab?: (tab: 'needs' | 'receiving' | 'my_bills') => void;
+  activePurchaseTab?: 'needs' | 'receiving' | 'my_bills';
+  isManagement?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -85,6 +93,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveWorkspace,
   mobileOpen = false,
   setMobileOpen,
+  onPurchaseInitialTab,
+  activePurchaseTab,
+  isManagement,
 }) => {
   const { activeOutlet, isHeadOffice, setActiveOutlet } = useOutlet();
   const { isOnline } = usePWA();
@@ -94,6 +105,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isAdmin = ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN'].includes(
     userRole.toUpperCase()
   );
+  // Management / head-office staff (admin, kitchen head, central purchase) keep the full suite.
+  const showFullSuite = isManagement
+    ? true
+    : (isAdmin ||
+       ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN',
+        'CENTRAL_PURCHASE_MANAGER', 'CENTRAL_STORE_MANAGER', 'DESSERT_KITCHEN_HEAD',
+        'GENERAL_MANAGER', 'DIRECTOR', 'KITCHEN_CHEF', 'PRODUCTION_MANAGER'].includes(userRole.toUpperCase()) ||
+       !!isHeadOffice);
 
   const navGroups = [
     {
@@ -119,7 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Management',
       defaultOpen: true,
       items: [
-        { id: 'dashboard' as WorkspaceId, label: 'Executive Dashboard', icon: LayoutDashboard, badge: null },
+        { id: 'dashboard' as WorkspaceId, label: isAdmin && (!activeOutlet?.id || isHeadOffice) ? 'Executive Dashboard' : 'Outlet Dashboard', icon: LayoutDashboard, badge: null },
         ...(isHeadOffice && isAdmin ? [{ id: 'multiOutlet' as WorkspaceId, label: 'Multi-Outlet Intelligence', icon: BarChart3, badge: 'HQ' }] : []),
         ...(isAdmin ? [{ id: 'supplierPerformance' as WorkspaceId, label: 'Supplier Performance', icon: Truck, badge: 'Procurement' }] : []),
         ...(isAdmin ? [{ id: 'approvals' as WorkspaceId, label: 'Approval Center', icon: CheckSquare, badge: 'Pending' }] : []),
@@ -163,10 +182,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
-  const workspaceGroup = (id: WorkspaceId) => navGroups.find((group) => group.items.some((item) => item.id === id));
+// Outlet-only navigation — exactly the four required modules.
+  const outletNavGroups = [
+    {
+      label: 'Outlet Purchasing',
+      defaultOpen: true,
+      items: [
+        { id: 'purchase', label: 'Purchase / Needs', icon: ShoppingCart, initialTab: 'needs' as const, badge: null },
+        { id: 'purchase', label: 'Receiving', icon: Truck, initialTab: 'receiving' as const, badge: null },
+        { id: 'purchase', label: 'My Bills', icon: FileText, initialTab: 'my_bills' as const, badge: null },
+      ],
+    },
+    {
+      label: 'Kitchen Orders',
+      defaultOpen: true,
+      items: [{ id: 'kitchenOrders', label: 'Kitchen Orders', icon: ChefHat, initialTab: undefined, badge: null }],
+    },
+  ];
+  // Navigation groups actually rendered: full suite for management, outlet-only for regular outlet users.
+  const renderedGroups = showFullSuite ? navGroups : outletNavGroups;
+  const workspaceGroup = (id: WorkspaceId) => renderedGroups.find((group) => group.items.some((item) => item.id === id));
   const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
-    navGroups.forEach((group) => { initial[group.label] = !!group.defaultOpen; });
+    renderedGroups.forEach((group) => { initial[group.label] = !!group.defaultOpen; });
     return initial;
   });
 
@@ -178,7 +216,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [activeWorkspace]);
 
 
-  const handleSelect = (id: WorkspaceId) => {
+  const handleSelect = (id: WorkspaceId, initialTab?: 'needs' | 'receiving' | 'my_bills') => {
+    if (id === 'purchase' && initialTab) {
+      onPurchaseInitialTab?.(initialTab);
+    }
     setActiveWorkspace(id);
     if (setMobileOpen) setMobileOpen(false);
   };
@@ -226,11 +267,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <ShieldCheck className="w-3 h-3 text-[#C79A3B]" />
           <span>{isHeadOffice ? 'Head Office Scope' : activeOutlet?.id ? 'Restricted Outlet' : 'Select Branch Above'}</span>
         </div>
+          {isAdmin && activeOutlet?.id && !isHeadOffice && (
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof setActiveOutlet === 'function') {
+                    setActiveOutlet({
+                      id: '',
+                      code: '',
+                      name: 'Select Branch / Outlet',
+                      type: 'RESTAURANT_OUTLET',
+                      isActive: true,
+                    });
+                }
+                setActiveWorkspace('dashboard');
+              }}
+              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#1C1C1C] text-white text-[11px] font-bold rounded-lg hover:bg-black transition-colors shadow-sm"
+            >
+              <LayoutDashboard className="w-3 h-3" />
+              Return to Admin Dashboard
+            </button>
+          )}
       </div>
 
       {/* Navigation Groups */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        {navGroups.map((group) => {
+        {renderedGroups.map((group) => {
           const isOpen = !!openGroups[group.label];
           const hasActive = group.items.some((item) => item.id === activeWorkspace);
           return (
@@ -250,11 +312,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="space-y-0.5">
                   {group.items.map((item) => {
                     const Icon = item.icon;
-                    const isActive = activeWorkspace === item.id;
+                    const itemTab = (item as { initialTab?: 'needs' | 'receiving' | 'my_bills' }).initialTab;
+                    const isActive =
+                      item.id === 'purchase' && itemTab
+                        ? activeWorkspace === 'purchase' && activePurchaseTab === itemTab
+                        : activeWorkspace === (item.id as WorkspaceId);
                     return (
                       <button
-                        key={item.id}
-                        onClick={() => handleSelect(item.id)}
+                        key={`${item.id}-${itemTab || 'default'}`}
+                        onClick={() => handleSelect(item.id as WorkspaceId, itemTab)}
                         className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all duration-150 active:scale-[0.98] ${
                           isActive
                             ? 'bg-[#F1E4C5] text-[#B8862D] font-bold shadow-sm border border-[#B8862D]/30'

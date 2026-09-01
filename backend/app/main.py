@@ -23,6 +23,7 @@ from app.core.expense_schema_bootstrap import ensure_expense_schema
 from app.core.notification_schema_bootstrap import ensure_notification_schema
 from app.core.ai_document_schema_bootstrap import ensure_ai_document_schema
 from app.core.master_data_schema_bootstrap import ensure_master_data_schema
+from app.core.kitchen_order_schema_bootstrap import ensure_kitchen_order_schema
 from app.core.exceptions import AppException
 from app.api.v1.api import api_router
 
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
         ensure_notification_schema()
         ensure_ai_document_schema()
         ensure_master_data_schema()
+        ensure_kitchen_order_schema()
         logger.info("✅ Notification schema compatibility check complete")
     except Exception as exc:
         logger.warning("Schema bootstrap skipped: %s", exc)

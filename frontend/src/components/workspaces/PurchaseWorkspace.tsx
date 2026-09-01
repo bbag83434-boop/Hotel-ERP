@@ -29,15 +29,22 @@ import {
 
 interface PurchaseWorkspaceProps {
   onNavigateWorkspace?: (workspace: WorkspaceId) => void;
+  initialTab?: 'needs' | 'receiving' | 'my_bills';
 }
 
 type PurchaseTab = 'needs' | 'receiving' | 'my_bills';
 
-export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigateWorkspace }) => {
+export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigateWorkspace, initialTab }) => {
   const { activeOutlet, isHeadOffice } = useOutlet();
 
   // Active Main Tab
-  const [activeTab, setActiveTab] = useState<PurchaseTab>('needs');
+  const [activeTab, setActiveTab] = useState<PurchaseTab>(initialTab || 'needs');
+  
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Loading & Feedback
   const [loading, setLoading] = useState<boolean>(false);
