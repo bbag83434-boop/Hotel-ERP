@@ -77,6 +77,20 @@ from app.schemas.inventory import (
 router = APIRouter()
 
 
+def _role_name(user: User) -> str:
+    return (user.role.name if user.role else "").strip().upper()
+
+def _is_inventory_manager(user: User) -> bool:
+    return _role_name(user) in {
+        "SUPER_ADMIN", "SUPERADMIN", "OWNER", "ADMIN", "HQ_ADMIN", "HEAD_OFFICE_ADMIN",
+        "CENTRAL_PURCHASE_MANAGER", "CENTRAL_STORE_MANAGER", "GENERAL_MANAGER", "DIRECTOR"
+    }
+
+def _user_branch_ids(user: User) -> set:
+    return {ub.branch_id for ub in (user.branches or [])}
+
+
+
 # =============================================================
 # 1. CATEGORY MANAGEMENT
 # =============================================================
@@ -911,6 +925,12 @@ def get_stock_balances(
     query = db.query(StockBalance).join(
         Item, Item.id == StockBalance.item_id
     ).filter(Item.company_id == current_user.company_id)
+    if not _is_inventory_manager(current_user):
+        user_bids = list(_user_branch_ids(current_user))
+        if not user_bids:
+            return [] # No branches -> no stock
+        query = query.join(Warehouse, Warehouse.id == StockBalance.warehouse_id).filter(Warehouse.branch_id.in_(user_bids))
+
 
     if warehouse_id:
         query = query.filter(StockBalance.warehouse_id == warehouse_id)
@@ -960,6 +980,12 @@ def get_low_stock_alerts(
     query = db.query(StockBalance).join(
         Item, Item.id == StockBalance.item_id
     ).filter(Item.company_id == current_user.company_id)
+    if not _is_inventory_manager(current_user):
+        user_bids = list(_user_branch_ids(current_user))
+        if not user_bids:
+            return []
+        query = query.join(Warehouse, Warehouse.id == StockBalance.warehouse_id).filter(Warehouse.branch_id.in_(user_bids))
+
 
     if warehouse_id:
         query = query.filter(StockBalance.warehouse_id == warehouse_id)

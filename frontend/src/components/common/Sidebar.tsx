@@ -182,13 +182,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
-// Outlet-only navigation — exactly the four required modules.
   const outletNavGroups = [
     {
       label: 'Outlet Purchasing',
       defaultOpen: true,
       items: [
-        { id: 'purchase', label: 'Purchase / Needs', icon: ShoppingCart, initialTab: 'needs' as const, badge: null },
+        { id: 'purchase', label: 'Purchase', icon: ShoppingCart, initialTab: 'needs' as const, badge: null },
         { id: 'purchase', label: 'Receiving', icon: Truck, initialTab: 'receiving' as const, badge: null },
         { id: 'purchase', label: 'My Bills', icon: FileText, initialTab: 'my_bills' as const, badge: null },
       ],
@@ -197,6 +196,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Kitchen Orders',
       defaultOpen: true,
       items: [{ id: 'kitchenOrders', label: 'Kitchen Orders', icon: ChefHat, initialTab: undefined, badge: null }],
+    },
+    {
+      label: 'Outlet Inventory',
+      defaultOpen: true,
+      items: [{ id: 'inventory', label: 'Stock', icon: Boxes, initialTab: undefined, badge: null }],
     },
   ];
   // Navigation groups actually rendered: full suite for management, outlet-only for regular outlet users.
