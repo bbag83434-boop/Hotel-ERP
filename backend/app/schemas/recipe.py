@@ -175,6 +175,8 @@ class ProductionConsumptionResponse(BaseModel):
     id: str
     production_order_id: str
     raw_item_id: str
+    stock_batch_id: Optional[str] = None
+    batch_number: Optional[str] = None
     raw_item_name: Optional[str] = None
     raw_item_code: Optional[str] = None
     unit_symbol: Optional[str] = None
@@ -236,6 +238,7 @@ class ProductionPreviewItem(BaseModel):
     shortage_qty: Decimal
     unit_cost: Decimal
     total_cost: Decimal
+    fifo_batches: List[str] = []
 
 class ProductionPreviewResponse(BaseModel):
     recipe_id: str
@@ -264,6 +267,7 @@ class ProductionOrderExecuteRequest(BaseModel):
     expiry_date: Optional[datetime] = None
     notes: Optional[str] = None
     custom_consumptions: Optional[List[ProductionConsumptionCreate]] = None
+    idempotency_key: str
 
 # -------------------------------------------------------------
 # Part 9: Production Variance & Cost Analysis Schemas

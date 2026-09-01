@@ -90,6 +90,7 @@ class ProductionOrder(BaseModel):
     total_raw_cost = Column("totalRawCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     unit_food_cost = Column("unitFoodCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     notes = Column(Text, nullable=True)
+    idempotency_key = Column("idempotencyKey", String(255), nullable=True, unique=True)
     created_by_id = Column("createdById", String(36), ForeignKey("users.id"), nullable=True)
 
     companyId = synonym("company_id")
@@ -104,6 +105,7 @@ class ProductionOrder(BaseModel):
     completedDate = synonym("completed_date")
     totalRawCost = synonym("total_raw_cost")
     unitFoodCost = synonym("unit_food_cost")
+    idempotencyKey = synonym("idempotency_key")
     createdById = synonym("created_by_id")
 
     recipe = relationship("Recipe", back_populates="production_orders")
@@ -121,6 +123,8 @@ class ProductionConsumption(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     production_order_id = Column("productionOrderId", String(36), ForeignKey("production_orders.id", ondelete="CASCADE"), nullable=False, index=True)
     raw_item_id = Column("rawItemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
+    stock_batch_id = Column("stockBatchId", String(36), ForeignKey("stock_batches.id", ondelete="SET NULL"), nullable=True, index=True)
+    batch_number = Column("batchNumber", String(100), nullable=True)
     standard_qty = Column("standardQty", Numeric(14, 4), nullable=False)
     actual_consumed_qty = Column("actualConsumedQty", Numeric(14, 4), nullable=False)
     unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
@@ -128,6 +132,8 @@ class ProductionConsumption(Base):
 
     productionOrderId = synonym("production_order_id")
     rawItemId = synonym("raw_item_id")
+    stockBatchId = synonym("stock_batch_id")
+    batchNumber = synonym("batch_number")
     standardQty = synonym("standard_qty")
     actualConsumedQty = synonym("actual_consumed_qty")
     unitCost = synonym("unit_cost")
@@ -135,3 +141,4 @@ class ProductionConsumption(Base):
 
     production_order = relationship("ProductionOrder", back_populates="consumptions")
     raw_item = relationship("Item", foreign_keys=[raw_item_id])
+    stock_batch = relationship("StockBatch", foreign_keys=[stock_batch_id])

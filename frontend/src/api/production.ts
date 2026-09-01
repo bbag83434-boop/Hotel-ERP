@@ -58,6 +58,7 @@ export const productionApi = {
     return res.data;
   },
   executeProduction: async (payload: {
+    branch_id: string;
     recipe_id: string;
     planned_qty: number;
     kitchen_warehouse_id: string;
@@ -67,8 +68,13 @@ export const productionApi = {
     expiry_date?: string;
     custom_consumptions?: Array<{ raw_item_id: string; actual_consumed_qty: number }>;
     notes?: string;
+    idempotency_key?: string;
   }): Promise<ProductionOrder> => {
-    const res = await apiClient.post<ProductionOrder>('/recipes/production/execute', payload);
+    const finalPayload = {
+      ...payload,
+      idempotency_key: payload.idempotency_key || crypto.randomUUID()
+    };
+    const res = await apiClient.post<ProductionOrder>('/recipes/production/execute', finalPayload);
     return res.data;
   },
   checkSufficiency: async (orderId: string): Promise<any> => {

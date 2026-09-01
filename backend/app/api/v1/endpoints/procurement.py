@@ -1889,6 +1889,25 @@ def post_stock_for_grn(grn: GoodsReceiveNote, db: Session, current_user: User):
         po = db.query(PurchaseOrder).filter(PurchaseOrder.id == grn.po_id).first()
 
     for itm in grn.items:
+        # Calculate and update Moving Average Cost (MAC)
+        master_item = db.query(Item).filter(Item.id == itm.item_id).with_for_update().first()
+        if master_item:
+            old_qty = db.query(func.sum(StockBalance.quantity)).filter(
+                StockBalance.item_id == itm.item_id
+            ).scalar() or Decimal("0.0000")
+            
+            old_cost = Decimal(str(master_item.cost_price or 0))
+            received_qty = Decimal(str(itm.accepted_qty))
+            received_cost = Decimal(str(itm.unit_price or 0))
+            
+            if old_qty <= 0:
+                master_item.cost_price = received_cost
+            else:
+                total_val = (old_qty * old_cost) + (received_qty * received_cost)
+                new_qty = old_qty + received_qty
+                if new_qty > 0:
+                    master_item.cost_price = (total_val / new_qty).quantize(Decimal("0.0001"))
+
         # 1. Update/Create StockBalance in destination warehouse
         sb = db.query(StockBalance).filter(
             StockBalance.warehouse_id == warehouse_id,

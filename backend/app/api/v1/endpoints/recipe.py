@@ -742,20 +742,38 @@ def preview_production(
 
         std_q = Decimal(str(ing.quantity))
         req_q = std_q * multiplier
-        unit_cost = Decimal(str(raw.cost_price or 0)) if raw else Decimal("0.0000")
-        line_cost = req_q * unit_cost
-        total_est_cost += line_cost
+        
+        batches = db.query(StockBatch).filter(
+            StockBatch.warehouse_id == preview_in.kitchen_warehouse_id,
+            StockBatch.item_id == ing.raw_item_id,
+            StockBatch.quantity > 0,
+            StockBatch.is_active == True,
+        ).order_by(StockBatch.created_at.asc()).all()
 
-        bal = db.query(StockBalance).filter(
-            StockBalance.warehouse_id == preview_in.kitchen_warehouse_id,
-            StockBalance.item_id == ing.raw_item_id,
-        ).first()
-
-        avail_q = Decimal(str(bal.quantity if bal else 0))
-        is_suff = avail_q >= req_q
-        shortage = max(Decimal("0.0000"), req_q - avail_q)
+        total_avail_batch = sum([Decimal(str(b.quantity)) for b in batches])
+        is_suff = total_avail_batch >= req_q
+        shortage = max(Decimal("0.0000"), req_q - total_avail_batch)
         if not is_suff:
             all_avail = False
+            
+        line_cost = Decimal("0.0000")
+        fifo_batches_used = []
+        remaining_req = req_q
+        
+        for b in batches:
+            if remaining_req <= Decimal("0.0000"):
+                break
+            qty_from_batch = min(remaining_req, Decimal(str(b.quantity)))
+            remaining_req -= qty_from_batch
+            line_cost += qty_from_batch * Decimal(str(b.unit_cost))
+            fifo_batches_used.append(f"{b.batch_number}: {qty_from_batch} x {b.unit_cost}")
+            
+        # If there's shortage, estimate remaining at item's cost price
+        if remaining_req > Decimal("0.0000"):
+            line_cost += remaining_req * Decimal(str(raw.cost_price or 0))
+
+        total_est_cost += line_cost
+        avg_unit_cost = line_cost / req_q if req_q > 0 else Decimal("0.0000")
 
         items_breakdown.append(
             ProductionPreviewItem(
@@ -765,11 +783,12 @@ def preview_production(
                 unit_symbol=raw_u.symbol if raw_u else None,
                 standard_qty_per_unit_yield=std_q,
                 required_qty=req_q,
-                available_qty=avail_q,
+                available_qty=total_avail_batch,
                 is_sufficient=is_suff,
                 shortage_qty=shortage,
-                unit_cost=unit_cost,
+                unit_cost=avg_unit_cost,
                 total_cost=line_cost,
+                fifo_batches=fifo_batches_used,
             )
         )
 
@@ -804,6 +823,15 @@ def execute_production_order(
     5. Credits finished goods to StockBalance (PRODUCTION_IN).
     6. Synchronizes finished good Item cost price.
     """
+    # Check for existing idempotency key
+    if exec_in.idempotency_key:
+        existing_order = db.query(ProductionOrder).filter(
+            ProductionOrder.company_id == current_user.company_id,
+            ProductionOrder.idempotency_key == exec_in.idempotency_key
+        ).first()
+        if existing_order:
+            return _format_production_order_response(existing_order, db)
+
     branch = db.query(Branch).filter(
         Branch.id == exec_in.branch_id,
         Branch.company_id == current_user.company_id,
@@ -840,7 +868,7 @@ def execute_production_order(
     # Custom consumptions map if provided
     custom_map = {c.raw_item_id: Decimal(str(c.actual_consumed_qty)) for c in (exec_in.custom_consumptions or [])}
 
-    # Step 1: Pre-Production Sufficiency Check (Strict Blocking)
+    # Step 1: Pre-Production Sufficiency Check (Strict Blocking with FIFO batches)
     shortages = []
     consumptions_to_process = []
     for ing in recipe.ingredients:
@@ -855,26 +883,27 @@ def execute_production_order(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        bal = db.query(StockBalance).filter(
-            StockBalance.warehouse_id == exec_in.kitchen_warehouse_id,
-            StockBalance.item_id == ing.raw_item_id,
-        ).first()
+        batches = db.query(StockBatch).filter(
+            StockBatch.warehouse_id == exec_in.kitchen_warehouse_id,
+            StockBatch.item_id == ing.raw_item_id,
+            StockBatch.quantity > 0,
+            StockBatch.is_active == True,
+        ).order_by(StockBatch.created_at.asc()).with_for_update().all()
 
-        avail = Decimal(str(bal.quantity if bal else 0))
-        if avail < act_req:
-            shortage_qty = act_req - avail
+        total_avail_batch = sum([Decimal(str(b.quantity)) for b in batches])
+
+        if total_avail_batch < act_req:
+            shortage_qty = act_req - total_avail_batch
             shortages.append(
-                f"{raw.name if raw else ing.raw_item_id} (Required: {act_req}, Available: {avail}, Shortage: {shortage_qty})"
+                f"{raw.name if raw else ing.raw_item_id} (Required: {act_req}, Available: {total_avail_batch}, Shortage: {shortage_qty})"
             )
-
-        unit_cost = Decimal(str(raw.cost_price or 0)) if raw else Decimal("0.0000")
-        line_cost = act_req * unit_cost
-        consumptions_to_process.append((ing, raw, std_req, act_req, unit_cost, line_cost))
+        else:
+            consumptions_to_process.append((ing, raw, std_req, act_req, batches))
 
     if shortages:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Production blocked: Insufficient stock for {', '.join(shortages)}",
+            detail=f"Production blocked: Insufficient FIFO batch stock for {', '.join(shortages)}",
         )
 
     # Generate unique order number
@@ -900,22 +929,23 @@ def execute_production_order(
         total_raw_cost=Decimal("0.0000"),
         unit_food_cost=Decimal("0.0000"),
         notes=exec_in.notes.strip() if exec_in.notes else None,
+        idempotency_key=exec_in.idempotency_key,
         created_by_id=current_user.id,
     )
     db.add(new_order)
     db.flush()
 
-    # Step 2: Atomic Raw Material Deduction & Ledger Writing
+    # Step 2: Atomic Raw Material Deduction & Ledger Writing (FIFO)
     total_consumed_cost = Decimal("0.0000")
-    for ing, raw, std_req, act_req, unit_cost, line_cost in consumptions_to_process:
-        total_consumed_cost += line_cost
-
+    for ing, raw, std_req, act_req, batches in consumptions_to_process:
+        remaining_req = act_req
+        
         # Lock StockBalance row
         bal = db.query(StockBalance).filter(
             StockBalance.warehouse_id == exec_in.kitchen_warehouse_id,
             StockBalance.item_id == ing.raw_item_id,
         ).with_for_update().first()
-
+        
         if not bal:
             bal = StockBalance(
                 warehouse_id=exec_in.kitchen_warehouse_id,
@@ -926,33 +956,47 @@ def execute_production_order(
             db.flush()
         else:
             bal.quantity = Decimal(str(bal.quantity)) - act_req
+            db.flush()
 
-        # Record Consumption
-        consump = ProductionConsumption(
-            production_order_id=new_order.id,
-            raw_item_id=ing.raw_item_id,
-            standard_qty=std_req,
-            actual_consumed_qty=act_req,
-            unit_cost=unit_cost,
-            total_cost=line_cost,
-        )
-        db.add(consump)
+        for b in batches:
+            if remaining_req <= Decimal("0.0000"):
+                break
+                
+            qty_from_batch = min(remaining_req, Decimal(str(b.quantity)))
+            b.quantity = Decimal(str(b.quantity)) - qty_from_batch
+            remaining_req -= qty_from_batch
+            
+            unit_cost = Decimal(str(b.unit_cost))
+            line_cost = qty_from_batch * unit_cost
+            total_consumed_cost += line_cost
+            
+            consump = ProductionConsumption(
+                production_order_id=new_order.id,
+                raw_item_id=ing.raw_item_id,
+                stock_batch_id=b.id,
+                batch_number=b.batch_number,
+                standard_qty=std_req * (qty_from_batch / act_req) if act_req > Decimal("0") else Decimal("0"),
+                actual_consumed_qty=qty_from_batch,
+                unit_cost=unit_cost,
+                total_cost=line_cost,
+            )
+            db.add(consump)
 
-        # Record StockLedger (PRODUCTION_OUT)
-        ledger_out = StockLedger(
-            warehouse_id=exec_in.kitchen_warehouse_id,
-            item_id=ing.raw_item_id,
-            movement_type="PRODUCTION_OUT",
-            change_qty=-act_req,
-            balance_qty=Decimal(str(bal.quantity)),
-            unit_cost=unit_cost,
-            total_cost=-line_cost,
-            reference_type="PRODUCTION_ORDER",
-            reference_id=new_order.id,
-            notes=f"Production Order #{order_number} Raw Consumption: {raw.name if raw else ing.raw_item_id}",
-            created_by_id=current_user.id,
-        )
-        db.add(ledger_out)
+            ledger_out = StockLedger(
+                warehouse_id=exec_in.kitchen_warehouse_id,
+                item_id=ing.raw_item_id,
+                batch_number=b.batch_number,
+                movement_type="PRODUCTION_OUT",
+                change_qty=-qty_from_batch,
+                balance_qty=Decimal(str(bal.quantity)),
+                unit_cost=unit_cost,
+                total_cost=-line_cost,
+                reference_type="PRODUCTION_ORDER",
+                reference_id=new_order.id,
+                notes=f"Production Order #{order_number} Raw Consumption: {raw.name if raw else ing.raw_item_id} (Batch: {b.batch_number})",
+                created_by_id=current_user.id,
+            )
+            db.add(ledger_out)
 
     # Step 3: Finished Good Calculation, Batch Generation & Stock Credit
     unit_food_cost = (total_consumed_cost / actual_yield).quantize(Decimal("0.0001")) if actual_yield > 0 else Decimal("0.0000")
@@ -1285,7 +1329,7 @@ def update_production_order_status(
     po = db.query(ProductionOrder).filter(
         ProductionOrder.id == order_id,
         ProductionOrder.company_id == current_user.company_id,
-    ).first()
+    ).with_for_update().first()
     if not po:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Production order not found")
 
@@ -1356,36 +1400,45 @@ def update_production_order_status(
         if actual_yield <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Actual yield quantity must be greater than zero")
 
-        # Check stock sufficiency before completing
+        # Check stock sufficiency before completing (FIFO batches)
         shortages = []
+        consumptions_to_process = []
         for pc in po.consumptions:
             qty_to_deduct = Decimal(str(pc.actual_consumed_qty if pc.actual_consumed_qty > 0 else pc.standard_qty))
             raw_item = db.query(Item).filter(Item.id == pc.raw_item_id).first()
-            bal = db.query(StockBalance).filter(
-                StockBalance.warehouse_id == po.kitchen_warehouse_id,
-                StockBalance.item_id == pc.raw_item_id,
-            ).first()
-            avail = Decimal(str(bal.quantity if bal else 0))
-            if avail < qty_to_deduct:
+            
+            batches = db.query(StockBatch).filter(
+                StockBatch.warehouse_id == po.kitchen_warehouse_id,
+                StockBatch.item_id == pc.raw_item_id,
+                StockBatch.quantity > 0,
+                StockBatch.is_active == True,
+            ).order_by(StockBatch.created_at.asc()).with_for_update().all()
+            
+            total_avail_batch = sum([Decimal(str(b.quantity)) for b in batches])
+            
+            if total_avail_batch < qty_to_deduct:
                 shortages.append(
-                    f"{raw_item.name if raw_item else pc.raw_item_id} (Required: {qty_to_deduct}, Available: {avail}, Shortage: {qty_to_deduct - avail})"
+                    f"{raw_item.name if raw_item else pc.raw_item_id} (Required: {qty_to_deduct}, Available: {total_avail_batch}, Shortage: {qty_to_deduct - total_avail_batch})"
                 )
+            else:
+                consumptions_to_process.append((pc, raw_item, qty_to_deduct, batches))
 
         if shortages:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Production blocked: Insufficient stock for {', '.join(shortages)}",
+                detail=f"Production blocked: Insufficient FIFO stock for {', '.join(shortages)}",
             )
 
-        # 1. Deduct raw materials (PRODUCTION_OUT) with row locking
+        # 1. Deduct raw materials (PRODUCTION_OUT) with row locking and FIFO batches
         total_consumed_cost = Decimal("0.0000")
-        for pc in po.consumptions:
-            qty_to_deduct = Decimal(str(pc.actual_consumed_qty if pc.actual_consumed_qty > 0 else pc.standard_qty))
-            raw_item = db.query(Item).filter(Item.id == pc.raw_item_id).first()
-            unit_cost = Decimal(str(raw_item.cost_price or 0)) if raw_item else Decimal("0.0000")
-            line_cost = qty_to_deduct * unit_cost
-            total_consumed_cost += line_cost
-
+        
+        # Clear existing consumptions to replace them with specific batch consumptions
+        db.query(ProductionConsumption).filter(ProductionConsumption.production_order_id == po.id).delete()
+        db.flush()
+        
+        for pc, raw_item, qty_to_deduct, batches in consumptions_to_process:
+            remaining_req = qty_to_deduct
+            
             # Lock StockBalance for raw material
             bal = db.query(StockBalance).filter(
                 StockBalance.warehouse_id == po.kitchen_warehouse_id,
@@ -1402,22 +1455,47 @@ def update_production_order_status(
                 db.flush()
             else:
                 bal.quantity = Decimal(str(bal.quantity)) - qty_to_deduct
+                db.flush()
+            
+            for b in batches:
+                if remaining_req <= Decimal("0.0000"):
+                    break
+                
+                qty_from_batch = min(remaining_req, Decimal(str(b.quantity)))
+                b.quantity = Decimal(str(b.quantity)) - qty_from_batch
+                remaining_req -= qty_from_batch
+                
+                unit_cost = Decimal(str(b.unit_cost))
+                line_cost = qty_from_batch * unit_cost
+                total_consumed_cost += line_cost
+                
+                consump = ProductionConsumption(
+                    production_order_id=po.id,
+                    raw_item_id=pc.raw_item_id,
+                    stock_batch_id=b.id,
+                    batch_number=b.batch_number,
+                    standard_qty=Decimal(str(pc.standard_qty)) * (qty_from_batch / qty_to_deduct) if qty_to_deduct > Decimal("0") else Decimal("0"),
+                    actual_consumed_qty=qty_from_batch,
+                    unit_cost=unit_cost,
+                    total_cost=line_cost,
+                )
+                db.add(consump)
 
-            # StockLedger entry for raw consumption
-            ledger_out = StockLedger(
-                warehouse_id=po.kitchen_warehouse_id,
-                item_id=pc.raw_item_id,
-                movement_type="PRODUCTION_OUT",
-                change_qty=-qty_to_deduct,
-                balance_qty=Decimal(str(bal.quantity)),
-                unit_cost=unit_cost,
-                total_cost=-line_cost,
-                reference_type="PRODUCTION_ORDER",
-                reference_id=po.id,
-                notes=f"Production Order #{po.order_number} Raw Consumption: {raw_item.name if raw_item else pc.raw_item_id}",
-                created_by_id=current_user.id,
-            )
-            db.add(ledger_out)
+                ledger_out = StockLedger(
+                    warehouse_id=po.kitchen_warehouse_id,
+                    item_id=pc.raw_item_id,
+                    batch_number=b.batch_number,
+                    movement_type="PRODUCTION_OUT",
+                    change_qty=-qty_from_batch,
+                    balance_qty=Decimal(str(bal.quantity)),
+                    unit_cost=unit_cost,
+                    total_cost=-line_cost,
+                    reference_type="PRODUCTION_ORDER",
+                    reference_id=po.id,
+                    notes=f"Production Order #{po.order_number} Raw Consumption: {raw_item.name if raw_item else pc.raw_item_id} (Batch: {b.batch_number})",
+                    created_by_id=current_user.id,
+                )
+                db.add(ledger_out)
 
         # 2. Credit finished goods (PRODUCTION_IN) with row locking
         unit_food_cost = (total_consumed_cost / actual_yield).quantize(Decimal("0.0001")) if actual_yield > 0 else Decimal("0.0000")

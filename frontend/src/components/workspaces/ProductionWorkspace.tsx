@@ -107,6 +107,7 @@ export const ProductionWorkspace: React.FC = () => {
     setFeedback(null);
     try {
       const order = await productionApi.executeProduction({
+        branch_id: activeOutlet?.id || '',
         recipe_id: selectedRecipeId,
         planned_qty: plannedQty,
         kitchen_warehouse_id: selectedWarehouseId,
@@ -300,47 +301,36 @@ export const ProductionWorkspace: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
-                    {filteredOrders.map((ord) => (
-                      <tr key={ord.id} className="hover:bg-[#FAF8F5]/50 transition-colors">
-                        <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">
-                          {ord.orderNumber}
-                        </td>
-                        <td className="p-3.5">
-                          <span className="font-bold text-[#1C1C1C] block">
-                            {ord.recipe?.name || 'Recipe'}
-                          </span>
-                          <span className="text-[10px] text-[#707070]">
-                            {ord.kitchenWarehouse?.name || 'Kitchen'}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-right font-semibold text-[#1C1C1C]">
-                          {Number(ord.plannedQty).toFixed(2)}
-                        </td>
-                        <td className="p-3.5 text-right font-semibold text-[#2E8B57]">
-                          {Number(ord.actualYieldQty || 0).toFixed(2)}
-                        </td>
-                        <td className="p-3.5 text-right font-mono font-semibold text-[#1C1C1C]">
-                          ${Number(ord.totalRawCost || 0).toFixed(2)}
-                        </td>
-                        <td className="p-3.5 text-right font-mono font-semibold text-[#2E8B57]">
-                          ${Number(ord.unitFoodCost || 0).toFixed(2)}
-                        </td>
-                        <td className="p-3.5">
-                          <Badge
-                            variant={
-                              ord.status === 'COMPLETED'
-                                ? 'success'
-                                : ord.status === 'IN_PROGRESS'
-                                ? 'warning'
-                                : 'neutral'
-                            }
-                          >
-                            {ord.status}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
+                        {previewData?.ingredients?.map((ing: any) => (
+                          <tr key={ing.rawItemId || ing.raw_item_id} className="hover:bg-[#FAF8F5]/50">
+                            <td className="p-3 font-semibold text-[#1C1C1C]">
+                              {ing.rawItemName || ing.item_name} ({ing.rawItemCode || ing.item_code})
+                            </td>
+                            <td className="p-3 text-right font-mono font-bold text-[#1C1C1C]">
+                              {Number(ing.standardRequiredQty || ing.required_qty).toFixed(2)} {ing.unitSymbol || ing.unit_symbol}
+                            </td>
+                            <td className="p-3 text-right font-mono text-[#707070]">
+                              {Number(ing.currentStockInKitchen || ing.available_qty).toFixed(2)} {ing.unitSymbol || ing.unit_symbol}
+                            </td>
+                            <td className="p-3 text-left font-mono text-[10px] text-[#707070]">
+                              {(ing.fifo_batches || []).map((b: string, i: number) => <div key={i}>{b}</div>)}
+                              {(!ing.fifo_batches || ing.fifo_batches.length === 0) && "-"}
+                            </td>
+                            <td className="p-3 text-right font-mono font-semibold text-[#2E8B57]">
+                              ₹{Number(ing.totalCost || ing.total_cost).toFixed(2)}
+                            </td>
+                            <td className="p-3">
+                              {ing.isAvailable !== false && ing.is_sufficient !== false && ing.isSufficient !== false ? (
+                                <Badge variant="success">Available</Badge>
+                              ) : (
+                                <Badge variant="danger">
+                                  Short: {Number(ing.shortageQty || ing.shortage_qty).toFixed(2)} {ing.unitSymbol || ing.unit_symbol}
+                                </Badge>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
                 </table>
               </div>
             </div>
