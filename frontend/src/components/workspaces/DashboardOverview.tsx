@@ -27,7 +27,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ setActiveW
     'HEAD_OFFICE_ADMIN',
   ].includes(userRole.toUpperCase());
 
-  if (!isAdmin && !isHeadOffice) {
+  if (!isAdmin || (isAdmin && activeOutlet?.id && !isHeadOffice)) {
     return (
       <div className="w-full">
         <OutletDashboard

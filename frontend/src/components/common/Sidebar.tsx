@@ -86,7 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen = false,
   setMobileOpen,
 }) => {
-  const { activeOutlet, isHeadOffice } = useOutlet();
+  const { activeOutlet, isHeadOffice, setActiveOutlet } = useOutlet();
   const { isOnline } = usePWA();
   const { user, logout } = useAuth();
 
