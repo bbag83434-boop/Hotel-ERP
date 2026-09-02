@@ -1,0 +1,47 @@
+=== FINAL STATE: Gulab Jamun BOM for COMP-001 ===
+
+Company: 86187627-bceb-4fa4-8add-e44c9f2f24ee (COMP-001)
+
+--- 1. ITEMS (8 distinct codes, expect 8) ---
+  FG-GULAB-JAMUN-01  Royal Heritage Gulab Jamun (2 pcs portion) FINISHED_GOOD   cost=$75.0000 sell=$120.0000 unit=pcs
+  RM-GHEE-01         Pure Cow Desi Ghee                         RAW_MATERIAL    cost=$650.0000 sell=$0.0000 unit=kg
+  RM-MAIDA-01        Refined Wheat Flour (Maida Premium)        RAW_MATERIAL    cost=$42.0000 sell=$0.0000 unit=kg
+  RM-MAWA-01         Fresh Cow Milk Mawa (Khoya)                RAW_MATERIAL    cost=$320.0000 sell=$0.0000 unit=kg
+  RM-OIL-01          Sunflower Frying Oil                       RAW_MATERIAL    cost=$120.0000 sell=$0.0000 unit=L
+  RM-SUGAR-01        Refined Granulated Cane Sugar              RAW_MATERIAL    cost=$45.0000 sell=$0.0000 unit=kg
+  SFG-DOUGH-01       Gulab Jamun Dough Base                     SEMI_FINISHED   cost=$219.2000 sell=$0.0000 unit=kg
+  SFG-SYRUP-01       Gulab Jamun Sugar Syrup                    SEMI_FINISHED   cost=$36.0000 sell=$0.0000 unit=kg
+  duplicates: NONE ✓
+
+--- 2. ACTIVE RECIPES ---
+  REC-DOUGH-01               fin=SFG-DOUGH-01 yield=1.0000 current=true active=true
+  REC-GULAB-JAMUN-MASTER     fin=FG-GULAB-JAMUN-01 yield=2.0000 current=true active=true
+  REC-SYRUP-01               fin=SFG-SYRUP-01 yield=1.0000 current=true active=true
+  recipe_items per recipe:
+    REC-DOUGH-01               -> 3 ingredients
+    REC-GULAB-JAMUN-MASTER     -> 4 ingredients
+    REC-SYRUP-01               -> 1 ingredients
+
+--- 3. STOCK BALANCES (central kitchen SL-01, 3d296770) ---
+  FG-GULAB-JAMUN-01  qty=50.0000 pcs
+  RM-GHEE-01         qty=25.0000 kg
+  RM-MAIDA-01        qty=100.0000 kg
+  RM-MAWA-01         qty=25.0000 kg
+  RM-OIL-01          qty=30.0000 L
+  RM-SUGAR-01        qty=100.0000 kg
+  SFG-DOUGH-01       qty=20.0000 kg
+  SFG-SYRUP-01       qty=20.0000 kg
+
+--- 4. HHG-51F339 (must be untouched/empty) ---
+  items: not present ✓
+  recipes: not present ✓
+
+--- 5. Kitchen orders / Production orders (seed must NOT create these) ---
+  kitchen_orders for Gulab items: 0 (expect 0)
+  production_orders referencing COMP-001 recipes: 0
+  total production_orders for COMP-001: 0
+
+--- 6. available-items (FG only) ---
+  FG-GULAB-JAMUN-01 type=FINISHED_GOOD active=true has_recipe=true
+
+✅ TOTALS: items=8 recipes=3 stocked=8 hhg=0
