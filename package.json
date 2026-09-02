@@ -16,5 +16,21 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "main": "patch_appcontent_stock.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bbag83434-boop/Hotel-ERP.git"
+  },
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/bbag83434-boop/Hotel-ERP/issues"
+  },
+  "homepage": "https://github.com/bbag83434-boop/Hotel-ERP#readme",
+  "dependencies": {
+    "pg": "^8.23.0"
+  }
 }
