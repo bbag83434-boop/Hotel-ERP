@@ -92,13 +92,7 @@ export const AppContent = () => {
     }
   }, [fetchHealth, isAuthenticated]);
 
-  // Normal outlet users cannot access the Admin/Executive Dashboard.
-  useEffect(() => {
-    if (authLoading || !isAuthenticated) return;
-    if (!isManagement && activeWorkspace === 'dashboard') {
-      setActiveWorkspace('purchase');
-    }
-  }, [authLoading, isAuthenticated, isManagement, activeWorkspace]);
+  // Normal outlet users default to dashboard (Outlet Dashboard) as per role-based landing requirements.
 
   if (authLoading || !isAuthenticated) {
     return (

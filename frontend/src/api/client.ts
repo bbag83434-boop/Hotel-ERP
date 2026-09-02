@@ -28,7 +28,7 @@ export const apiClient = axios.create({
 // Request Interceptor to attach Active Outlet ID & Auth Token
 apiClient.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
-    const activeOutletId = localStorage.getItem('apex_active_outlet_id');
+    const activeOutletId = typeof window !== 'undefined' ? sessionStorage.getItem('apex_active_outlet_id') : null;
     if (activeOutletId && config.headers) {
       config.headers['X-Outlet-Id'] = activeOutletId;
     }
@@ -59,7 +59,7 @@ export const getStoredRefreshToken = (): string | null => {
 
 export const getStoredOutletId = (): string | null => {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem('apex_active_outlet_id');
+    return sessionStorage.getItem('apex_active_outlet_id');
   }
   return null;
 };
@@ -68,8 +68,8 @@ export const clearAuthStorage = (): void => {
   if (typeof window !== 'undefined') {
     localStorage.removeItem('apex_auth_token');
     localStorage.removeItem('apex_refresh_token');
-    localStorage.removeItem('apex_active_outlet_id');
-    localStorage.removeItem('apex_active_outlet_code');
+    sessionStorage.removeItem('apex_active_outlet_id');
+    sessionStorage.removeItem('apex_active_outlet_code');
   }
 };
 

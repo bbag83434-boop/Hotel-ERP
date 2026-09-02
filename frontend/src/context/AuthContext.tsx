@@ -64,9 +64,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (typeof window !== 'undefined') {
           localStorage.setItem('apex_user_profile', JSON.stringify(res.data));
           const activeBranch = res.data.active_branch || res.data.activeBranch;
-          if (activeBranch && !localStorage.getItem('apex_active_outlet_id')) {
-            localStorage.setItem('apex_active_outlet_id', activeBranch.id);
-            localStorage.setItem('apex_active_outlet_code', activeBranch.code);
+          if (activeBranch && !sessionStorage.getItem('apex_active_outlet_id')) {
+            sessionStorage.setItem('apex_active_outlet_id', activeBranch.id);
+            sessionStorage.setItem('apex_active_outlet_code', activeBranch.code);
           }
         }
       }
@@ -131,8 +131,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           const activeBranch = data.user.active_branch || data.user.activeBranch;
           if (activeBranch && typeof window !== 'undefined') {
-            localStorage.setItem('apex_active_outlet_id', activeBranch.id);
-            localStorage.setItem('apex_active_outlet_code', activeBranch.code);
+            sessionStorage.setItem('apex_active_outlet_id', activeBranch.id);
+            sessionStorage.setItem('apex_active_outlet_code', activeBranch.code);
           }
         } else {
           await fetchUserProfile(accessToken);
@@ -194,10 +194,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('apex_auth_token');
         localStorage.removeItem('apex_refresh_token');
         localStorage.removeItem('apex_user_profile');
-        localStorage.removeItem('apex_active_outlet_id');
-        localStorage.removeItem('apex_active_outlet_code');
-        localStorage.removeItem('apex_active_outlet_name');
-        localStorage.removeItem('apex_active_outlet_type');
+        sessionStorage.removeItem('apex_active_outlet_id');
+        sessionStorage.removeItem('apex_active_outlet_code');
+        sessionStorage.removeItem('apex_active_outlet_name');
+        sessionStorage.removeItem('apex_active_outlet_type');
       }
       setToken(null);
       setUser(null);

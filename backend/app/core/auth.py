@@ -89,6 +89,24 @@ def require_outlet_scope(
 
     return outlet_id
 
+def optional_outlet_scope(
+    outlet_id: Optional[str] = Header(None, alias="X-Outlet-Id"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> Optional[str]:
+    if not outlet_id or not outlet_id.strip():
+        return None
+    outlet_id = outlet_id.strip()
+
+    if current_user.role and current_user.role.name in ["SUPER_ADMIN", "OWNER", "HQ_ADMIN", "CENTRAL_PURCHASE_MANAGER"]:
+        return outlet_id
+
+    user_branch_ids = {ub.branch_id for ub in current_user.branches}
+    if outlet_id not in user_branch_ids:
+        raise ForbiddenException(f"Access denied: User is not authorized for outlet scope '{outlet_id}'")
+
+    return outlet_id
+
 
 # ==============================================================================
 # Head Office Approver Roles & Authorization Guard

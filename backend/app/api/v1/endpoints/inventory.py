@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, select
 
 from app.core.database import get_db
-from app.core.auth import get_current_active_user
+from app.core.auth import get_current_active_user, optional_outlet_scope
 from app.models.user import User
 from app.models.organization import Warehouse, Branch, StoreLocation
 from app.models.inventory import (
@@ -918,6 +918,7 @@ def delete_item(
 def get_stock_balances(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
     warehouse_id: Optional[str] = None,
     item_id: Optional[str] = None,
     low_stock_only: bool = False,
@@ -925,7 +926,10 @@ def get_stock_balances(
     query = db.query(StockBalance).join(
         Item, Item.id == StockBalance.item_id
     ).filter(Item.company_id == current_user.company_id)
-    if not _is_inventory_manager(current_user):
+    
+    if outlet_id:
+        query = query.join(Warehouse, Warehouse.id == StockBalance.warehouse_id).filter(Warehouse.branch_id == outlet_id)
+    elif not _is_inventory_manager(current_user):
         user_bids = list(_user_branch_ids(current_user))
         if not user_bids:
             return [] # No branches -> no stock
@@ -975,12 +979,16 @@ def get_stock_balances(
 def get_low_stock_alerts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
     warehouse_id: Optional[str] = None,
 ):
     query = db.query(StockBalance).join(
         Item, Item.id == StockBalance.item_id
     ).filter(Item.company_id == current_user.company_id)
-    if not _is_inventory_manager(current_user):
+    
+    if outlet_id:
+        query = query.join(Warehouse, Warehouse.id == StockBalance.warehouse_id).filter(Warehouse.branch_id == outlet_id)
+    elif not _is_inventory_manager(current_user):
         user_bids = list(_user_branch_ids(current_user))
         if not user_bids:
             return []
@@ -1025,6 +1033,7 @@ def get_low_stock_alerts(
 def get_stock_ledger(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
     warehouse_id: Optional[str] = None,
     item_id: Optional[str] = None,
     movement_type: Optional[str] = None,
@@ -1033,6 +1042,14 @@ def get_stock_ledger(
     query = db.query(StockLedger).join(
         Item, Item.id == StockLedger.item_id
     ).filter(Item.company_id == current_user.company_id)
+    
+    if outlet_id:
+        query = query.filter(StockLedger.branch_id == outlet_id)
+    elif not _is_inventory_manager(current_user):
+        user_bids = list(_user_branch_ids(current_user))
+        if not user_bids:
+            return []
+        query = query.filter(StockLedger.branch_id.in_(user_bids))
 
     if warehouse_id:
         query = query.filter(StockLedger.warehouse_id == warehouse_id)
@@ -1106,6 +1123,7 @@ def get_stock_ledger(
 def get_stock_movement_timeline(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
     item_id: Optional[str] = None,
     warehouse_id: Optional[str] = None,
     start_date: Optional[datetime] = None,
@@ -1116,6 +1134,14 @@ def get_stock_movement_timeline(
     query = db.query(StockLedger).join(
         Item, Item.id == StockLedger.item_id
     ).filter(Item.company_id == current_user.company_id)
+    
+    if outlet_id:
+        query = query.filter(StockLedger.branch_id == outlet_id)
+    elif not _is_inventory_manager(current_user):
+        user_bids = list(_user_branch_ids(current_user))
+        if not user_bids:
+            return []
+        query = query.filter(StockLedger.branch_id.in_(user_bids))
 
     if item_id:
         query = query.filter(StockLedger.item_id == item_id)

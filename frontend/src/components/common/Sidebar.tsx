@@ -106,13 +106,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     userRole.toUpperCase()
   );
   // Management / head-office staff (admin, kitchen head, central purchase) keep the full suite.
-  const showFullSuite = isManagement
+  // But if ANY user is currently scoped to a specific Outlet, restrict the sidebar to outlet modules.
+  const hasManagementRole = isManagement
     ? true
     : (isAdmin ||
        ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN',
         'CENTRAL_PURCHASE_MANAGER', 'CENTRAL_STORE_MANAGER', 'DESSERT_KITCHEN_HEAD',
-        'GENERAL_MANAGER', 'DIRECTOR', 'KITCHEN_CHEF', 'PRODUCTION_MANAGER'].includes(userRole.toUpperCase()) ||
-       !!isHeadOffice);
+        'GENERAL_MANAGER', 'DIRECTOR', 'KITCHEN_CHEF', 'PRODUCTION_MANAGER'].includes(userRole.toUpperCase()));
+        
+  const isOutletScope = Boolean(activeOutlet?.id && !isHeadOffice);
+  const showFullSuite = isOutletScope ? false : (hasManagementRole || !!isHeadOffice);
 
   const navGroups = [
     {

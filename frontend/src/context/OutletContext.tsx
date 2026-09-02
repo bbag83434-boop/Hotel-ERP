@@ -87,10 +87,10 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [activeOutlet, setActiveOutletState] = useState<Outlet>(() => {
     if (typeof window !== 'undefined') {
-      const savedId = localStorage.getItem('apex_active_outlet_id');
-      const savedCode = localStorage.getItem('apex_active_outlet_code');
-      const savedName = localStorage.getItem('apex_active_outlet_name');
-      const savedType = localStorage.getItem('apex_active_outlet_type') as BranchType;
+      const savedId = sessionStorage.getItem('apex_active_outlet_id');
+      const savedCode = sessionStorage.getItem('apex_active_outlet_code');
+      const savedName = sessionStorage.getItem('apex_active_outlet_name');
+      const savedType = sessionStorage.getItem('apex_active_outlet_type') as BranchType;
       if (savedId && savedCode && savedName) {
         return {
           id: savedId,
@@ -128,10 +128,10 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (match) {
             setActiveOutletState(match);
             if (typeof window !== 'undefined') {
-              localStorage.setItem('apex_active_outlet_id', match.id);
-              localStorage.setItem('apex_active_outlet_code', match.code);
-              localStorage.setItem('apex_active_outlet_name', match.name);
-              localStorage.setItem('apex_active_outlet_type', match.type);
+              sessionStorage.setItem('apex_active_outlet_id', match.id);
+              sessionStorage.setItem('apex_active_outlet_code', match.code);
+              sessionStorage.setItem('apex_active_outlet_name', match.name);
+              sessionStorage.setItem('apex_active_outlet_type', match.type);
             }
           }
         }
@@ -153,8 +153,8 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setOutlets(liveBranches);
 
             // Re-sync current active outlet if it exists in live list
-            const savedId = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_id') : null;
-            const savedCode = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_code') : null;
+            const savedId = typeof window !== 'undefined' ? sessionStorage.getItem('apex_active_outlet_id') : null;
+            const savedCode = typeof window !== 'undefined' ? sessionStorage.getItem('apex_active_outlet_code') : null;
             if (savedId || savedCode) {
               const matched = liveBranches.find((o) => o.id === savedId || o.code === savedCode);
               if (matched) {
@@ -180,8 +180,8 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }));
         setOutlets(dbOutlets);
 
-        const savedId = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_id') : null;
-        const savedCode = typeof window !== 'undefined' ? localStorage.getItem('apex_active_outlet_code') : null;
+        const savedId = typeof window !== 'undefined' ? sessionStorage.getItem('apex_active_outlet_id') : null;
+        const savedCode = typeof window !== 'undefined' ? sessionStorage.getItem('apex_active_outlet_code') : null;
         if (savedId || savedCode) {
           const matched = dbOutlets.find((o) => o.id === savedId || o.code === savedCode);
           if (matched) {
@@ -204,15 +204,15 @@ export const OutletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setActiveOutletState(outlet);
     if (typeof window !== 'undefined') {
       if (outlet.id) {
-        localStorage.setItem('apex_active_outlet_id', outlet.id);
-        localStorage.setItem('apex_active_outlet_code', outlet.code);
-        localStorage.setItem('apex_active_outlet_name', outlet.name);
-        localStorage.setItem('apex_active_outlet_type', outlet.type);
+        sessionStorage.setItem('apex_active_outlet_id', outlet.id);
+        sessionStorage.setItem('apex_active_outlet_code', outlet.code);
+        sessionStorage.setItem('apex_active_outlet_name', outlet.name);
+        sessionStorage.setItem('apex_active_outlet_type', outlet.type);
       } else {
-        localStorage.removeItem('apex_active_outlet_id');
-        localStorage.removeItem('apex_active_outlet_code');
-        localStorage.removeItem('apex_active_outlet_name');
-        localStorage.removeItem('apex_active_outlet_type');
+        sessionStorage.removeItem('apex_active_outlet_id');
+        sessionStorage.removeItem('apex_active_outlet_code');
+        sessionStorage.removeItem('apex_active_outlet_name');
+        sessionStorage.removeItem('apex_active_outlet_type');
       }
     }
   };
