@@ -101,10 +101,11 @@ export const KitchenOrdersWorkspace: React.FC<KitchenOrdersWorkspaceProps> = ({ 
   const { user } = useAuth();
 
   const userRole = typeof user?.role === 'object' ? (user.role.name || '') : (user?.role || '');
-  const isKitchenRole = KITCHEN_ROLES.includes(userRole.toUpperCase());
-  const isAdminRole = ADMIN_ROLES.includes(userRole.toUpperCase());
   const isCentralOutlet = CENTRAL_OUTLET_TYPES.includes((activeOutlet?.type || '').toUpperCase());
-  const isKitchen = Boolean(initialView === 'kitchen' || isKitchenRole || isCentralOutlet);
+  
+  const isKitchen = activeOutlet 
+    ? isCentralOutlet 
+    : Boolean(initialView === 'kitchen' || KITCHEN_ROLES.includes(userRole.toUpperCase()));
 
   const [activeTab, setActiveTab] = useState<OutletTab>('orders');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -328,14 +329,25 @@ return (
               : 'Require finished/semi-finished items (e.g. Gulab Jamun, desserts, gravy) from the Central/Production Kitchen.'}
           </p>
         </div>
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="p-2 rounded-xl border border-[rgba(45,45,45,0.12)] text-[#707070] hover:bg-[#FAF8F5] transition-all"
-          title="Refresh"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#C79A3B]' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="p-2 rounded-xl border border-[rgba(45,45,45,0.12)] text-[#707070] hover:bg-[#FAF8F5] transition-all"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#C79A3B]' : ''}`} />
+          </button>
+          {!isKitchen && (
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all active:scale-[0.98]"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New Kitchen Order
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Feedback */}
