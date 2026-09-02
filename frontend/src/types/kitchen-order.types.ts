@@ -72,6 +72,7 @@ export interface KitchenOrderCreateInput {
   requested_qty: number;
   required_date?: string;
   notes?: string;
+  kitchen_warehouse_id?: string;
 }
 
 export interface KitchenOrderDispatchInput {

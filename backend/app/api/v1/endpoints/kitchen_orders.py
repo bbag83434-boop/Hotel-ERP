@@ -319,6 +319,7 @@ def create_kitchen_order(
         status="SUBMITTED",
         required_date=payload.required_date,
         notes=payload.notes.strip() if payload.notes else None,
+        kitchen_warehouse_id=payload.kitchen_warehouse_id,
         created_by_id=current_user.id,
     )
     db.add(order)

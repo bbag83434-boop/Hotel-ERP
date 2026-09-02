@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useOutlet } from '@/context/OutletContext';
 import { useAuth } from '@/context/AuthContext';
 import { kitchenOrdersApi } from '@/api/kitchenOrders';
+import { organizationApi } from '@/api/organization';
 import {
   KitchenOrder,
   KitchenOrderItemOption,
@@ -111,6 +112,9 @@ export const KitchenOrdersWorkspace: React.FC<KitchenOrdersWorkspaceProps> = ({ 
 
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [items, setItems] = useState<KitchenOrderItemOption[]>([]);
+  const [kitchens, setKitchens] = useState<any[]>([]);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createKitchenWarehouseId, setCreateKitchenWarehouseId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -418,7 +422,7 @@ return (
       )}
 
       {/* Filters (kitchen mode & my orders) */}
-      {(isKitchen || activeTab === 'orders') && (
+      {true && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-white rounded-2xl border border-[rgba(45,45,45,0.08)]">
           <div className="relative w-full sm:w-64">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-[#707070]" />
@@ -567,15 +571,17 @@ return (
           )}
         </div>
       )}
-{/* Outlet mode — Create Kitchen Order */}
-      {!isKitchen && activeTab === 'create' && (
-        <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs p-5 space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-[#1C1C1C]">Require from Production Kitchen</h3>
-            <p className="text-xs text-[#707070] mt-0.5">
-              Select a real finished/semi-finished item and enter the required quantity. The Central Kitchen will produce/allocate and dispatch it to your outlet.
-            </p>
-          </div>
+{/* Outlet mode — Create Kitchen Order Modal */}
+      {!isKitchen && isCreateModalOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-[#1C1C1C]">New Kitchen Order</h3>
+                <p className="text-xs text-[#707070]">Require finished/semi-finished goods from a Central Kitchen.</p>
+              </div>
+              <button onClick={() => setIsCreateModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
 
           {items.length === 0 ? (
             <div className="p-8 text-center rounded-2xl bg-[#FAF8F5] border border-dashed border-[rgba(45,45,45,0.15)]">
@@ -600,7 +606,7 @@ return (
                     <option value="">Select item...</option>
                     {items.map((it) => (
                       <option key={it.id} value={it.id}>
-                        {it.name} ({it.code}) · {it.unit_symbol || 'unit'}{it.has_recipe ? ' · Recipe ✓' : ' · No recipe'}
+                        {it.name} ({it.code}) · {it.unit_symbol || 'unit'} {it.has_recipe ? ' · Recipe ✓' : ''}
                       </option>
                     ))}
                   </select>
@@ -627,12 +633,41 @@ return (
                     )}
                   </div>
                   <div>
+                    <label className="block text-[11px] font-semibold text-[#707070] mb-1">
+                      Central Production Kitchen
+                    </label>
+                    <select
+                      value={createKitchenWarehouseId}
+                      onChange={(e) => setCreateKitchenWarehouseId(e.target.value)}
+                      className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl font-semibold"
+                    >
+                      <option value="">(Auto-assign to default central kitchen)</option>
+                      {kitchens.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.name} ({k.branch?.name || k.branch_id})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
                     <label className="block text-[11px] font-semibold text-[#707070] mb-1">Required By</label>
                     <input
                       type="date"
                       value={createRequiredDate}
                       onChange={(e) => setCreateRequiredDate(e.target.value)}
                       className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#707070] mb-1">Current Status</label>
+                    <input
+                      type="text"
+                      disabled
+                      value="Pending (New Order)"
+                      className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl font-semibold text-gray-500"
                     />
                   </div>
                 </div>
@@ -649,21 +684,30 @@ return (
                 </div>
               </div>
 
-              <button
-                onClick={handleCreate}
-                disabled={submitting}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all active:scale-[0.98]"
-              >
-                {submitting ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <ChefHat className="w-3.5 h-3.5 text-[#C79A3B]" />
-                )}
-                {submitting ? 'Submitting...' : 'Submit Kitchen Order'}
-              </button>
+              <div className="flex items-center justify-end gap-2 mt-4">
+                  <button
+                    onClick={() => setIsCreateModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-bold text-[#707070] hover:bg-[#FAF8F5]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreate}
+                    disabled={submitting}
+                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all active:scale-[0.98]"
+                  >
+                    {submitting ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <ChefHat className="w-3.5 h-3.5 text-[#C79A3B]" />
+                    )}
+                    {submitting ? 'Submitting...' : 'Submit Request'}
+                  </button>
+              </div>
             </>
           )}
         </div>
+      </div>
       )}
 {/* Dispatch modal — Kitchen */}
       {dispatchOrder && (

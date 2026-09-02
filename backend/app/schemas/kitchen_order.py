@@ -13,6 +13,7 @@ class KitchenOrderCreate(BaseModel):
     requested_qty: Decimal = Field(gt=Decimal("0.0000"))
     required_date: Optional[datetime] = None
     notes: Optional[str] = None
+    kitchen_warehouse_id: Optional[str] = None
 
 
 class KitchenOrderStartProductionRequest(BaseModel):
