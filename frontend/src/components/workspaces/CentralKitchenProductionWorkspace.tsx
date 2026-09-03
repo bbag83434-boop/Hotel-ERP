@@ -15,7 +15,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { centralKitchenProductionApi } from '@/api/production';
+import { centralKitchenProductionApi, productionApi } from '@/api/production';
 import {
   ChefHat,
   RefreshCw,
@@ -95,19 +95,19 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
         setHistory(histRes || []);
       }
 
-      // (We fetch recipes via the Production preview endpoint list or RecipeManager manages them itself.
-      // But we need a light list for the New Production dropdown.)
-      const r = await fetch('/api/v1/recipes').then((res) => res.json()).catch(() => []);
-      if (Array.isArray(r)) {
-        setRecipes(r);
-        if (r.length > 0 && !selectedRecipeId) {
-          setSelectedRecipeId(r[0].id);
+      // Fetch recipes
+      try {
+        const r = await productionApi.getRecipes({ is_active: true });
+        if (Array.isArray(r)) {
+          // Keep recipes that have a finished item
+          const validRecipes = r.filter(x => x.finishedItemId || x.finished_item_id);
+          setRecipes(validRecipes);
+          if (validRecipes.length > 0 && !selectedRecipeId) {
+            setSelectedRecipeId(validRecipes[0].id);
+          }
         }
-      } else if (r.data && Array.isArray(r.data)) {
-        setRecipes(r.data);
-        if (r.data.length > 0 && !selectedRecipeId) {
-          setSelectedRecipeId(r.data[0].id);
-        }
+      } catch (e) {
+        console.error("Failed to load recipes", e);
       }
 
     } catch (err: any) {
@@ -291,11 +291,16 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
                 >
                   <option value="">-- Select Recipe --</option>
-                  {recipes.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.finishedItemName || r.name} ({r.code})
-                    </option>
-                  ))}
+                  {recipes.map((r) => {
+                    const name = r.finishedItemName || r.finished_item_name || r.name;
+                    const qty = r.yieldQty || r.yield_qty || 1;
+                    const unit = r.finishedUnitSymbol || r.finished_unit_symbol || 'Units';
+                    return (
+                      <option key={r.id} value={r.id}>
+                        {name} — {qty} {unit}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
