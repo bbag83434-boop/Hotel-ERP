@@ -73,7 +73,8 @@ export type WorkspaceId =
   | 'telegramNotifications'
   | 'aiDocuments'
   | 'aiWastageSales'
-  | 'whatsappBusiness';
+  | 'whatsappBusiness'
+  | 'outletSales';
 
 // Outlet-scope sidebar flow ids that map onto PurchaseWorkspace tabs or the
 // KitchenOrders module (kept internal to the Sidebar for scoped navigation).
@@ -125,6 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { id: 'inventory' as WorkspaceId, label: 'Inventory & Stock', icon: Boxes, badge: null },
         { id: 'orders' as WorkspaceId, label: 'Orders & POS', icon: ShoppingBag, badge: '3 Sources' },
+        { id: 'outletSales' as WorkspaceId, label: 'Outlet Sales/Cons', icon: Banknote, badge: null },
         { id: 'cashierShift' as WorkspaceId, label: 'Cashier Shift & Reconcile', icon: Banknote, badge: 'Shift' },
         { id: 'kds' as WorkspaceId, label: 'Kitchen Display', icon: ChefHat, badge: 'Live' },
         { id: 'purchase' as WorkspaceId, label: 'Central Purchase & PO', icon: ShoppingCart, badge: 'PO' },
@@ -209,6 +211,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Kitchen Orders',
       defaultOpen: true,
       items: [{ id: 'kitchenOrders', label: 'Kitchen Orders', icon: ChefHat, initialTab: undefined, badge: null }],
+    },
+    {
+      label: 'Outlet Sales & Consumption',
+      defaultOpen: true,
+      items: [{ id: 'outletSales', label: 'Sales/Consumption', icon: Banknote, initialTab: undefined, badge: null }],
     },
     {
       label: 'Outlet Inventory',

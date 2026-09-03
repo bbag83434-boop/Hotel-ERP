@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, auth, users, organization, hr, inventory, recipe, procurement, wastage, reports, ai, orders, billing, customer_support, maintenance, beverage, finance, hotel, cashier_shift, expense, ai_provider, ai_tools, notifications, ai_document, whatsapp, dashboard, kitchen_orders
+from app.api.v1.endpoints import health, auth, users, organization, hr, inventory, recipe, procurement, wastage, reports, ai, orders, billing, customer_support, maintenance, beverage, finance, hotel, cashier_shift, expense, ai_provider, ai_tools, notifications, ai_document, whatsapp, dashboard, kitchen_orders, outlet_sales
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication & RBAC"])
@@ -11,6 +11,7 @@ api_router.include_router(procurement.router, prefix="/procurement", tags=["Proc
 api_router.include_router(billing.router, prefix="/procurement", tags=["Supplier Bills, Payments & Vendor Ledger"])
 api_router.include_router(recipe.router, prefix="/recipes", tags=["Recipe / BOM Engine & Production"])
 api_router.include_router(kitchen_orders.router, prefix="/kitchen-orders", tags=["Kitchen Orders (Outlet -> Production Kitchen)"])
+api_router.include_router(outlet_sales.router, prefix="/outlet-sales", tags=["Outlet Sales & Consumption"])
 api_router.include_router(wastage.router, prefix="/wastage", tags=["Wastage & Food Loss Management"])
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports & Analytics Foundation"])
 api_router.include_router(ai.router, prefix="/ai", tags=["AI & Automation Foundation"])

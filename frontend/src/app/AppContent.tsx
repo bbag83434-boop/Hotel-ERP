@@ -50,6 +50,7 @@ import AIDocumentProcessingWorkspace from '@/components/workspaces/AIDocumentPro
 import AIWastageSalesIntelligenceWorkspace from '@/components/workspaces/AIWastageSalesIntelligenceWorkspace';
 import WhatsAppBusinessWorkspace from '@/components/workspaces/WhatsAppBusinessWorkspace';
 import { CentralKitchenProductionWorkspace } from '@/components/workspaces/CentralKitchenProductionWorkspace';
+import OutletSalesWorkspace from '@/components/workspaces/OutletSalesWorkspace';
 
 export const AppContent = () => {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
@@ -197,6 +198,12 @@ export const AppContent = () => {
           {activeWorkspace === 'kitchenOrders' && (
             <div className="w-full min-w-0">
               <KitchenOrdersWorkspace initialView={isManagement ? 'kitchen' : 'outlet'} />
+            </div>
+          )}
+
+          {activeWorkspace === 'outletSales' && (
+            <div className="w-full min-w-0">
+              <OutletSalesWorkspace />
             </div>
           )}
 
