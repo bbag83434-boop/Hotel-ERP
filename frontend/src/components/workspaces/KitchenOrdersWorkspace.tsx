@@ -64,11 +64,11 @@ export const ADMIN_ROLES = [
 const CENTRAL_OUTLET_TYPES = ['CENTRAL_STORE', 'DESSERT_KITCHEN', 'HEAD_OFFICE'];
 
 export const statusBadge: Record<string, { label: string; cls: string }> = {
-  SUBMITTED: { label: 'Submitted', cls: 'bg-amber-100 text-amber-800' },
-  APPROVED: { label: 'Approved', cls: 'bg-indigo-100 text-indigo-800' },
-  REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800' },
-  IN_PRODUCTION: { label: 'In Production', cls: 'bg-blue-100 text-blue-800' },
-  DISPATCHED: { label: 'Dispatched', cls: 'bg-violet-100 text-violet-800' },
+  SUBMITTED: { label: 'Demand Submitted', cls: 'bg-amber-100 text-amber-800' },
+  APPROVED: { label: 'Demand Approved', cls: 'bg-indigo-100 text-indigo-800' },
+  REJECTED: { label: 'Demand Rejected', cls: 'bg-red-100 text-red-800' },
+  IN_PRODUCTION: { label: 'Dispatch Pending Approval', cls: 'bg-blue-100 text-blue-800' },
+  DISPATCHED: { label: 'Dispatch Approved (In Transit)', cls: 'bg-violet-100 text-violet-800' },
   PARTIALLY_RECEIVED: { label: 'Partly Received', cls: 'bg-cyan-100 text-cyan-800' },
   RECEIVED: { label: 'Received', cls: 'bg-green-100 text-green-800' },
   CANCELLED: { label: 'Cancelled', cls: 'bg-red-100 text-red-700' },
@@ -147,11 +147,6 @@ export const KitchenOrdersWorkspace: React.FC<KitchenOrdersWorkspaceProps> = ({ 
   const [cancelReason, setCancelReason] = useState<string>('');
   const [cancelLoading, setCancelLoading] = useState<boolean>(false);
 
-  // Issue modal state
-  const [issueOrder, setIssueOrder] = useState<KitchenOrder | null>(null);
-  const [issueQty, setIssueQty] = useState<number>(0);
-  const [issueLoading, setIssueLoading] = useState<boolean>(false);
-
   // Reject modal state
   const [rejectOrder, setRejectOrder] = useState<KitchenOrder | null>(null);
   const [rejectReason, setRejectReason] = useState<string>('');
@@ -205,10 +200,9 @@ const fetchData = useCallback(async () => {
 
   const openDispatch = (order: KitchenOrder) => {
     setDispatchOrder(order);
-    // Dispatch uses the actual issued quantity, not the original requested quantity.
-    const issued = num(order.issued_qty);
+    const requested = num(order.requested_qty);
     const alreadyDispatched = num(order.dispatched_qty);
-    setDispatchQty(Math.max(0, issued - alreadyDispatched));
+    setDispatchQty(Math.max(0, requested - alreadyDispatched));
     setDispatchNotes('');
     setDispatchBatchNumber('');
   };
@@ -358,6 +352,40 @@ const fetchData = useCallback(async () => {
     }
   };
 
+  const handleApproveDispatch = async (order: KitchenOrder) => {
+    setLoading(true);
+    setFeedback(null);
+    try {
+      await kitchenOrdersApi.approveDispatch(order.id, {});
+      setFeedback({ type: 'success', message: `Dispatch for order ${order.order_number} approved.` });
+      fetchData();
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.detail || err?.response?.data?.error?.message || err?.message || 'Approval failed',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectDispatch = async (order: KitchenOrder) => {
+    setLoading(true);
+    setFeedback(null);
+    try {
+      await kitchenOrdersApi.rejectDispatch(order.id, {});
+      setFeedback({ type: 'success', message: `Dispatch for order ${order.order_number} rejected.` });
+      fetchData();
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.response?.data?.detail || err?.response?.data?.error?.message || err?.message || 'Reject failed',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Reject handler
   const handleReject = async (order: KitchenOrder) => {
     setRejectOrder(order);
@@ -386,38 +414,7 @@ const fetchData = useCallback(async () => {
     }
   };
 
-  // Issue handler
-  const openIssue = (order: KitchenOrder) => {
-    setIssueOrder(order);
-    setIssueQty(num(order.requested_qty));
-  };
 
-  const handleIssue = async () => {
-    if (!issueOrder) return;
-    if (issueQty <= 0) {
-      setFeedback({ type: 'error', message: 'Issue quantity must be greater than zero.' });
-      return;
-    }
-    if (issueQty > num(issueOrder.requested_qty)) {
-      setFeedback({ type: 'error', message: 'Cannot issue more than requested quantity.' });
-      return;
-    }
-    setIssueLoading(true);
-    setFeedback(null);
-    try {
-      await kitchenOrdersApi.issueKitchenOrder(issueOrder.id, { issue_qty: issueQty });
-      setFeedback({ type: 'success', message: `Issued ${issueQty} qty for order ${issueOrder.order_number}. Ready to dispatch.` });
-      setIssueOrder(null);
-      fetchData();
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        message: err?.response?.data?.detail || err?.response?.data?.error?.message || err?.message || 'Issue failed. Check central kitchen stock.',
-      });
-    } finally {
-      setIssueLoading(false);
-    }
-  };
 
   // Challan handler
   const openChallan = (order: KitchenOrder) => {
@@ -610,16 +607,15 @@ return (
             <div className="divide-y divide-gray-100">
               {filteredOrders.map((o) => {
                 const badge = statusBadge[o.status] || { label: o.status, cls: 'bg-gray-100 text-gray-700' };
-                const remaining = num(o.requested_qty) - num(o.received_qty);
-                const issuedRemaining = num(o.issued_qty) - num(o.dispatched_qty);
                 // Admin can approve/reject submitted orders.
                 const canApprove = isKitchen && o.status === 'SUBMITTED';
-                // Central Kitchen can issue approved orders.
-                const canIssue = isKitchen && ['APPROVED', 'IN_PRODUCTION'].includes(o.status) && num(o.issued_qty) === 0;
-                // Central Kitchen can dispatch after issue.
-                const canDispatch = isKitchen && ['APPROVED', 'IN_PRODUCTION', 'DISPATCHED', 'PARTIALLY_RECEIVED'].includes(o.status) && issuedRemaining > 0;
+                // Central Kitchen submits the actual dispatch quantity (no separate issue step).
+                const canDispatch = isKitchen && o.status === 'APPROVED';
+                // Admin can approve the dispatch.
+                const canApproveDispatch = isKitchen && ADMIN_ROLES.includes(userRole.toUpperCase()) && o.status === 'IN_PRODUCTION';
+                // Outlet can receive only after dispatch is approved.
                 const canReceive = !isKitchen && o.status === 'DISPATCHED';
-                const canCancel = !isKitchen && ['SUBMITTED', 'APPROVED', 'IN_PRODUCTION'].includes(o.status);
+                const canCancel = !isKitchen && ['SUBMITTED', 'APPROVED'].includes(o.status);
                 return (
                   <div
                     key={o.id}
@@ -646,7 +642,6 @@ return (
 
                       <div className="flex items-center gap-2 flex-wrap text-[11px] text-[#707070]">
                         <span>Requested: <b className="text-[#1C1C1C]">{fmtQty(o.requested_qty)}</b></span>
-                        <span>Issued: <b className="text-[#1C1C1C]">{fmtQty(o.issued_qty)}</b></span>
                         <span>Dispatched: <b className="text-[#1C1C1C]">{fmtQty(o.dispatched_qty)}</b></span>
                         <span>Received: <b className="text-[#2E8B57]">{fmtQty(o.received_qty)}</b></span>
                         <span className="text-[#707070]">· Required by: {fmtDay(o.required_date)}</span>
@@ -696,23 +691,32 @@ return (
                           </button>
                         </>
                       )}
-                      {/* Issue (Central Kitchen, for APPROVED) */}
-                      {canIssue && (
-                        <button
-                          onClick={() => openIssue(o)}
-                          className="px-3 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 flex items-center gap-1"
-                        >
-                          <Package className="w-3 h-3" /> Issue
-                        </button>
-                      )}
+
                       {/* Dispatch (Central Kitchen) */}
                       {canDispatch && (
                         <button
                           onClick={() => openDispatch(o)}
                           className="px-3 py-1.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs flex items-center gap-1"
                         >
-                          <Truck className="w-3 h-3" /> Dispatch
+                          <Truck className="w-3 h-3" /> Submit Dispatch
                         </button>
+                      )}
+                      {/* Approve/Reject Dispatch (HO Admin) */}
+                      {canApproveDispatch && (
+                        <>
+                          <button
+                            onClick={() => handleApproveDispatch(o)}
+                            className="px-3 py-1.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs flex items-center gap-1"
+                          >
+                            <CheckCircle2 className="w-3 h-3" /> Approve Dispatch
+                          </button>
+                          <button
+                            onClick={() => handleRejectDispatch(o)}
+                            className="px-2.5 py-1.5 rounded-xl border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 flex items-center gap-1"
+                          >
+                            <Ban className="w-3 h-3" /> Reject Dispatch
+                          </button>
+                        </>
                       )}
                       {/* Print Challan */}
                       {isKitchen && ['IN_PRODUCTION', 'DISPATCHED', 'PARTIALLY_RECEIVED', 'RECEIVED'].includes(o.status) && (
@@ -957,7 +961,7 @@ return (
               </button>
             </div>
             <p className="text-[10px] text-[#707070] flex items-center gap-1">
-              <Info className="w-3 h-3" /> Dispatch uses the issued quantity. Stock will be deducted from Central Kitchen when the outlet confirms receiving.
+              <Info className="w-3 h-3" /> Stock will be deducted immediately from the Central Kitchen.
             </p>
           </div>
         </div>
@@ -1069,44 +1073,6 @@ return (
         </div>
       )}
 
-      {/* Issue modal — Central Kitchen */}
-      {issueOrder && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-md space-y-4 shadow-xl">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <div>
-                <h3 className="text-base font-bold text-[#1C1C1C]">Issue Quantity</h3>
-                <p className="text-xs text-[#707070]">{issueOrder.order_number} · {issueOrder.item_name}</p>
-              </div>
-              <button onClick={() => setIssueOrder(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="bg-[#FAF8F5] rounded-xl p-3 text-xs text-[#707070] space-y-0.5">
-              <p>Requested by outlet: <b className="text-[#1C1C1C]">{fmtQty(issueOrder.requested_qty)} {issueOrder.unit_symbol || 'units'}</b></p>
-              {issueOrder.kitchen_available_qty !== undefined && issueOrder.kitchen_available_qty !== null && (
-                <p>Central Kitchen stock: <b className="text-[#1C1C1C]">{fmtQty(issueOrder.kitchen_available_qty)} {issueOrder.unit_symbol || 'units'}</b></p>
-              )}
-              {issueOrder.branch_name && <p>Outlet: {issueOrder.branch_name} [{issueOrder.branch_code}]</p>}
-              {Number(issueOrder.kitchen_available_qty) < issueQty && (
-                <p className="text-red-600 font-semibold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Insufficient stock! Available: {fmtQty(issueOrder.kitchen_available_qty)}, Required: {fmtQty(issueQty)}</p>
-              )}
-            </div>
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[11px] font-semibold text-[#707070] mb-1">Issue Quantity <span className="text-red-500">*</span> <span className="text-[#999] font-normal ml-1">(max: {fmtQty(issueOrder.requested_qty)})</span></label>
-                <input type="number" min={0} max={num(issueOrder.requested_qty)} step="any" value={issueQty || ''} onChange={(e) => setIssueQty(Number(e.target.value))} className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl font-semibold" />
-                <p className="text-[10px] text-[#707070] mt-1">You can send less than requested but not more.</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setIssueOrder(null)} className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold text-[#707070] hover:bg-[#FAF8F5]">Close</button>
-              <button onClick={handleIssue} disabled={issueLoading || issueQty <= 0 || issueQty > num(issueOrder.requested_qty) || issueQty > Number(issueOrder.kitchen_available_qty)} className="flex-1 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 flex items-center justify-center gap-1 disabled:opacity-50">
-                {issueLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />}
-                Confirm Issue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Reject modal — Admin/HQ */}
       {rejectOrder && (

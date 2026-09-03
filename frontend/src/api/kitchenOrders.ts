@@ -59,6 +59,16 @@ export const kitchenOrdersApi = {
     return res.data;
   },
 
+  approveDispatch: async (id: string, payload?: any): Promise<KitchenOrder> => {
+    const res = await apiClient.post<KitchenOrder>(`/kitchen-orders/${id}/approve-dispatch`, payload || {});
+    return res.data;
+  },
+
+  rejectDispatch: async (id: string, payload?: any): Promise<KitchenOrder> => {
+    const res = await apiClient.post<KitchenOrder>(`/kitchen-orders/${id}/reject-dispatch`, payload || {});
+    return res.data;
+  },
+
   receiveKitchenOrder: async (id: string, payload: KitchenOrderReceiveInput): Promise<KitchenOrder> => {
     const res = await apiClient.post<KitchenOrder>(`/kitchen-orders/${id}/receive`, payload);
     return res.data;

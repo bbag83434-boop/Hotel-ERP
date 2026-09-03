@@ -596,21 +596,21 @@ def dispatch_kitchen_order(
     ):
         raise BadRequestException(f"Cannot dispatch a kitchen order in status '{current_status}'.")
 
-    # Use issued_qty as the dispatch baseline.
-    issued = Decimal(str(order.issued_qty or 0))
+    # Use requested_qty as the baseline, as we are skipping the separate "Issue" step.
+    requested = Decimal(str(order.requested_qty or 0))
     already_dispatched = Decimal(str(order.dispatched_qty or 0))
-    remaining_to_dispatch = (issued - already_dispatched).max(Decimal("0.0000"))
+    
+    if order.status == KitchenOrderStatus.DISPATCHED:
+        raise BadRequestException("This kitchen order has already been dispatched.")
 
-    if remaining_to_dispatch <= Decimal("0.0000"):
-        raise BadRequestException("This kitchen order has already been fully dispatched.")
-
-    dispatch_qty = Decimal(str(payload.dispatched_qty)) if payload.dispatched_qty is not None else remaining_to_dispatch
+    dispatch_qty = Decimal(str(payload.dispatched_qty)) if payload.dispatched_qty is not None else requested
     if dispatch_qty <= Decimal("0.0000"):
         raise BadRequestException("Dispatch quantity must be greater than zero.")
-    if dispatch_qty > remaining_to_dispatch:
-        raise BadRequestException(
-            f"Dispatch quantity {dispatch_qty} exceeds remaining issued quantity {remaining_to_dispatch}."
-        )
+    if dispatch_qty > requested:
+        raise BadRequestException(f"Dispatch quantity {dispatch_qty} exceeds requested quantity {requested}.")
+
+    # Automatically set issued_qty to match what is being dispatched (no pending concept)
+    order.issued_qty = dispatch_qty
 
     # Resolve the central kitchen warehouse.
     kitchen_wh = None
@@ -648,18 +648,95 @@ def dispatch_kitchen_order(
             unit=unit,
         )
 
-    # NO stock deduction at dispatch — stock moves only at Receive.
+    # Deduct stock at dispatch (Sector V dispatch)
+    stock_service = StockService(db)
+    stock_service.post_stock_movement(
+        warehouse_id=kitchen_wh.id,
+        item_id=order.item_id,
+        change_qty=-dispatch_qty,
+        movement_type="TRANSFER_OUT",
+        reference_type="KITCHEN_ORDER",
+        reference_id=order.id,
+        batch_number=payload.batch_number or order.batch_number,
+        expiry_date=payload.expiry_date or order.expiry_date,
+        user_id=current_user.id,
+        idempotency_key=f"ko_dispatch_{order.id}_{dispatch_qty}",
+    )
+
     order.kitchen_warehouse_id = kitchen_wh.id
     order.dispatched_qty = already_dispatched + dispatch_qty
     order.batch_number = payload.batch_number or order.batch_number
     order.expiry_date = payload.expiry_date or order.expiry_date
-    order.status = "DISPATCHED"
+    order.status = "IN_PRODUCTION" # Used as "Pending HO Dispatch Approval"
     order.dispatched_by_id = current_user.id
     order.dispatched_at = datetime.utcnow()
     if payload.notes:
         note = payload.notes.strip()
         order.dispatch_notes = f"{order.dispatch_notes + ' | ' if order.dispatch_notes else ''}{note}"
 
+    db.commit()
+    db.refresh(order)
+    return _format_kitchen_order(order, db, current_user)
+
+
+@router.post("/{order_id}/approve-dispatch", response_model=KitchenOrderResponse)
+def approve_dispatch(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if not _is_kitchen_manager(current_user):
+        raise ForbiddenException("Only Admin can approve dispatch.")
+
+    order = db.query(KitchenOrder).filter(KitchenOrder.id == order_id, KitchenOrder.company_id == current_user.company_id).first()
+    if not order:
+        raise NotFoundException("Kitchen order", order_id)
+
+    if order.status != KitchenOrderStatus.IN_PRODUCTION:
+        raise BadRequestException("Only pending dispatch orders can be approved.")
+
+    order.status = "DISPATCHED"
+    db.commit()
+    db.refresh(order)
+    return _format_kitchen_order(order, db, current_user)
+
+
+@router.post("/{order_id}/reject-dispatch", response_model=KitchenOrderResponse)
+def reject_dispatch(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if not _is_kitchen_manager(current_user):
+        raise ForbiddenException("Only Admin can reject dispatch.")
+
+    order = db.query(KitchenOrder).filter(KitchenOrder.id == order_id, KitchenOrder.company_id == current_user.company_id).first()
+    if not order:
+        raise NotFoundException("Kitchen order", order_id)
+
+    if order.status != KitchenOrderStatus.IN_PRODUCTION:
+        raise BadRequestException("Only pending dispatch orders can be rejected.")
+
+    # Revert Sector V stock
+    stock_service = StockService(db)
+    dispatch_qty = order.dispatched_qty
+    if dispatch_qty > 0 and order.kitchen_warehouse_id:
+        stock_service.post_stock_movement(
+            warehouse_id=order.kitchen_warehouse_id,
+            item_id=order.item_id,
+            change_qty=dispatch_qty,
+            movement_type="TRANSFER_IN",
+            reference_type="KITCHEN_ORDER",
+            reference_id=order.id,
+            batch_number=order.batch_number,
+            expiry_date=order.expiry_date,
+            user_id=current_user.id,
+            idempotency_key=f"ko_dispatch_revert_{order.id}_{datetime.utcnow().timestamp()}",
+        )
+    
+    order.issued_qty = Decimal("0.0000")
+    order.dispatched_qty = Decimal("0.0000")
+    order.status = "APPROVED" # Revert back to approved so Sector V can retry
     db.commit()
     db.refresh(order)
     return _format_kitchen_order(order, db, current_user)
@@ -726,22 +803,8 @@ def receive_kitchen_order(
 
     stock_service = StockService(db)
 
-    # Decrease central kitchen stock by accepted amount.
+    # Increase outlet stock by accepted amount (Kitchen stock was already deducted at dispatch).
     if accepted_qty > 0:
-        stock_service.post_stock_movement(
-            warehouse_id=kitchen_wh.id,
-            item_id=order.item_id,
-            change_qty=-accepted_qty,
-            movement_type="TRANSFER_OUT",
-            reference_type="KITCHEN_ORDER",
-            reference_id=order.id,
-            batch_number=order.batch_number,
-            expiry_date=order.expiry_date,
-            user_id=current_user.id,
-            idempotency_key=f"ko_receive_deduct_{order.id}_{accepted_qty}",
-        )
-
-        # Increase outlet stock by accepted amount.
         stock_service.post_stock_movement(
             warehouse_id=outlet_wh.id,
             item_id=order.item_id,
@@ -755,21 +818,9 @@ def receive_kitchen_order(
             idempotency_key=f"ko_receive_{order.id}_{accepted_qty}",
         )
 
-    # Log variance if dispatched > received
+    # Log variance message if dispatched > received (No stock deduction needed since kitchen already deducted full amount at dispatch)
     variance_qty = dispatched - accepted_qty
     if variance_qty > 0:
-        stock_service.post_stock_movement(
-            warehouse_id=kitchen_wh.id,
-            item_id=order.item_id,
-            change_qty=-variance_qty,
-            movement_type="ADJUSTMENT",
-            reference_type="KITCHEN_ORDER",
-            reference_id=order.id,
-            batch_number=order.batch_number,
-            expiry_date=order.expiry_date,
-            user_id=current_user.id,
-            idempotency_key=f"ko_variance_{order.id}_{variance_qty}",
-        )
         variance_msg = f" Shortage of {variance_qty} recorded as variance."
     else:
         variance_msg = ""
