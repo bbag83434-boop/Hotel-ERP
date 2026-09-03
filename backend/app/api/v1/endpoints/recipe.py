@@ -816,7 +816,16 @@ def preview_production(
 
         std_q = Decimal(str(ing.quantity))
         req_q = std_q * multiplier
-        
+
+        # Normalize the required quantity into the raw item's base unit so the
+        # comparison against warehouse stock (kept in base units) is valid —
+        # e.g. recipe says 500 GM while stock is tracked in KG.
+        if raw and ing.unit_id and raw.unit_id and ing.unit_id != raw.unit_id:
+            try:
+                req_q = convert_quantity(db, current_user.company_id, req_q, ing.unit_id, raw.unit_id)
+            except ValueError:
+                pass  # fall back to recipe-unit comparison if no conversion exists
+
         batches = db.query(StockBatch).filter(
             StockBatch.warehouse_id == preview_in.kitchen_warehouse_id,
             StockBatch.item_id == ing.raw_item_id,
@@ -825,8 +834,19 @@ def preview_production(
         ).order_by(StockBatch.created_at.asc()).all()
 
         total_avail_batch = sum([Decimal(str(b.quantity)) for b in batches])
-        is_suff = total_avail_batch >= req_q
-        shortage = max(Decimal("0.0000"), req_q - total_avail_batch)
+
+        # StockBalance is the authoritative on-hand quantity. Use it when present
+        # so items without FIFO batch tracking are not falsely reported short.
+        balance_row = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == preview_in.kitchen_warehouse_id,
+            StockBalance.item_id == ing.raw_item_id,
+        ).first()
+        total_avail = max(
+            Decimal(str(balance_row.quantity)) if balance_row else Decimal("0.0000"),
+            total_avail_batch,
+        )
+        is_suff = total_avail >= req_q
+        shortage = max(Decimal("0.0000"), req_q - total_avail)
         if not is_suff:
             all_avail = False
             
@@ -857,7 +877,7 @@ def preview_production(
                 unit_symbol=raw_u.symbol if raw_u else None,
                 standard_qty_per_unit_yield=std_q,
                 required_qty=req_q,
-                available_qty=total_avail_batch,
+                available_qty=total_avail,
                 is_sufficient=is_suff,
                 shortage_qty=shortage,
                 unit_cost=avg_unit_cost,
@@ -929,12 +949,20 @@ def execute_production_order(
 
     planned_qty = Decimal(str(exec_in.planned_qty))
     actual_yield = Decimal(str(exec_in.actual_yield_qty if exec_in.actual_yield_qty is not None else planned_qty))
-    wastage_qty = Decimal(str(exec_in.wastage_qty or 0))
-
     if planned_qty <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Planned quantity must be greater than zero")
     if actual_yield <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Actual yield quantity must be greater than zero")
+    if actual_yield > planned_qty:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Good output (actual yield) cannot exceed planned output quantity",
+        )
+
+    # Lost To Yield = Planned Output - Good Output — always derived server-side so
+    # history is consistent and can never be bypassed from the client.
+
+    wastage_qty = max(planned_qty - actual_yield, Decimal("0.0000"))
 
     base_yield = Decimal(str(recipe.yield_qty or 1))
     multiplier = planned_qty / base_yield if base_yield > 0 else planned_qty
@@ -966,10 +994,22 @@ def execute_production_order(
 
         total_avail_batch = sum([Decimal(str(b.quantity)) for b in batches])
 
-        if total_avail_batch < act_req:
-            shortage_qty = act_req - total_avail_batch
+        # Lock the StockBalance row and use it as the authoritative on-hand
+        # quantity. Items without FIFO batch tracking still have StockBalance,
+        # so availability is the better of the two (they should agree).
+        bal_row = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == exec_in.kitchen_warehouse_id,
+            StockBalance.item_id == ing.raw_item_id,
+        ).with_for_update().first()
+        total_avail = max(
+            Decimal(str(bal_row.quantity)) if bal_row else Decimal("0.0000"),
+            total_avail_batch,
+        )
+
+        if total_avail < act_req:
+            shortage_qty = act_req - total_avail
             shortages.append(
-                f"{raw.name if raw else ing.raw_item_id} (Required: {act_req}, Available: {total_avail_batch}, Shortage: {shortage_qty})"
+                f"{raw.name if raw else ing.raw_item_id} (Required: {act_req}, Available: {total_avail}, Shortage: {shortage_qty})"
             )
         else:
             consumptions_to_process.append((ing, raw, std_req, act_req, batches))
@@ -977,7 +1017,7 @@ def execute_production_order(
     if shortages:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Production blocked: Insufficient FIFO batch stock for {', '.join(shortages)}",
+            detail=f"Production blocked: Insufficient stock in Central Kitchen for {', '.join(shortages)}",
         )
 
     # Generate unique order number
@@ -1021,10 +1061,14 @@ def execute_production_order(
         ).with_for_update().first()
         
         if not bal:
+            # No balance row yet — the validated availability came from FIFO
+            # batches (balance table empty), so seed from the batch sum.
+            # The resulting balance can never go negative.
+            batch_sum = sum([Decimal(str(b.quantity)) for b in batches])
             bal = StockBalance(
                 warehouse_id=exec_in.kitchen_warehouse_id,
                 item_id=ing.raw_item_id,
-                quantity=-act_req,
+                quantity=batch_sum - act_req,
             )
             db.add(bal)
             db.flush()
@@ -1068,6 +1112,42 @@ def execute_production_order(
                 reference_type="PRODUCTION_ORDER",
                 reference_id=new_order.id,
                 notes=f"Production Order #{order_number} Raw Consumption: {raw.name if raw else ing.raw_item_id} (Batch: {b.batch_number})",
+                created_by_id=current_user.id,
+            )
+            db.add(ledger_out)
+
+        # Un-batched remainder: on-hand stock exists in StockBalance without
+        # FIFO batches. Cost it at the item's current cost price and record the
+        # consumption + ledger so the transaction stays complete and traceable.
+        if remaining_req > Decimal("0.0000"):
+            unit_cost = Decimal(str(raw.cost_price or 0))
+            line_cost = remaining_req * unit_cost
+            total_consumed_cost += line_cost
+
+            consump = ProductionConsumption(
+                production_order_id=new_order.id,
+                raw_item_id=ing.raw_item_id,
+                stock_batch_id=None,
+                batch_number=None,
+                standard_qty=std_req * (remaining_req / act_req) if act_req > Decimal("0") else Decimal("0"),
+                actual_consumed_qty=remaining_req,
+                unit_cost=unit_cost,
+                total_cost=line_cost,
+            )
+            db.add(consump)
+
+            ledger_out = StockLedger(
+                warehouse_id=exec_in.kitchen_warehouse_id,
+                item_id=ing.raw_item_id,
+                batch_number=None,
+                movement_type="PRODUCTION_OUT",
+                change_qty=-remaining_req,
+                balance_qty=Decimal(str(bal.quantity)),
+                unit_cost=unit_cost,
+                total_cost=-line_cost,
+                reference_type="PRODUCTION_ORDER",
+                reference_id=new_order.id,
+                notes=f"Production Order #{order_number} Raw Consumption (unbatched): {raw.name if raw else ing.raw_item_id}",
                 created_by_id=current_user.id,
             )
             db.add(ledger_out)
@@ -1469,7 +1549,7 @@ def update_production_order_status(
     if target_status == "COMPLETED":
         recipe = db.query(Recipe).filter(Recipe.id == po.recipe_id).first()
         actual_yield = Decimal(str(status_in.actual_yield_qty if status_in.actual_yield_qty is not None else po.planned_qty))
-        wastage_qty = Decimal(str(status_in.wastage_qty or 0))
+        wastage_qty = Decimal(str(status_in.wastage_qty or  0))
 
         if actual_yield <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Actual yield quantity must be greater than zero")
@@ -1757,4 +1837,6 @@ def reverse_production_order(
     db.commit()
     db.refresh(po)
     return _format_production_order_response(po, db)
+
+
 

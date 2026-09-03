@@ -151,6 +151,9 @@ export const centralKitchenProductionApi = {
     planned_qty: number;
     kitchen_warehouse_id: string;
     actual_yield_qty?: number;
+    wastage_qty?: number;
+    batch_number?: string;
+    expiry_date?: string;
     notes?: string;
     idempotency_key?: string;
   }): Promise<ProductionOrder> => {

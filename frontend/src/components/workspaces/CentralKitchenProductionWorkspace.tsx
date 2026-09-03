@@ -76,12 +76,14 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [productionQty, setProductionQty] = useState<number>(1);
+  const [actualYieldQty, setActualYieldQty] = useState<number | null>(null);
   const [preview, setPreview] = useState<ProductionPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
 
   // Search
   const [historySearch, setHistorySearch] = useState('');
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
   // 1. Initial Load
   const fetchAll = useCallback(async () => {
@@ -156,19 +158,24 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
     setExecuting(true);
     setFeedback(null);
     try {
+      const yieldQty = actualYieldQty !== null ? actualYieldQty : productionQty;
+      const wastageQty = Math.max(0, productionQty - yieldQty); // Lost To Yield
+      
       const order = await centralKitchenProductionApi.executeProduction({
         branch_id: centralConfig.branch_id,
         recipe_id: selectedRecipeId,
         planned_qty: productionQty,
         kitchen_warehouse_id: centralConfig.warehouse_id,
-        actual_yield_qty: productionQty,
+        actual_yield_qty: yieldQty,
+        wastage_qty: wastageQty,
       });
       setFeedback({
         type: 'success',
-        message: `✅ Production ${order.orderNumber} Completed! ${productionQty} units produced. Ingredients consumed via FIFO.`,
+        message: `✅ Production ${order.orderNumber} Completed! ${yieldQty} units produced. Ingredients consumed via FIFO.`,
       });
       setPreview(null);
       setProductionQty(1);
+      setActualYieldQty(null);
       
       // Refresh history & stay on history tab
       const h = await centralKitchenProductionApi.getCentralKitchenOrders();
@@ -306,7 +313,7 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
 
               <div>
                 <label className="text-xs font-semibold text-[#1C1C1C] block mb-2">
-                  Production Quantity (Total Yield)
+                  PLANNED PRODUCTION (Total Yield)
                 </label>
                 <div className="flex items-center gap-2">
                   <button
@@ -331,6 +338,19 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              {selectedRecipe && (
+                <div>
+                  <label className="text-xs font-semibold text-[#1C1C1C] block mb-2">
+                    RECIPE BATCH
+                  </label>
+                  <div className="flex items-center h-10 px-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                    <span className="text-sm font-bold text-[#1C1C1C]">
+                      {selectedRecipe.yieldQty || selectedRecipe.yield_qty || 1} <span className="text-xs text-[#707070] font-normal">{selectedRecipe.finishedUnitSymbol || selectedRecipe.finished_unit_symbol || 'Units'}</span>
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* UI STATES */}
@@ -359,20 +379,32 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
                 {/* Recipe Info & Yield Output */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-5 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
                    <div>
-                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-1">GOOD OUTPUT</span>
-                     <b className="text-[#1C1C1C] text-xl">{productionQty} <span className="text-sm font-semibold text-[#707070]">{selectedRecipe?.finishedUnitSymbol || 'Units'}</span></b>
+                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-2">GOOD OUTPUT</span>
+                     <div className="flex items-center gap-1.5">
+                       <input
+                         type="number"
+                         min="0"
+                         max={productionQty}
+                         value={actualYieldQty !== null ? actualYieldQty : productionQty}
+                         onChange={(e) => setActualYieldQty(Math.min(productionQty, Math.max(0, Number(e.target.value))))}
+                         className="w-20 px-2 py-1 text-sm font-mono font-bold rounded-lg border border-[rgba(45,45,45,0.15)] focus:outline-none focus:border-[#C79A3B]"
+                       />
+                       <span className="text-sm font-semibold text-[#707070]">{selectedRecipe?.finishedUnitSymbol || 'Units'}</span>
+                     </div>
                    </div>
                    <div>
-                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-1">LOST TO YIELD</span>
-                     <b className="text-[#1C1C1C] text-xl">0 <span className="text-sm font-semibold text-[#707070]">{selectedRecipe?.finishedUnitSymbol || 'Units'}</span></b>
+                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-2">LOST TO YIELD</span>
+                     <b className="text-[#1C1C1C] text-xl flex items-center h-[34px]">
+                       {Math.max(0, productionQty - (actualYieldQty !== null ? actualYieldQty : productionQty))} <span className="text-sm font-semibold text-[#707070] ml-1">{selectedRecipe?.finishedUnitSymbol || 'Units'}</span>
+                     </b>
                    </div>
                    <div>
-                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-1">TOTAL INGREDIENT COST</span>
-                     <b className="text-[#1C1C1C] text-xl">₹{fmt((preview as any).totalEstimatedRawCost ?? (preview as any).total_estimated_raw_cost)}</b>
+                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-2">TOTAL INGREDIENT COST</span>
+                     <b className="text-[#1C1C1C] text-xl flex items-center h-[34px]">₹{fmt((preview as any).totalEstimatedRawCost ?? (preview as any).total_estimated_raw_cost)}</b>
                    </div>
                    <div>
-                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-1">COST PER OUTPUT UNIT</span>
-                     <b className="text-[#1C1C1C] text-xl">₹{fmt((preview as any).estimatedUnitFoodCost ?? (preview as any).estimated_unit_food_cost)}</b>
+                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-2">COST PER OUTPUT UNIT</span>
+                     <b className="text-[#1C1C1C] text-xl flex items-center h-[34px]">₹{fmt((preview as any).estimatedUnitFoodCost ?? (preview as any).estimated_unit_food_cost)}</b>
                    </div>
                 </div>
 
@@ -416,6 +448,17 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
                                <span className="font-mono text-[13px]">{fmt(shortage)} {unit}</span>
                              </div>
                            )}
+
+                           <div className="pt-2 mt-2 border-t border-[rgba(45,45,45,0.05)] space-y-2">
+                             <div className="flex justify-between items-center">
+                               <span className="text-[#707070]">Rate</span>
+                               <b className="font-mono text-[#1C1C1C]">₹{fmt(num((ing as any).unit_cost ?? (ing as any).unitCost))} / {unit}</b>
+                             </div>
+                             <div className="flex justify-between items-center">
+                               <span className="text-[#707070]">Ingredient Cost</span>
+                               <b className="font-mono text-[#2E8B57]">₹{fmt(num((ing as any).total_cost ?? (ing as any).totalCost))}</b>
+                             </div>
+                           </div>
                         </div>
                         
                         <div className={`mt-auto pt-3 border-t ${isSuff ? 'border-[rgba(45,45,45,0.05)]' : 'border-red-100'}`}>
@@ -515,7 +558,9 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
                       <th className="p-3.5">Date</th>
                       <th className="p-3.5">Item</th>
                       <th className="p-3.5">Recipe</th>
-                      <th className="p-3.5 text-right">Produced Qty</th>
+                      <th className="p-3.5 text-right">Planned Qty</th>
+                      <th className="p-3.5 text-right">Good Output</th>
+                      <th className="p-3.5 text-right">Lost to Yield</th>
                       <th className="p-3.5">Unit</th>
                       <th className="p-3.5 text-right">Total Cost</th>
                       <th className="p-3.5 text-right">Cost/Unit</th>
@@ -531,29 +576,74 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
                       const unitSymbol = (order as any).finished_unit_symbol || (order as any).finishedUnitSymbol || 'pcs';
                       const cost = num((order as any).total_raw_cost ?? order.totalRawCost);
                       const cpu = num((order as any).unit_food_cost ?? order.unitFoodCost);
+                      const plannedQty = num((order as any).planned_qty ?? order.plannedQty);
                       const qty = num((order as any).actual_yield_qty ?? order.actualYieldQty);
+                      const wastage = num((order as any).wastage_qty ?? order.wastageQty);
                       const date = (order as any).completed_date || (order as any).completedDate || (order as any).created_at;
                       const creator = (order as any).created_by?.firstName || 'Admin';
 
                       return (
-                        <tr key={order.id} className="hover:bg-[#FAF8F5]/50">
-                          <td className="p-3.5 font-mono font-semibold text-[11px]">{order.orderNumber}</td>
-                          <td className="p-3.5 text-[#707070]">{fmtDate(date)}</td>
-                          <td className="p-3.5 font-semibold text-[#1C1C1C]">{itemName}</td>
-                          <td className="p-3.5 text-[#707070]">{recipeName}</td>
-                          <td className="p-3.5 text-right font-mono font-bold">{fmt(qty)}</td>
-                          <td className="p-3.5 text-[#707070]">{unitSymbol}</td>
-                          <td className="p-3.5 text-right font-mono font-semibold text-[#2E8B57]">₹{fmt(cost)}</td>
-                          <td className="p-3.5 text-right font-mono text-[#707070]">₹{fmt(cpu)}</td>
-                          <td className="p-3.5 text-[#707070] text-[11px]">{creator}</td>
-                          <td className="p-3.5"><Badge variant="success">Completed</Badge></td>
-                          <td className="p-3.5">
-                            {/* View Details mock action (already implemented partially in History logic if we expand row) */}
-                            <button className="text-[10px] font-bold text-[#3978B8] hover:underline">
-                              View Details
-                            </button>
-                          </td>
-                        </tr>
+                        <React.Fragment key={order.id}>
+                          <tr className="hover:bg-[#FAF8F5]/50">
+                            <td className="p-3.5 font-mono font-semibold text-[11px]">{order.orderNumber}</td>
+                            <td className="p-3.5 text-[#707070]">{fmtDate(date)}</td>
+                            <td className="p-3.5 font-semibold text-[#1C1C1C]">{itemName}</td>
+                            <td className="p-3.5 text-[#707070]">{recipeName}</td>
+                            <td className="p-3.5 text-right font-mono text-[#707070]">{fmt(plannedQty)}</td>
+                            <td className="p-3.5 text-right font-mono font-bold text-[#1C1C1C]">{fmt(qty)}</td>
+                            <td className="p-3.5 text-right font-mono text-red-600">{fmt(wastage)}</td>
+                            <td className="p-3.5 text-[#707070]">{unitSymbol}</td>
+                            <td className="p-3.5 text-right font-mono font-semibold text-[#2E8B57]">₹{fmt(cost)}</td>
+                            <td className="p-3.5 text-right font-mono text-[#707070]">₹{fmt(cpu)}</td>
+                            <td className="p-3.5 text-[#707070] text-[11px]">{creator}</td>
+                            <td className="p-3.5"><Badge variant="success">Completed</Badge></td>
+                            <td className="p-3.5">
+                              <button 
+                                onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                                className="text-[10px] font-bold text-[#3978B8] hover:underline"
+                              >
+                                {expandedOrderId === order.id ? 'Hide Details' : 'View Details'}
+                              </button>
+                            </td>
+                          </tr>
+                          
+                          {expandedOrderId === order.id && (order as any).consumptions && (
+                            <tr className="bg-[#FAF8F5]">
+                              <td colSpan={13} className="p-0 border-b border-[rgba(45,45,45,0.08)]">
+                                <div className="p-5 bg-[#FAF8F5] border-t border-[rgba(45,45,45,0.08)]">
+                                  <h4 className="text-xs font-bold text-[#1C1C1C] mb-3">HISTORICAL INGREDIENT CONSUMPTION (AT PRODUCTION)</h4>
+                                  <div className="bg-white rounded-xl border border-[rgba(45,45,45,0.08)] overflow-hidden max-w-4xl">
+                                    <table className="w-full text-left text-xs">
+                                      <thead className="bg-[#FAF8F5] text-[#707070] font-bold border-b border-[rgba(45,45,45,0.08)]">
+                                        <tr>
+                                          <th className="p-3">Ingredient Item</th>
+                                          <th className="p-3 text-right">Qty Consumed</th>
+                                          <th className="p-3">Unit</th>
+                                          <th className="p-3 text-right">Rate at Production</th>
+                                          <th className="p-3 text-right">Amount (Historical)</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                                        {((order as any).consumptions || []).map((cons: any) => (
+                                          <tr key={cons.id} className="hover:bg-[#FAF8F5]/30">
+                                            <td className="p-3 font-semibold text-[#1C1C1C]">{cons.raw_item_name || cons.rawItemName}</td>
+                                            <td className="p-3 text-right font-mono font-bold text-[#1C1C1C]">{fmt(cons.actual_consumed_qty ?? cons.actualConsumedQty)}</td>
+                                            <td className="p-3 text-[#707070]">{cons.unit_symbol || cons.unitSymbol}</td>
+                                            <td className="p-3 text-right font-mono text-[#707070]">₹{fmt(cons.unit_cost ?? cons.unitCost)}</td>
+                                            <td className="p-3 text-right font-mono font-bold text-[#2E8B57]">₹{fmt(cons.total_cost ?? cons.totalCost)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  <p className="text-[10px] text-[#707070] mt-3">
+                                    * Rates shown above are locked to the transaction time and will never change, even if current Item Master rates change.
+                                  </p>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
