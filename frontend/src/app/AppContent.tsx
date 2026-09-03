@@ -49,7 +49,7 @@ import TelegramNotificationWorkspace from '@/components/workspaces/TelegramNotif
 import AIDocumentProcessingWorkspace from '@/components/workspaces/AIDocumentProcessingWorkspace';
 import AIWastageSalesIntelligenceWorkspace from '@/components/workspaces/AIWastageSalesIntelligenceWorkspace';
 import WhatsAppBusinessWorkspace from '@/components/workspaces/WhatsAppBusinessWorkspace';
-import { CentralKitchenProductionWorkspace } from '@/components/workspaces/CentralKitchenProductionWorkspace';
+import MainKitchenWorkspace from '@/components/workspaces/MainKitchenWorkspace';
 import OutletSalesWorkspace from '@/components/workspaces/OutletSalesWorkspace';
 
 export const AppContent = () => {
@@ -197,7 +197,7 @@ export const AppContent = () => {
 
           {activeWorkspace === 'kitchenOrders' && (
             <div className="w-full min-w-0">
-              <KitchenOrdersWorkspace initialView={isManagement ? 'kitchen' : 'outlet'} />
+              <MainKitchenWorkspace initialView={isManagement ? 'kitchen' : 'outlet'} />
             </div>
           )}
 
@@ -215,7 +215,7 @@ export const AppContent = () => {
 
           {activeWorkspace === 'centralKitchenProduction' && (
             <div className="w-full min-w-0">
-              <CentralKitchenProductionWorkspace />
+              <MainKitchenWorkspace />
             </div>
           )}
 
