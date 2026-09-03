@@ -314,7 +314,7 @@ export default function OutletSalesWorkspace() {
                 </div>
 
                 <div className="mt-4 pt-4 border-t flex justify-end gap-3">
-                  <Button variant="outline" onClick={() => setPreviewData(null)}>Cancel</Button>
+                  <Button className="bg-white text-gray-700 border border-gray-300 hover:bg-gray-50" onClick={() => setPreviewData(null)}>Cancel</Button>
                   <Button 
                     onClick={handlePost} 
                     disabled={!previewData.is_valid || loading}
