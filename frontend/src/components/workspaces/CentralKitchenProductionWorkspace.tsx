@@ -120,29 +120,39 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // 2. Production Check (Preview)
-  const handlePreview = async () => {
-    if (!selectedRecipeId || !centralConfig?.warehouse_id || productionQty <= 0) return;
-    setPreviewLoading(true);
-    setPreview(null);
-    setFeedback(null);
-    try {
-      const data = await centralKitchenProductionApi.previewProduction({
-        recipe_id: selectedRecipeId,
-        planned_qty: productionQty,
-        kitchen_warehouse_id: centralConfig.warehouse_id,
-      });
-      setPreview(data);
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || err?.message || 'Preview failed' });
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    const fetchPreview = async () => {
+      if (!selectedRecipeId || !centralConfig?.warehouse_id || productionQty <= 0) {
+        setPreview(null);
+        return;
+      }
+      setPreviewLoading(true);
+      setFeedback(null);
+      try {
+        const data = await centralKitchenProductionApi.previewProduction({
+          recipe_id: selectedRecipeId,
+          planned_qty: productionQty,
+          kitchen_warehouse_id: centralConfig.warehouse_id,
+        });
+        setPreview(data);
+      } catch (err: any) {
+        setPreview(null);
+        setFeedback({ type: 'error', message: err?.response?.data?.detail || err?.message || 'Preview failed' });
+      } finally {
+        setPreviewLoading(false);
+      }
+    };
+    
+    timeout = setTimeout(fetchPreview, 300);
+    return () => clearTimeout(timeout);
+  }, [selectedRecipeId, productionQty, centralConfig]);
 
   // 3. Execution (Post)
   const handleExecute = async () => {
     if (!centralConfig?.branch_id || !centralConfig?.warehouse_id || !selectedRecipeId || productionQty <= 0) return;
-    if (!preview?.allIngredientsAvailable) return;
+    const isAllAvail = (preview as any)?.allIngredientsAvailable ?? (preview as any)?.all_ingredients_available;
+    if (!isAllAvail) return;
     setExecuting(true);
     setFeedback(null);
     try {
@@ -318,101 +328,150 @@ export const CentralKitchenProductionWorkspace: React.FC = () => {
               </div>
             </div>
 
-            {/* Action */}
-            <Button
-              variant="primary"
-              size="md"
-              onClick={handlePreview}
-              disabled={previewLoading || !selectedRecipeId || productionQty <= 0}
-              loading={previewLoading}
-              icon={<Search className="w-3.5 h-3.5 text-[#C79A3B]" />}
-            >
-              Check Ingredient Availability
-            </Button>
+            {/* UI STATES */}
+            {!selectedRecipeId && (
+              <div className="py-12 text-center text-[#707070] text-sm border-t border-[rgba(45,45,45,0.08)] mt-4">
+                Select a recipe to begin production.
+              </div>
+            )}
+            
+            {selectedRecipeId && (!productionQty || productionQty <= 0) && (
+              <div className="py-12 text-center text-[#707070] text-sm border-t border-[rgba(45,45,45,0.08)] mt-4">
+                Enter production quantity.
+              </div>
+            )}
+            
+            {selectedRecipeId && productionQty > 0 && previewLoading && (
+              <div className="py-12 text-center text-[#707070] text-sm flex flex-col items-center justify-center gap-3 border-t border-[rgba(45,45,45,0.08)] mt-4">
+                 <RefreshCw className="w-5 h-5 animate-spin text-[#C79A3B]" /> 
+                 Checking ingredient availability...
+              </div>
+            )}
 
-            {/* PREVIEW RESULTS */}
-            {preview && (
-              <div className="space-y-4 pt-4 border-t border-[rgba(45,45,45,0.08)]">
+            {preview && !previewLoading && (
+              <div className="space-y-6 pt-6 border-t border-[rgba(45,45,45,0.08)] mt-6">
                 
-                {/* Banner */}
-                <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl border ${
-                  preview.allIngredientsAvailable ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                {/* Recipe Info & Yield Output */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-5 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
+                   <div>
+                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-1">GOOD OUTPUT</span>
+                     <b className="text-[#1C1C1C] text-xl">{productionQty} <span className="text-sm font-semibold text-[#707070]">{selectedRecipe?.finishedUnitSymbol || 'Units'}</span></b>
+                   </div>
+                   <div>
+                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-1">LOST TO YIELD</span>
+                     <b className="text-[#1C1C1C] text-xl">0 <span className="text-sm font-semibold text-[#707070]">{selectedRecipe?.finishedUnitSymbol || 'Units'}</span></b>
+                   </div>
+                   <div>
+                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-1">TOTAL INGREDIENT COST</span>
+                     <b className="text-[#1C1C1C] text-xl">₹{fmt((preview as any).totalEstimatedRawCost ?? (preview as any).total_estimated_raw_cost)}</b>
+                   </div>
+                   <div>
+                     <span className="text-[10px] text-[#707070] uppercase font-bold tracking-wider block mb-1">COST PER OUTPUT UNIT</span>
+                     <b className="text-[#1C1C1C] text-xl">₹{fmt((preview as any).estimatedUnitFoodCost ?? (preview as any).estimated_unit_food_cost)}</b>
+                   </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h4 className="text-sm font-bold text-[#1C1C1C] flex items-center gap-2">
+                    INGREDIENT AVAILABILITY
+                  </h4>
+                  <span className="text-[11px] font-bold text-[#707070] bg-[#FAF8F5] px-3 py-1.5 rounded-lg border border-[rgba(45,45,45,0.08)]">
+                    STOCK SOURCE: Central Kitchen ({centralConfig?.warehouse_name})
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {preview.ingredients.map((ing, n) => {
+                    const reqQty  = num((ing as any).required_qty   ?? (ing as any).standardRequiredQty);
+                    const avlQty  = num((ing as any).available_qty  ?? (ing as any).currentStockInKitchen);
+                    const shortage = num((ing as any).shortage_qty  ?? (ing as any).shortageQty);
+                    const unit    = (ing as any).unit_symbol        ?? (ing as any).unitSymbol        ?? '';
+                    const isSuff  = (ing as any).is_sufficient      !== false && (ing as any).isAvailable !== false;
+                    const name    = (ing as any).item_name          ?? (ing as any).rawItemName  ?? '—';
+                    
+                    return (
+                      <div key={(ing as any).raw_item_id ?? name} className={`p-4 rounded-xl border shadow-sm flex flex-col gap-4 ${isSuff ? 'bg-white border-[rgba(45,45,45,0.08)]' : 'bg-[#FFF8F8] border-[#FDB8B8]'}`}>
+                        <div className="flex justify-between items-start">
+                           <span className="font-bold text-[#1C1C1C] text-sm">{n + 1}. {name}</span>
+                        </div>
+                        
+                        <div className="space-y-2 text-xs text-[#4A4A4A]">
+                           <div className="flex justify-between items-center">
+                             <span className="text-[#707070]">Required</span>
+                             <b className="font-mono text-[13px]">{fmt(reqQty)} {unit}</b>
+                           </div>
+                           <div className="flex justify-between items-center">
+                             <span className="text-[#707070]">Central Kitchen Stock</span>
+                             <b className="font-mono text-[13px]">{fmt(avlQty)} {unit}</b>
+                           </div>
+                           
+                           {!isSuff && (
+                             <div className="flex justify-between items-center text-red-600 font-bold mt-2 pt-2 border-t border-red-100">
+                               <span>Shortage</span>
+                               <span className="font-mono text-[13px]">{fmt(shortage)} {unit}</span>
+                             </div>
+                           )}
+                        </div>
+                        
+                        <div className={`mt-auto pt-3 border-t ${isSuff ? 'border-[rgba(45,45,45,0.05)]' : 'border-red-100'}`}>
+                           {isSuff ? (
+                             <span className="flex items-center gap-1.5 text-[#2E8B57] font-bold text-xs">
+                               <CheckCircle2 className="w-4 h-4" /> Available
+                             </span>
+                           ) : (
+                             <span className="flex items-center gap-1.5 text-red-600 font-bold text-xs">
+                               <AlertTriangle className="w-4 h-4" /> Insufficient
+                             </span>
+                           )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Bottom Save Banner */}
+                <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 rounded-2xl border shadow-sm mt-8 ${
+                  ((preview as any).allIngredientsAvailable ?? (preview as any).all_ingredients_available) ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
                 }`}>
                   <div>
-                    <span className="text-xs font-bold">
-                      {preview.allIngredientsAvailable ? (
-                        <span className="flex items-center gap-1.5 text-[#2E8B57]">
-                          <CheckCircle2 className="w-4 h-4" /> Requirements Met — Ready to Produce
+                    {((preview as any).allIngredientsAvailable ?? (preview as any).all_ingredients_available) ? (
+                      <div>
+                        <span className="flex items-center gap-2 text-[#2E8B57] font-bold text-sm">
+                          <CheckCircle2 className="w-5 h-5" /> ALL INGREDIENTS AVAILABLE
                         </span>
-                      ) : (
-                        <span className="flex items-center gap-1.5 text-red-700">
-                          <AlertTriangle className="w-4 h-4" /> INSUFFICIENT STOCK — Production Blocked
+                        <p className="text-xs text-[#2E8B57] opacity-80 mt-1">Required ingredients can be issued from Central Kitchen stock.</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="flex items-center gap-2 text-red-700 font-bold text-sm mb-3">
+                          <AlertTriangle className="w-5 h-5" /> CANNOT SAVE PRODUCTION
                         </span>
-                      )}
-                    </span>
-                    <span className="text-[11px] text-[#707070] block mt-1">
-                      Total Cost: ₹{fmt(preview.totalEstimatedRawCost)} · Cost/Unit: ₹{fmt(preview.estimatedUnitFoodCost)}
-                    </span>
+                        <ul className="text-[11px] text-red-700 space-y-1.5 ml-7 list-disc">
+                          {preview.ingredients.filter(ing => !((ing as any).is_sufficient !== false && (ing as any).isAvailable !== false)).map(ing => {
+                             const reqQty  = num((ing as any).required_qty   ?? (ing as any).standardRequiredQty);
+                             const avlQty  = num((ing as any).available_qty  ?? (ing as any).currentStockInKitchen);
+                             const shortage = num((ing as any).shortage_qty  ?? (ing as any).shortageQty);
+                             const unit    = (ing as any).unit_symbol        ?? (ing as any).unitSymbol        ?? '';
+                             const name    = (ing as any).item_name          ?? (ing as any).rawItemName  ?? '—';
+                             return (
+                               <li key={name}><b>{name}</b> — Required {fmt(reqQty)} {unit}, Available {fmt(avlQty)} {unit}, Shortage {fmt(shortage)} {unit}</li>
+                             );
+                          })}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                   <Button
                     variant="success"
-                    size="md"
+                    size="lg"
                     onClick={handleExecute}
-                    disabled={executing || !preview.allIngredientsAvailable}
+                    disabled={executing || !((preview as any).allIngredientsAvailable ?? (preview as any).all_ingredients_available)}
                     loading={executing}
-                    icon={<Play className="w-3.5 h-3.5" />}
+                    icon={<Play className="w-4 h-4" />}
+                    className="shrink-0"
                   >
-                    Confirm Production
+                    SAVE PRODUCTION
                   </Button>
-                </div>
-
-                {/* Table */}
-                <div className="bg-white rounded-xl border border-[rgba(45,45,45,0.08)] overflow-hidden">
-                  <div className="px-4 py-2.5 bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)]">
-                    <p className="text-xs font-bold text-[#1C1C1C]">Ingredient Requirement Table</p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-[#FAF8F5] text-[#707070] font-bold border-b border-[rgba(45,45,45,0.08)]">
-                        <tr>
-                          <th className="p-3">Ingredient</th>
-                          <th className="p-3 text-right">Required Qty</th>
-                          <th className="p-3 text-right">Available</th>
-                          <th className="p-3">Unit</th>
-                          <th className="p-3 text-right">Rate</th>
-                          <th className="p-3 text-right">Cost</th>
-                          <th className="p-3">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
-                        {preview.ingredients.map((ing) => {
-                          const reqQty  = num((ing as any).required_qty   ?? (ing as any).standardRequiredQty);
-                          const avlQty  = num((ing as any).available_qty  ?? (ing as any).currentStockInKitchen);
-                          const unit    = (ing as any).unit_symbol        ?? (ing as any).unitSymbol        ?? '';
-                          const rate    = num((ing as any).unit_cost      ?? (ing as any).unitCost);
-                          const cost    = num((ing as any).total_cost     ?? (ing as any).totalCost);
-                          const isSuff  = (ing as any).is_sufficient      !== false && (ing as any).isAvailable !== false;
-                          const name    = (ing as any).item_name          ?? (ing as any).rawItemName  ?? '—';
-                          
-                          return (
-                            <tr key={(ing as any).raw_item_id ?? name} className="hover:bg-[#FAF8F5]/50">
-                              <td className="p-3 font-semibold text-[#1C1C1C]">{name}</td>
-                              <td className="p-3 text-right font-mono font-bold text-[#1C1C1C]">{fmt(reqQty)}</td>
-                              <td className={`p-3 text-right font-mono ${isSuff ? 'text-[#2E8B57]' : 'text-red-600 font-bold'}`}>
-                                {fmt(avlQty)}
-                              </td>
-                              <td className="p-3 text-[#707070]">{unit}</td>
-                              <td className="p-3 text-right font-mono text-[#707070]">₹{fmt(rate)}</td>
-                              <td className="p-3 text-right font-mono font-semibold text-[#2E8B57]">₹{fmt(cost)}</td>
-                              <td className="p-3">
-                                {isSuff ? <Badge variant="success">OK</Badge> : <Badge variant="danger">Shortage</Badge>}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
                 </div>
 
               </div>
