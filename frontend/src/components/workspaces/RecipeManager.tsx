@@ -58,16 +58,23 @@ export default function RecipeManager({
     instructions: "",
   });
   const [ings, setIngs] = useState<Ing[]>([blank()]);
+  const [units, setUnits] = useState<any[]>([]);
+  const [stockBalances, setStockBalances] = useState<any[]>([]);
+  
   const load = async () => {
     setLoading(true);
     setErr(null);
     try {
-      const [r, i] = await Promise.all([
+      const [r, i, u, sb] = await Promise.all([
         productionApi.getRecipes(),
         inventoryApi.getItems({ is_active: true }),
+        inventoryApi.getUnits(),
+        inventoryApi.getStockBalances()
       ]);
       setRecipes(r || []);
       setItems(i || []);
+      setUnits(u || []);
+      setStockBalances(sb || []);
     } catch (e: any) {
       setErr(
         e?.response?.data?.detail || e?.message || "Failed to load recipes",
@@ -466,7 +473,7 @@ export default function RecipeManager({
             />
           </label>
           <label className="text-[11px] font-semibold">
-            Finished / Semi-finished Item
+            Output Item (Finished / Semi-finished Item)
             <select
               value={form.finished_item_id}
               onChange={(e) =>
@@ -483,20 +490,29 @@ export default function RecipeManager({
             </select>
           </label>
           <label className="text-[11px] font-semibold">
-            Yield Quantity
-            <input
-              type="number"
-              min=".0001"
-              step=".01"
-              value={form.yield_qty}
-              onChange={(e) =>
-                setForm({ ...form, yield_qty: Number(e.target.value) })
-              }
-              className="mt-1 w-full px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-black/10 text-xs"
-            />
+            ONE BATCH MAKES
+            <div className="flex gap-2 mt-1">
+              <input
+                type="number"
+                min=".0001"
+                step=".01"
+                value={form.yield_qty}
+                onChange={(e) =>
+                  setForm({ ...form, yield_qty: Number(e.target.value) })
+                }
+                placeholder="Enter quantity"
+                className="w-full px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-black/10 text-xs font-mono"
+              />
+              <div className="px-4 py-2.5 rounded-xl bg-gray-100 border border-black/10 text-xs text-gray-700 flex items-center justify-center font-bold min-w-[80px] shrink-0">
+                {(() => {
+                  const fin = finished.find(i => i.id === form.finished_item_id);
+                  return (fin as any)?.unit?.symbol || (fin as any)?.unitSymbol || "UNIT";
+                })()}
+              </div>
+            </div>
           </label>
           <label className="text-[11px] font-semibold">
-            Preparation Minutes
+            Preparation Time (Minutes)
             <input
               type="number"
               min="0"
@@ -507,16 +523,18 @@ export default function RecipeManager({
                   preparation_minutes: Number(e.target.value),
                 })
               }
+              placeholder="Enter minutes"
               className="mt-1 w-full px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-black/10 text-xs"
             />
           </label>
           <label className="text-[11px] font-semibold">
-            Description
+            Recipe Description
             <input
               value={form.description}
               onChange={(e) =>
                 setForm({ ...form, description: e.target.value })
               }
+              placeholder="Enter description"
               className="mt-1 w-full px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-black/10 text-xs"
             />
           </label>
@@ -537,105 +555,146 @@ export default function RecipeManager({
             {ings.map((x, n) => (
               <div
                 key={n}
-                className="p-3 rounded-xl bg-[#FAF8F5] border border-black/5"
+                className="p-4 rounded-xl bg-white border border-gray-200 shadow-sm"
               >
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <select
-                    value={x.raw_item_id}
-                    onChange={(e) => {
-                      const it = raw.find((i) => i.id === e.target.value);
-                      setIng(n, {
-                        raw_item_id: e.target.value,
-                        unit_id: it?.unit_id || "",
-                      });
-                    }}
-                    className="px-2.5 py-2 rounded-lg border border-black/10 text-[11px] bg-white"
-                  >
-                    <option value="">Ingredient</option>
-                    {raw.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name} ({i.code})
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min=".0001"
-                    step=".01"
-                    value={x.quantity}
-                    onChange={(e) =>
-                      setIng(n, { quantity: Number(e.target.value) })
-                    }
-                    placeholder="Net qty"
-                    className="px-2.5 py-2 rounded-lg border border-black/10 text-[11px]"
-                  />
-                  <input
-                    type="number"
-                    min=".0001"
-                    step=".01"
-                    value={x.gross_quantity}
-                    onChange={(e) =>
-                      setIng(n, { gross_quantity: Number(e.target.value) })
-                    }
-                    placeholder="Gross qty"
-                    className="px-2.5 py-2 rounded-lg border border-black/10 text-[11px]"
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  <input
-                    type="number"
-                    min=".01"
-                    max="100"
-                    step=".01"
-                    value={x.usable_yield}
-                    onChange={(e) =>
-                      setIng(n, { usable_yield: Number(e.target.value) })
-                    }
-                    placeholder="Usable yield %"
-                    className="px-2.5 py-2 rounded-lg border border-black/10 text-[11px]"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="99.99"
-                    step=".01"
-                    value={x.waste_percentage}
-                    onChange={(e) =>
-                      setIng(n, { waste_percentage: Number(e.target.value) })
-                    }
-                    placeholder="Wastage %"
-                    className="px-2.5 py-2 rounded-lg border border-black/10 text-[11px]"
-                  />
+                {/* Header Section */}
+                <div className="flex justify-between items-start mb-4 border-b border-gray-100 pb-3">
+                  <div className="flex gap-3">
+                    <div className="w-6 h-6 rounded-md bg-[#FAF8F5] border border-gray-200 flex items-center justify-center font-bold text-gray-600 text-xs shrink-0 mt-1">
+                      {n + 1}
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-gray-400 tracking-wider block mb-1">USES</span>
+                      <select
+                        value={x.raw_item_id}
+                        onChange={(e) => {
+                          const it = raw.find((i) => i.id === e.target.value);
+                          setIng(n, {
+                            raw_item_id: e.target.value,
+                            unit_id: it?.unit_id || "",
+                          });
+                        }}
+                        className="font-bold text-sm bg-transparent border-b border-dashed border-gray-300 focus:outline-none focus:border-gray-500 pb-0.5 cursor-pointer text-gray-800 -ml-1"
+                      >
+                        <option value="">Select Ingredient...</option>
+                        {raw.map((i) => (
+                          <option key={i.id} value={i.id}>
+                            {i.name}
+                          </option>
+                        ))}
+                      </select>
+                      
+                      {(() => {
+                        const it = raw.find((i) => i.id === x.raw_item_id);
+                        if (!it) return null;
+                        
+                        const rate = Number(it?.cost_price || (it as any)?.costPrice || 0);
+                        const unitSymbol = (it as any)?.unit?.symbol || (it as any)?.unitSymbol || "";
+                        
+                        // Calculate stock on hand
+                        const itemStock = stockBalances.filter(sb => sb.item_id === x.raw_item_id).reduce((sum, sb) => sum + (Number(sb.quantity) || 0), 0);
+                        
+                        const reqQty = Number(x.quantity) || 0;
+                        const uy = Number(x.usable_yield) || 100;
+                        const yieldFactor = uy / 100;
+                        const grossQty = reqQty / yieldFactor;
+
+                        return (
+                          <div className="mt-3 space-y-1 text-[11px] text-[#707070]">
+                            <p>Rate: ₹{rate.toFixed(2)} / {unitSymbol}</p>
+                            <p>Stock on hand: {itemStock.toFixed(3)} {unitSymbol}</p>
+                            <p className="font-semibold text-gray-800">Required for recipe: {grossQty.toFixed(3)} {unitSymbol}</p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
                   <button
                     type="button"
                     disabled={ings.length === 1}
                     onClick={() => setIngs(ings.filter((_, i) => i !== n))}
-                    className="rounded-lg border border-red-200 text-red-600 text-[11px] disabled:opacity-40"
+                    className="text-red-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 disabled:opacity-30 transition-colors"
                   >
-                    Remove
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
-                {(() => {
-                  const item = raw.find((i) => i.id === x.raw_item_id);
-                  const rate = Number(item?.cost_price || (item as any)?.costPrice || 0);
-                  const yield_factor = (Number(x.usable_yield) || 100) / 100;
-                  let gross_qty = Number(x.gross_quantity) || 0;
-                  if (!gross_qty || gross_qty <= 0) {
-                    gross_qty = (Number(x.quantity) || 0) / yield_factor;
-                  }
-                  const ingredientCost = gross_qty * rate;
-                  const unitSymbol = (item as any)?.unit?.symbol || (item as any)?.unitSymbol || "unit";
-                  return (
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-black/5 text-[10px] text-[#707070]">
-                      <span>
-                        Actual Rate: <b className="text-[#1C1C1C]">₹{rate.toFixed(2)}/{unitSymbol}</b>
-                      </span>
-                      <span>
-                        Ingredient Cost: <b className="text-[#2E8B57]">₹{ingredientCost.toFixed(2)}</b>
-                      </span>
-                    </div>
-                  );
-                })()}
+
+                {/* Input Fields Section */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 tracking-wider mb-1.5">QTY</label>
+                    <input
+                      type="number"
+                      min=".0001"
+                      step=".01"
+                      value={x.quantity}
+                      onChange={(e) => {
+                        const req = Number(e.target.value);
+                        const uy = Number(x.usable_yield) || 100;
+                        const wp = 100 - uy;
+                        const yieldFactor = uy / 100;
+                        const gross = req / yieldFactor;
+                        setIng(n, { quantity: req, gross_quantity: gross, waste_percentage: wp });
+                      }}
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-gray-200 text-sm font-mono text-center focus:ring-2 focus:ring-[#C79A3B] outline-none"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 tracking-wider mb-1.5">UNIT</label>
+                    <select
+                      disabled
+                      className="w-full px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-sm font-bold text-gray-500 text-center appearance-none"
+                    >
+                      <option>
+                      {(() => {
+                        const it = raw.find((i) => i.id === x.raw_item_id);
+                        return (it as any)?.unit?.symbol || (it as any)?.unitSymbol || "UNIT";
+                      })()}
+                      </option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 tracking-wider mb-1.5">YIELD %</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      max="100"
+                      step=".01"
+                      value={x.usable_yield}
+                      onChange={(e) => {
+                        const uy = Number(e.target.value);
+                        const wp = 100 - uy;
+                        const req = Number(x.quantity) || 0;
+                        const yieldFactor = uy / 100;
+                        const gross = req / yieldFactor;
+                        setIng(n, { usable_yield: uy, waste_percentage: wp, gross_quantity: gross });
+                      }}
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-gray-200 text-sm font-mono text-center focus:ring-2 focus:ring-[#C79A3B] outline-none"
+                    />
+                  </div>
+                  
+                  <div className="flex flex-col items-end justify-center h-full">
+                    {(() => {
+                      const it = raw.find((i) => i.id === x.raw_item_id);
+                      if (!it) return null;
+                      const rate = Number(it?.cost_price || (it as any)?.costPrice || 0);
+                      const reqQty = Number(x.quantity) || 0;
+                      const uy = Number(x.usable_yield) || 100;
+                      const yieldFactor = uy / 100;
+                      const grossQty = reqQty / yieldFactor;
+                      const ingredientCost = grossQty * rate;
+                      
+                      return (
+                        <div className="text-right">
+                           <span className="block text-[10px] font-bold text-gray-500 tracking-wider mb-1">INGREDIENT COST</span>
+                           <span className="block text-sm font-bold text-[#2E8B57]">₹{ingredientCost.toFixed(2)}</span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -658,15 +717,20 @@ export default function RecipeManager({
           </h4>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-4 gap-x-2 text-center">
             <div>
-              <span className="text-[10px] text-[#707070] block">Total Recipe Cost</span>
+              <span className="text-[10px] text-[#707070] block">Total Ingredient Cost</span>
               <b className="text-[#1C1C1C]">₹{dynamicTotalRecipeCost.toFixed(2)}</b>
             </div>
             <div>
-              <span className="text-[10px] text-[#707070] block">Recipe Yield</span>
-              <b className="text-[#1C1C1C]">{Number(form.yield_qty || 1)}</b>
+              <span className="text-[10px] text-[#707070] block">Output Quantity</span>
+              <b className="text-[#1C1C1C]">
+                {Number(form.yield_qty || 1)} {(() => {
+                  const fin = finished.find(i => i.id === form.finished_item_id);
+                  return (fin as any)?.unit?.symbol || (fin as any)?.unitSymbol || "";
+                })()}
+              </b>
             </div>
             <div>
-              <span className="text-[10px] text-[#707070] block">Cost Per Finished Unit</span>
+              <span className="text-[10px] text-[#707070] block">Cost per Output Unit</span>
               <b className="text-[#1C1C1C]">₹{dynamicCostPerYield.toFixed(2)}</b>
             </div>
             <div>
