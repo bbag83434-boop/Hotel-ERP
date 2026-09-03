@@ -10,7 +10,9 @@ from app.models.base import BaseModel
 
 class KitchenOrderStatus(str, enum.Enum):
     SUBMITTED = "SUBMITTED"                    # Outlet placed the requirement
-    IN_PRODUCTION = "IN_PRODUCTION"            # Central/Production kitchen acknowledged (producing)
+    APPROVED = "APPROVED"                      # Admin/HQ approved the requirement (appears in central kitchen queue)
+    REJECTED = "REJECTED"                      # Admin/HQ rejected the requirement
+    IN_PRODUCTION = "IN_PRODUCTION"            # Central/Production kitchen acknowledged (producing) — kept for backward compat
     DISPATCHED = "DISPATCHED"                  # Kitchen allocated/dispatched finished/semi-finished goods
     PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED"  # Outlet received part of the dispatch
     RECEIVED = "RECEIVED"                      # Outlet received the full requested qty
@@ -40,13 +42,17 @@ class KitchenOrder(BaseModel):
     received_qty = Column("receivedQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
 
     status = Column(
-        SQLEnum('SUBMITTED', 'IN_PRODUCTION', 'DISPATCHED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED',
+        SQLEnum('SUBMITTED', 'APPROVED', 'REJECTED', 'IN_PRODUCTION', 'DISPATCHED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED',
                 name='KitchenOrderStatus'),
         default='SUBMITTED', nullable=False, index=True
     )
 
     required_date = Column("requiredDate", DateTime, nullable=True)
     notes = Column(Text, nullable=True)
+
+    # Issue quantity — the actual quantity the Central Kitchen decides to issue
+    # (saved at Issue step; may be less than requested; used by Dispatch).
+    issued_qty = Column("issuedQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
 
     # Kitchen / production warehouse fields
     kitchen_warehouse_id = Column("kitchenWarehouseId", String(36), ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -64,6 +70,13 @@ class KitchenOrder(BaseModel):
     received_at = Column("receivedAt", DateTime, nullable=True)
     receive_notes = Column("receiveNotes", Text, nullable=True)
 
+    # Approval audit fields
+    approved_by_id = Column("approvedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column("approvedAt", DateTime, nullable=True)
+    rejected_by_id = Column("rejectedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rejected_at = Column("rejectedAt", DateTime, nullable=True)
+    rejection_reason = Column("rejectionReason", String(500), nullable=True)
+
     cancelled_by_id = Column("cancelledById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     cancelled_at = Column("cancelledAt", DateTime, nullable=True)
     cancel_reason = Column("cancelReason", String(500), nullable=True)
@@ -78,6 +91,7 @@ class KitchenOrder(BaseModel):
     dispatchedQty = synonym("dispatched_qty")
     receivedQty = synonym("received_qty")
     requiredDate = synonym("required_date")
+    issuedQty = synonym("issued_qty")
     kitchenWarehouseId = synonym("kitchen_warehouse_id")
     batchNumber = synonym("batch_number")
     expiryDate = synonym("expiry_date")
@@ -88,6 +102,11 @@ class KitchenOrder(BaseModel):
     receivedById = synonym("received_by_id")
     receivedAt = synonym("received_at")
     receiveNotes = synonym("receive_notes")
+    approvedById = synonym("approved_by_id")
+    approvedAt = synonym("approved_at")
+    rejectedById = synonym("rejected_by_id")
+    rejectedAt = synonym("rejected_at")
+    rejectionReason = synonym("rejection_reason")
     cancelledById = synonym("cancelled_by_id")
     cancelledAt = synonym("cancelled_at")
     cancelReason = synonym("cancel_reason")
@@ -99,6 +118,8 @@ class KitchenOrder(BaseModel):
     received_warehouse = relationship("Warehouse", foreign_keys=[received_warehouse_id], lazy="joined")
     dispatched_by = relationship("User", foreign_keys=[dispatched_by_id], lazy="joined")
     received_by = relationship("User", foreign_keys=[received_by_id], lazy="joined")
+    approved_by = relationship("User", foreign_keys=[approved_by_id], lazy="joined")
+    rejected_by = relationship("User", foreign_keys=[rejected_by_id], lazy="joined")
     cancelled_by = relationship("User", foreign_keys=[cancelled_by_id], lazy="joined")
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="joined")
 

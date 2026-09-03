@@ -1,5 +1,7 @@
 export type KitchenOrderStatus =
   | 'SUBMITTED'
+  | 'APPROVED'
+  | 'REJECTED'
   | 'IN_PRODUCTION'
   | 'DISPATCHED'
   | 'PARTIALLY_RECEIVED'
@@ -34,6 +36,7 @@ export interface KitchenOrder {
 
   order_number: string;
   requested_qty: number | string;
+  issued_qty: number | string;
   dispatched_qty: number | string;
   received_qty: number | string;
   status: KitchenOrderStatus;
@@ -57,9 +60,18 @@ export interface KitchenOrder {
   received_at?: string | null;
   receive_notes?: string | null;
 
+  approved_by?: string | null;
+  approved_at?: string | null;
+  rejected_by?: string | null;
+  rejected_at?: string | null;
+  rejection_reason?: string | null;
+
   cancelled_by?: string | null;
   cancelled_at?: string | null;
   cancel_reason?: string | null;
+
+  challan_number?: string | null;
+  central_kitchen_name?: string | null;
 
   created_by?: string | null;
   created_at?: string;
@@ -91,6 +103,19 @@ export interface KitchenOrderReceiveInput {
 
 export interface KitchenOrderCancelInput {
   reason: string;
+}
+
+export interface KitchenOrderApproveInput {
+  notes?: string;
+}
+
+export interface KitchenOrderRejectInput {
+  reason: string;
+}
+
+export interface KitchenOrderIssueInput {
+  issue_qty: number;
+  kitchen_warehouse_id?: string;
 }
 
 export interface KitchenOrderStartProductionInput {

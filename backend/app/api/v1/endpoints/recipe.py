@@ -701,6 +701,80 @@ def list_production_orders(
     return [_format_production_order_response(o, db) for o in orders]
 
 
+
+
+# =============================================================
+# Central Kitchen Production — separate scoped endpoints
+# (Rule: must NOT touch Kitchen Order flow or Transfer/Dispatch)
+# =============================================================
+
+_CENTRAL_BRANCH_TYPES = ("DESSERT_KITCHEN", "CENTRAL_STORE", "HEAD_OFFICE")
+
+
+@router.get("/production/central-kitchen/orders", response_model=List[ProductionOrderResponse])
+def list_central_kitchen_production_orders(
+    warehouse_id: Optional[str] = None,
+    recipe_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Returns production orders executed in Central Kitchen branches only
+    (DESSERT_KITCHEN, CENTRAL_STORE, HEAD_OFFICE). Completely separate
+    from outlet production — does NOT affect Kitchen Order/Transfer/Dispatch flow.
+    """
+    central_branches = db.query(Branch).filter(
+        Branch.company_id == current_user.company_id,
+        Branch.is_active == True,
+        Branch.type.in_(_CENTRAL_BRANCH_TYPES),
+    ).all()
+    central_branch_ids = [b.id for b in central_branches]
+
+    query = db.query(ProductionOrder).filter(
+        ProductionOrder.company_id == current_user.company_id,
+    )
+    if central_branch_ids:
+        query = query.filter(ProductionOrder.branch_id.in_(central_branch_ids))
+    if warehouse_id:
+        query = query.filter(ProductionOrder.kitchen_warehouse_id == warehouse_id)
+    if recipe_id:
+        query = query.filter(ProductionOrder.recipe_id == recipe_id)
+
+    orders = query.order_by(ProductionOrder.created_at.desc()).all()
+    return [_format_production_order_response(o, db) for o in orders]
+
+
+@router.get("/production/central-kitchen/config")
+def get_central_kitchen_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Returns EXACTLY ONE Central Kitchen configuration.
+    Looks for Warehouse where is_central == True in the user's company.
+    """
+    warehouse = db.query(Warehouse).filter(
+        Warehouse.company_id == current_user.company_id,
+        Warehouse.is_central == True,
+        Warehouse.is_active == True,
+    ).first()
+
+    if not warehouse:
+        raise HTTPException(status_code=404, detail="No central kitchen warehouse configured. Please configure exactly one central warehouse in the organization settings.")
+
+    branch = warehouse.branch
+    if not branch:
+        raise HTTPException(status_code=404, detail="Central warehouse has no branch assigned.")
+
+    return {
+        "branch_id": branch.id,
+        "branch_name": branch.name,
+        "branch_code": branch.code,
+        "warehouse_id": warehouse.id,
+        "warehouse_name": warehouse.name,
+        "warehouse_code": warehouse.code
+    }
+
 @router.post("/production/preview", response_model=ProductionPreviewResponse)
 def preview_production(
     preview_in: ProductionPreviewRequest,

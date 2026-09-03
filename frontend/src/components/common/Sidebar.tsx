@@ -48,6 +48,7 @@ export type WorkspaceId =
   | 'purchase'
   | 'kitchenOrders'
   | 'production'
+  | 'centralKitchenProduction'
   | 'transfers'
   | 'wastage'
   | 'hr'
@@ -138,6 +139,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
     {
+      label: 'Central Kitchen',
+      defaultOpen: true,
+      items: [
+        { id: 'centralKitchenProduction' as WorkspaceId, label: 'PRODUCTION', icon: ChefHat, badge: 'CK' },
+        { id: 'kitchenOrders' as WorkspaceId, label: 'Kitchen Orders', icon: ShoppingBag, badge: null },
+      ],
+    },
+    {
       label: 'Management',
       defaultOpen: true,
       items: [
@@ -148,6 +157,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'organization' as WorkspaceId, label: 'Project Setup', icon: Building2, badge: null },
       ],
     },
+
     {
       label: 'Finance & Reporting',
       items: [

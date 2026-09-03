@@ -49,6 +49,7 @@ import TelegramNotificationWorkspace from '@/components/workspaces/TelegramNotif
 import AIDocumentProcessingWorkspace from '@/components/workspaces/AIDocumentProcessingWorkspace';
 import AIWastageSalesIntelligenceWorkspace from '@/components/workspaces/AIWastageSalesIntelligenceWorkspace';
 import WhatsAppBusinessWorkspace from '@/components/workspaces/WhatsAppBusinessWorkspace';
+import { CentralKitchenProductionWorkspace } from '@/components/workspaces/CentralKitchenProductionWorkspace';
 
 export const AppContent = () => {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
@@ -202,6 +203,12 @@ export const AppContent = () => {
           {activeWorkspace === 'production' && (
             <div className="w-full min-w-0">
               <ProductionWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'centralKitchenProduction' && (
+            <div className="w-full min-w-0">
+              <CentralKitchenProductionWorkspace />
             </div>
           )}
 

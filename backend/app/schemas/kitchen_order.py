@@ -21,7 +21,21 @@ class KitchenOrderStartProductionRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class KitchenOrderApproveRequest(BaseModel):
+    notes: Optional[str] = None
+
+
+class KitchenOrderRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class KitchenOrderIssueRequest(BaseModel):
+    issue_qty: Decimal = Field(..., gt=Decimal("0.0000"))
+    kitchen_warehouse_id: Optional[str] = None
+
+
 class KitchenOrderDispatchRequest(BaseModel):
+    # Optional override; if not provided, the saved issued_qty is used.
     dispatched_qty: Optional[Decimal] = Field(default=None, gt=Decimal("0.0000"))
     kitchen_warehouse_id: Optional[str] = None
     batch_number: Optional[str] = None
@@ -69,6 +83,7 @@ class KitchenOrderResponse(BaseModel):
 
     order_number: str
     requested_qty: Decimal
+    issued_qty: Decimal = Decimal("0.0000")
     dispatched_qty: Decimal = Decimal("0.0000")
     received_qty: Decimal = Decimal("0.0000")
     status: str
@@ -92,9 +107,19 @@ class KitchenOrderResponse(BaseModel):
     received_at: Optional[datetime] = None
     receive_notes: Optional[str] = None
 
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    rejected_by: Optional[str] = None
+    rejected_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+
     cancelled_by: Optional[str] = None
     cancelled_at: Optional[datetime] = None
     cancel_reason: Optional[str] = None
+
+    # Challan metadata (computed)
+    challan_number: Optional[str] = None
+    central_kitchen_name: Optional[str] = None
 
     created_by: Optional[str] = None
     created_at: Optional[datetime] = None

@@ -104,3 +104,62 @@ export const productionApi = {
     return res.data;
   },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Central Kitchen Production API — completely separate from general production
+// and Kitchen Order / Transfer / Dispatch flow.
+// ─────────────────────────────────────────────────────────────────────────────
+export const centralKitchenProductionApi = {
+  getCentralKitchenConfig: async (): Promise<{
+    branch_id: string;
+    branch_name: string;
+    branch_code: string;
+    warehouse_id: string;
+    warehouse_name: string;
+    warehouse_code: string;
+  }> => {
+    const res = await apiClient.get('/recipes/production/central-kitchen/config');
+    return res.data;
+  },
+
+  /** Production history scoped to central kitchen branches only */
+  getCentralKitchenOrders: async (params?: {
+    warehouse_id?: string;
+    recipe_id?: string;
+  }): Promise<ProductionOrder[]> => {
+    const res = await apiClient.get<ProductionOrder[]>(
+      '/recipes/production/central-kitchen/orders',
+      { params }
+    );
+    return res.data;
+  },
+
+  /** Preview/sufficiency check — reuses existing production/preview endpoint */
+  previewProduction: async (payload: {
+    recipe_id: string;
+    planned_qty: number;
+    kitchen_warehouse_id: string;
+  }): Promise<ProductionPreview> => {
+    const res = await apiClient.post<ProductionPreview>('/recipes/production/preview', payload);
+    return res.data;
+  },
+
+  /** Execute production — reuses existing execute endpoint with idempotency */
+  executeProduction: async (payload: {
+    branch_id: string;
+    recipe_id: string;
+    planned_qty: number;
+    kitchen_warehouse_id: string;
+    actual_yield_qty?: number;
+    notes?: string;
+    idempotency_key?: string;
+  }): Promise<ProductionOrder> => {
+    const finalPayload = {
+      ...payload,
+      idempotency_key: payload.idempotency_key || crypto.randomUUID(),
+    };
+    const res = await apiClient.post<ProductionOrder>('/recipes/production/execute', finalPayload);
+    return res.data;
+  },
+};
+

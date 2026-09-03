@@ -20,11 +20,14 @@ from app.models.inventory import Item, StockBalance
 from app.models.recipe import Recipe
 from app.models.kitchen_order import KitchenOrder, KitchenOrderStatus
 from app.schemas.kitchen_order import (
+    KitchenOrderApproveRequest,
     KitchenOrderAvailableItem,
     KitchenOrderCancelRequest,
     KitchenOrderCreate,
     KitchenOrderDispatchRequest,
+    KitchenOrderIssueRequest,
     KitchenOrderReceiveRequest,
+    KitchenOrderRejectRequest,
     KitchenOrderResponse,
     KitchenOrderStartProductionRequest,
 )
@@ -38,8 +41,6 @@ KITCHEN_ORDER_MANAGER_ROLES = {
     "CENTRAL_PURCHASE_MANAGER", "CENTRAL_STORE_MANAGER", "DESSERT_KITCHEN_HEAD",
     "GENERAL_MANAGER", "DIRECTOR", "KITCHEN_CHEF", "PRODUCTION_MANAGER",
 }
-
-CENTRAL_BRANCH_TYPES = {"CENTRAL_STORE", "DESSERT_KITCHEN", "HEAD_OFFICE"}
 
 FINISHED_TYPES = {"FINISHED_GOOD", "SEMI_FINISHED"}
 
@@ -58,39 +59,19 @@ def _user_branch_ids(user: User) -> set:
 
 def _resolve_kitchen_warehouse(company_id: str, db: Session) -> Warehouse:
     """
-    Resolve the Central/Production Kitchen warehouse that fulfils outlet kitchen orders.
-    Priority:
-      1. An explicitly central warehouse (is_central=True)
-      2. A warehouse belonging to a CENTRAL_STORE / DESSERT_KITCHEN / HEAD_OFFICE branch
+    Resolve the ONE Central/Production Kitchen warehouse that fulfils outlet kitchen orders.
+    Must be marked as is_central=True.
     """
     wh = (
         db.query(Warehouse)
         .filter(Warehouse.company_id == company_id, Warehouse.is_central == True, Warehouse.is_active == True)
-        .order_by(Warehouse.created_at.asc())
         .first()
     )
-    if wh:
-        return wh
-
-    wh = (
-        db.query(Warehouse)
-        .join(Branch, Branch.id == Warehouse.branch_id)
-        .filter(
-            Warehouse.company_id == company_id,
-            Warehouse.is_active == True,
-            Branch.type.in_(list(CENTRAL_BRANCH_TYPES)),
+    if not wh:
+        raise BadRequestException(
+            "No active Central Kitchen warehouse configured for this company. Please mark a warehouse as Central."
         )
-        .order_by(Warehouse.created_at.asc())
-        .first()
-    )
-    if wh:
-        return wh
-
-    raise BadRequestException(
-        "No central production kitchen warehouse configured. "
-        "Create a central warehouse (is_central=True) under a CENTRAL_STORE / DESSERT_KITCHEN / HEAD_OFFICE branch "
-        "or run production in Recipes & Production so finished stock can be dispatched."
-    )
+    return wh
 
 
 def _resolve_outlet_warehouse(branch_id: str, db: Session) -> Warehouse:
@@ -114,6 +95,7 @@ def _format_kitchen_order(order: KitchenOrder, db: Session, user: User) -> Kitch
     kitchen_available = None
     if _is_kitchen_manager(user) and order.status in (
         KitchenOrderStatus.SUBMITTED,
+        KitchenOrderStatus.APPROVED,
         KitchenOrderStatus.IN_PRODUCTION,
         KitchenOrderStatus.DISPATCHED,
         KitchenOrderStatus.PARTIALLY_RECEIVED,
@@ -153,6 +135,7 @@ def _format_kitchen_order(order: KitchenOrder, db: Session, user: User) -> Kitch
         unit_symbol=unit_symbol,
         order_number=order.order_number,
         requested_qty=Decimal(str(order.requested_qty or 0)),
+        issued_qty=Decimal(str(order.issued_qty or 0)),
         dispatched_qty=Decimal(str(order.dispatched_qty or 0)),
         received_qty=Decimal(str(order.received_qty or 0)),
         status=order.status.value if hasattr(order.status, "value") else str(order.status),
@@ -171,9 +154,16 @@ def _format_kitchen_order(order: KitchenOrder, db: Session, user: User) -> Kitch
         received_by=_person_name(order.received_by),
         received_at=order.received_at,
         receive_notes=order.receive_notes,
+        approved_by=_person_name(order.approved_by),
+        approved_at=order.approved_at,
+        rejected_by=_person_name(order.rejected_by),
+        rejected_at=order.rejected_at,
+        rejection_reason=order.rejection_reason,
         cancelled_by=_person_name(order.cancelled_by),
         cancelled_at=order.cancelled_at,
         cancel_reason=order.cancel_reason,
+        challan_number=f"CH-{order.order_number}",
+        central_kitchen_name=kitchen_wh_name,
         created_by=_person_name(order.created_by),
         created_at=order.created_at,
         updated_at=order.updated_at,
@@ -367,7 +357,7 @@ def cancel_kitchen_order(
     if not _is_kitchen_manager(current_user) and order.branch_id not in _user_branch_ids(current_user):
         raise ForbiddenException("Access denied: User cannot cancel this kitchen order.")
 
-    if order.status not in (KitchenOrderStatus.SUBMITTED, KitchenOrderStatus.IN_PRODUCTION):
+    if order.status not in (KitchenOrderStatus.SUBMITTED, KitchenOrderStatus.APPROVED, KitchenOrderStatus.IN_PRODUCTION):
         current_status = order.status.value if hasattr(order.status, "value") else order.status
         raise BadRequestException(f"Cannot cancel a kitchen order in status '{current_status}'.")
 
@@ -378,15 +368,22 @@ def cancel_kitchen_order(
     db.commit()
     db.refresh(order)
     return _format_kitchen_order(order, db, current_user)
-@router.post("/{order_id}/start-production", response_model=KitchenOrderResponse)
-def start_kitchen_order_production(
+
+
+@router.post("/{order_id}/approve", response_model=KitchenOrderResponse)
+def approve_kitchen_order(
     order_id: str,
-    payload: KitchenOrderStartProductionRequest = KitchenOrderStartProductionRequest(),
+    payload: KitchenOrderApproveRequest = KitchenOrderApproveRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    """
+    Admin/HQ approves a submitted kitchen order. After approval the order
+    appears in the Central Kitchen queue (Orders to Fulfill).
+    No stock change at this step.
+    """
     if not _is_kitchen_manager(current_user):
-        raise ForbiddenException("Only the Central/Production Kitchen can acknowledge and produce kitchen orders.")
+        raise ForbiddenException("Only Admin / Central Kitchen managers can approve kitchen orders.")
 
     order = (
         db.query(KitchenOrder)
@@ -397,7 +394,152 @@ def start_kitchen_order_production(
         raise NotFoundException("Kitchen order", order_id)
 
     if order.status != KitchenOrderStatus.SUBMITTED:
-        raise BadRequestException("Only SUBMITTED kitchen orders can be moved into production.")
+        current_status = order.status.value if hasattr(order.status, "value") else order.status
+        raise BadRequestException(f"Only SUBMITTED kitchen orders can be approved (current '{current_status}').")
+
+    order.status = "APPROVED"
+    order.approved_by_id = current_user.id
+    order.approved_at = datetime.utcnow()
+    if payload.notes:
+        note = payload.notes.strip()
+        order.notes = f"{order.notes + ' | ' if order.notes else ''}Approval note: {note}"
+    db.commit()
+    db.refresh(order)
+    return _format_kitchen_order(order, db, current_user)
+
+
+@router.post("/{order_id}/reject", response_model=KitchenOrderResponse)
+def reject_kitchen_order(
+    order_id: str,
+    payload: KitchenOrderRejectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Admin/HQ rejects a submitted kitchen order. No stock change.
+    """
+    if not _is_kitchen_manager(current_user):
+        raise ForbiddenException("Only Admin / Central Kitchen managers can reject kitchen orders.")
+
+    order = (
+        db.query(KitchenOrder)
+        .filter(KitchenOrder.id == order_id, KitchenOrder.company_id == current_user.company_id)
+        .first()
+    )
+    if not order:
+        raise NotFoundException("Kitchen order", order_id)
+
+    if order.status != KitchenOrderStatus.SUBMITTED:
+        current_status = order.status.value if hasattr(order.status, "value") else order.status
+        raise BadRequestException(f"Only SUBMITTED kitchen orders can be rejected (current '{current_status}').")
+
+    order.status = "REJECTED"
+    order.rejected_by_id = current_user.id
+    order.rejected_at = datetime.utcnow()
+    order.rejection_reason = payload.reason.strip()
+    db.commit()
+    db.refresh(order)
+    return _format_kitchen_order(order, db, current_user)
+
+
+@router.post("/{order_id}/issue", response_model=KitchenOrderResponse)
+def issue_kitchen_order(
+    order_id: str,
+    payload: KitchenOrderIssueRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Central Kitchen opens Issue: shows requested quantity and available
+    central kitchen stock. The user enters an editable issue quantity that
+    can be less than requested but never more, and never more than available
+    stock. The saved issued_qty is used by Dispatch.
+    No stock change at this step.
+    """
+    if not _is_kitchen_manager(current_user):
+        raise ForbiddenException("Only the Central Kitchen can issue kitchen orders.")
+
+    order = (
+        db.query(KitchenOrder)
+        .filter(KitchenOrder.id == order_id, KitchenOrder.company_id == current_user.company_id)
+        .first()
+    )
+    if not order:
+        raise NotFoundException("Kitchen order", order_id)
+
+    if order.status not in (KitchenOrderStatus.APPROVED, KitchenOrderStatus.IN_PRODUCTION):
+        current_status = order.status.value if hasattr(order.status, "value") else order.status
+        raise BadRequestException(f"Only APPROVED kitchen orders can be issued (current '{current_status}').")
+
+    requested = Decimal(str(order.requested_qty or 0))
+    issue_qty = Decimal(str(payload.issue_qty))
+
+    if issue_qty <= Decimal("0.0000"):
+        raise BadRequestException("Issue quantity must be greater than zero.")
+    if issue_qty > requested:
+        raise BadRequestException(f"Issue quantity {issue_qty} exceeds requested quantity {requested}.")
+
+    # Resolve central kitchen warehouse.
+    kitchen_wh = None
+    if payload.kitchen_warehouse_id:
+        kitchen_wh = (
+            db.query(Warehouse)
+            .filter(Warehouse.id == payload.kitchen_warehouse_id, Warehouse.company_id == current_user.company_id)
+            .first()
+        )
+        if not kitchen_wh:
+            raise NotFoundException("Warehouse", payload.kitchen_warehouse_id)
+    else:
+        if order.kitchen_warehouse_id:
+            kitchen_wh = db.query(Warehouse).filter(Warehouse.id == order.kitchen_warehouse_id).first()
+        if not kitchen_wh:
+            kitchen_wh = _resolve_kitchen_warehouse(current_user.company_id, db)
+
+    # Check available stock at the central kitchen.
+    balance = (
+        db.query(StockBalance)
+        .filter(StockBalance.warehouse_id == kitchen_wh.id, StockBalance.item_id == order.item_id)
+        .first()
+    )
+    available = Decimal(str(balance.quantity if balance else 0))
+
+    if available < issue_qty:
+        unit = order.item.unit.symbol if order.item.unit else "units"
+        raise InsufficientStockException(
+            item=order.item.name,
+            required=float(issue_qty),
+            available=float(available),
+            unit=unit,
+        )
+
+    order.kitchen_warehouse_id = kitchen_wh.id
+    order.issued_qty = issue_qty
+    db.commit()
+    db.refresh(order)
+    return _format_kitchen_order(order, db, current_user)
+
+
+@router.post("/{order_id}/start-production", response_model=KitchenOrderResponse)
+def start_kitchen_order_production(
+    order_id: str,
+    payload: KitchenOrderStartProductionRequest = KitchenOrderStartProductionRequest(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Legacy no-op kept for backward compat. Production is handled in PART 2."""
+    if not _is_kitchen_manager(current_user):
+        raise ForbiddenException("Only the Central/Production Kitchen can acknowledge kitchen orders.")
+
+    order = (
+        db.query(KitchenOrder)
+        .filter(KitchenOrder.id == order_id, KitchenOrder.company_id == current_user.company_id)
+        .first()
+    )
+    if not order:
+        raise NotFoundException("Kitchen order", order_id)
+
+    if order.status != KitchenOrderStatus.APPROVED:
+        raise BadRequestException("Only APPROVED kitchen orders can be acknowledged for production.")
 
     if payload.kitchen_warehouse_id:
         wh = (
@@ -430,12 +572,12 @@ def dispatch_kitchen_order(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Central/Production Kitchen produces or allocates the finished/semi-finished
-    quantity and dispatches it to the requesting outlet. Deducts stock from the
-    central kitchen warehouse (writes StockLedger) so the outlet can receive it.
+    Central Kitchen dispatches the issued quantity to the requesting outlet.
+    Uses the ACTUAL ISSUED quantity (not the original requested quantity).
+    NO stock change at dispatch time — stock moves only when outlet confirms Receive.
     """
     if not _is_kitchen_manager(current_user):
-        raise ForbiddenException("Only the Central/Production Kitchen can dispatch kitchen orders.")
+        raise ForbiddenException("Only the Central Kitchen can dispatch kitchen orders.")
 
     order = (
         db.query(KitchenOrder)
@@ -447,30 +589,30 @@ def dispatch_kitchen_order(
 
     current_status = order.status.value if hasattr(order.status, "value") else order.status
     if order.status not in (
-        KitchenOrderStatus.SUBMITTED,
+        KitchenOrderStatus.APPROVED,
         KitchenOrderStatus.IN_PRODUCTION,
         KitchenOrderStatus.DISPATCHED,
         KitchenOrderStatus.PARTIALLY_RECEIVED,
     ):
         raise BadRequestException(f"Cannot dispatch a kitchen order in status '{current_status}'.")
 
-    requested = Decimal(str(order.requested_qty or 0))
-    fully_received = Decimal(str(order.received_qty or 0))
+    # Use issued_qty as the dispatch baseline.
+    issued = Decimal(str(order.issued_qty or 0))
     already_dispatched = Decimal(str(order.dispatched_qty or 0))
-    remaining_to_dispatch = (requested - fully_received).max(Decimal("0.0000"))
+    remaining_to_dispatch = (issued - already_dispatched).max(Decimal("0.0000"))
 
     if remaining_to_dispatch <= Decimal("0.0000"):
-        raise BadRequestException("This kitchen order is already fully received.")
+        raise BadRequestException("This kitchen order has already been fully dispatched.")
 
     dispatch_qty = Decimal(str(payload.dispatched_qty)) if payload.dispatched_qty is not None else remaining_to_dispatch
     if dispatch_qty <= Decimal("0.0000"):
         raise BadRequestException("Dispatch quantity must be greater than zero.")
     if dispatch_qty > remaining_to_dispatch:
         raise BadRequestException(
-            f"Dispatch quantity {dispatch_qty} exceeds remaining requirement {remaining_to_dispatch}."
+            f"Dispatch quantity {dispatch_qty} exceeds remaining issued quantity {remaining_to_dispatch}."
         )
 
-    # Resolve the central kitchen warehouse that will dispatch.
+    # Resolve the central kitchen warehouse.
     kitchen_wh = None
     if payload.kitchen_warehouse_id:
         kitchen_wh = (
@@ -489,11 +631,10 @@ def dispatch_kitchen_order(
         if not kitchen_wh:
             kitchen_wh = _resolve_kitchen_warehouse(current_user.company_id, db)
 
-    # Ensure stock availability at the kitchen warehouse.
+    # Verify stock is still available (never goes negative).
     balance = (
         db.query(StockBalance)
         .filter(StockBalance.warehouse_id == kitchen_wh.id, StockBalance.item_id == order.item_id)
-        .with_for_update()
         .first()
     )
     available = Decimal(str(balance.quantity if balance else 0))
@@ -507,21 +648,7 @@ def dispatch_kitchen_order(
             unit=unit,
         )
 
-    # Deduct central kitchen stock (ledger movement KITCHEN_DISPATCH).
-    stock_service = StockService(db)
-    stock_service.post_stock_movement(
-        warehouse_id=kitchen_wh.id,
-        item_id=order.item_id,
-        change_qty=-dispatch_qty,
-        movement_type="KITCHEN_DISPATCH",
-        reference_type="KITCHEN_ORDER",
-        reference_id=order.id,
-        batch_number=payload.batch_number,
-        expiry_date=payload.expiry_date,
-        user_id=current_user.id,
-        idempotency_key=f"ko_dispatch_{order.id}_{dispatch_qty}",
-    )
-
+    # NO stock deduction at dispatch — stock moves only at Receive.
     order.kitchen_warehouse_id = kitchen_wh.id
     order.dispatched_qty = already_dispatched + dispatch_qty
     order.batch_number = payload.batch_number or order.batch_number
@@ -546,8 +673,10 @@ def receive_kitchen_order(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Outlet receives the dispatched finished/semi-finished goods. Stock increases
-    in the outlet's warehouse (StockBalance + StockLedger KITCHEN_RECEIVE).
+    Outlet receives the dispatched finished/semi-finished goods.
+    - Central Kitchen stock decreases by the received quantity.
+    - Outlet stock increases by the received quantity.
+    - Received quantity cannot exceed dispatched quantity.
     """
     order = (
         db.query(KitchenOrder)
@@ -561,21 +690,16 @@ def receive_kitchen_order(
         raise ForbiddenException("Access denied: User cannot receive this kitchen order.")
 
     current_status = order.status.value if hasattr(order.status, "value") else order.status
-    if order.status not in (KitchenOrderStatus.DISPATCHED, KitchenOrderStatus.PARTIALLY_RECEIVED):
+    if order.status != KitchenOrderStatus.DISPATCHED:
         raise BadRequestException(f"Only DISPATCHED kitchen orders can be received (current '{current_status}').")
 
     dispatched = Decimal(str(order.dispatched_qty or 0))
-    received = Decimal(str(order.received_qty or 0))
-    receivable = (dispatched - received).max(Decimal("0.0000"))
+    accepted_qty = Decimal(str(payload.accepted_qty)) if payload.accepted_qty is not None else dispatched
 
-    if receivable <= Decimal("0.0000"):
-        raise BadRequestException("Nothing left to receive for this kitchen order.")
-
-    accepted_qty = Decimal(str(payload.accepted_qty)) if payload.accepted_qty is not None else receivable
-    if accepted_qty <= Decimal("0.0000"):
-        raise BadRequestException("Accepted quantity must be greater than zero.")
-    if accepted_qty > receivable:
-        raise BadRequestException(f"Accepted quantity {accepted_qty} exceeds receivable quantity {receivable}.")
+    if accepted_qty < Decimal("0.0000"):
+        raise BadRequestException("Accepted quantity cannot be negative.")
+    if accepted_qty > dispatched:
+        raise BadRequestException(f"Accepted quantity {accepted_qty} exceeds dispatched quantity {dispatched}.")
 
     # Resolve the outlet (destination) warehouse.
     outlet_wh = None
@@ -593,32 +717,70 @@ def receive_kitchen_order(
         if not outlet_wh:
             outlet_wh = _resolve_outlet_warehouse(order.branch_id, db)
 
-    # Increase outlet stock (ledger movement KITCHEN_RECEIVE).
+    # Resolve the central kitchen warehouse.
+    kitchen_wh = None
+    if order.kitchen_warehouse_id:
+        kitchen_wh = db.query(Warehouse).filter(Warehouse.id == order.kitchen_warehouse_id).first()
+    if not kitchen_wh:
+        kitchen_wh = _resolve_kitchen_warehouse(current_user.company_id, db)
+
     stock_service = StockService(db)
-    stock_service.post_stock_movement(
-        warehouse_id=outlet_wh.id,
-        item_id=order.item_id,
-        change_qty=accepted_qty,
-        movement_type="KITCHEN_RECEIVE",
-        reference_type="KITCHEN_ORDER",
-        reference_id=order.id,
-        batch_number=order.batch_number,
-        expiry_date=order.expiry_date,
-        user_id=current_user.id,
-        idempotency_key=f"ko_receive_{order.id}_{accepted_qty}",
-    )
+
+    # Decrease central kitchen stock by accepted amount.
+    if accepted_qty > 0:
+        stock_service.post_stock_movement(
+            warehouse_id=kitchen_wh.id,
+            item_id=order.item_id,
+            change_qty=-accepted_qty,
+            movement_type="TRANSFER_OUT",
+            reference_type="KITCHEN_ORDER",
+            reference_id=order.id,
+            batch_number=order.batch_number,
+            expiry_date=order.expiry_date,
+            user_id=current_user.id,
+            idempotency_key=f"ko_receive_deduct_{order.id}_{accepted_qty}",
+        )
+
+        # Increase outlet stock by accepted amount.
+        stock_service.post_stock_movement(
+            warehouse_id=outlet_wh.id,
+            item_id=order.item_id,
+            change_qty=accepted_qty,
+            movement_type="TRANSFER_IN",
+            reference_type="KITCHEN_ORDER",
+            reference_id=order.id,
+            batch_number=order.batch_number,
+            expiry_date=order.expiry_date,
+            user_id=current_user.id,
+            idempotency_key=f"ko_receive_{order.id}_{accepted_qty}",
+        )
+
+    # Log variance if dispatched > received
+    variance_qty = dispatched - accepted_qty
+    if variance_qty > 0:
+        stock_service.post_stock_movement(
+            warehouse_id=kitchen_wh.id,
+            item_id=order.item_id,
+            change_qty=-variance_qty,
+            movement_type="ADJUSTMENT",
+            reference_type="KITCHEN_ORDER",
+            reference_id=order.id,
+            batch_number=order.batch_number,
+            expiry_date=order.expiry_date,
+            user_id=current_user.id,
+            idempotency_key=f"ko_variance_{order.id}_{variance_qty}",
+        )
+        variance_msg = f" Shortage of {variance_qty} recorded as variance."
+    else:
+        variance_msg = ""
 
     order.received_warehouse_id = outlet_wh.id
-    order.received_qty = received + accepted_qty
-    requested = Decimal(str(order.requested_qty or 0))
-    if (received + accepted_qty) >= requested:
-        order.status = "RECEIVED"
-    else:
-        order.status = "PARTIALLY_RECEIVED"
+    order.received_qty = accepted_qty
+    order.status = "RECEIVED"
     order.received_by_id = current_user.id
     order.received_at = datetime.utcnow()
-    if payload.notes:
-        note = payload.notes.strip()
+    if payload.notes or variance_msg:
+        note = (payload.notes.strip() if payload.notes else "") + variance_msg
         order.receive_notes = f"{order.receive_notes + ' | ' if order.receive_notes else ''}{note}"
 
     db.commit()

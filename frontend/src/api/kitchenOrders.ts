@@ -1,11 +1,14 @@
 import { apiClient } from './client';
 import {
   KitchenOrder,
+  KitchenOrderApproveInput,
   KitchenOrderCancelInput,
   KitchenOrderCreateInput,
   KitchenOrderDispatchInput,
+  KitchenOrderIssueInput,
   KitchenOrderItemOption,
   KitchenOrderReceiveInput,
+  KitchenOrderRejectInput,
   KitchenOrderStartProductionInput,
 } from '../types/kitchen-order.types';
 
@@ -33,6 +36,21 @@ export const kitchenOrdersApi = {
 
   startProduction: async (id: string, payload?: KitchenOrderStartProductionInput): Promise<KitchenOrder> => {
     const res = await apiClient.post<KitchenOrder>(`/kitchen-orders/${id}/start-production`, payload || {});
+    return res.data;
+  },
+
+  approveKitchenOrder: async (id: string, payload?: KitchenOrderApproveInput): Promise<KitchenOrder> => {
+    const res = await apiClient.post<KitchenOrder>(`/kitchen-orders/${id}/approve`, payload || {});
+    return res.data;
+  },
+
+  rejectKitchenOrder: async (id: string, payload: KitchenOrderRejectInput): Promise<KitchenOrder> => {
+    const res = await apiClient.post<KitchenOrder>(`/kitchen-orders/${id}/reject`, payload);
+    return res.data;
+  },
+
+  issueKitchenOrder: async (id: string, payload: KitchenOrderIssueInput): Promise<KitchenOrder> => {
+    const res = await apiClient.post<KitchenOrder>(`/kitchen-orders/${id}/issue`, payload);
     return res.data;
   },
 
