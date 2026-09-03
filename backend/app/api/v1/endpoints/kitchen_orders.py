@@ -588,20 +588,13 @@ def dispatch_kitchen_order(
         raise NotFoundException("Kitchen order", order_id)
 
     current_status = order.status.value if hasattr(order.status, "value") else order.status
-    if order.status not in (
-        KitchenOrderStatus.APPROVED,
-        KitchenOrderStatus.IN_PRODUCTION,
-        KitchenOrderStatus.DISPATCHED,
-        KitchenOrderStatus.PARTIALLY_RECEIVED,
-    ):
+    if order.status != KitchenOrderStatus.APPROVED:
+        if order.status in (KitchenOrderStatus.IN_PRODUCTION, KitchenOrderStatus.DISPATCHED, KitchenOrderStatus.PARTIALLY_RECEIVED, KitchenOrderStatus.RECEIVED):
+            raise BadRequestException("This kitchen order has already been dispatched.")
         raise BadRequestException(f"Cannot dispatch a kitchen order in status '{current_status}'.")
 
     # Use requested_qty as the baseline, as we are skipping the separate "Issue" step.
     requested = Decimal(str(order.requested_qty or 0))
-    already_dispatched = Decimal(str(order.dispatched_qty or 0))
-    
-    if order.status == KitchenOrderStatus.DISPATCHED:
-        raise BadRequestException("This kitchen order has already been dispatched.")
 
     dispatch_qty = Decimal(str(payload.dispatched_qty)) if payload.dispatched_qty is not None else requested
     if dispatch_qty <= Decimal("0.0000"):
@@ -664,7 +657,7 @@ def dispatch_kitchen_order(
     )
 
     order.kitchen_warehouse_id = kitchen_wh.id
-    order.dispatched_qty = already_dispatched + dispatch_qty
+    order.dispatched_qty = dispatch_qty
     order.batch_number = payload.batch_number or order.batch_number
     order.expiry_date = payload.expiry_date or order.expiry_date
     order.status = "IN_PRODUCTION" # Used as "Pending HO Dispatch Approval"
