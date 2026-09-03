@@ -20,7 +20,6 @@ import InventoryManager from '@/components/inventory/InventoryManager';
 import TransfersWorkspace from '@/components/workspaces/TransfersWorkspace';
 import PurchaseWorkspace from '@/components/workspaces/PurchaseWorkspace';
 import ProductionWorkspace from '@/components/workspaces/ProductionWorkspace';
-import KitchenOrdersWorkspace from '@/components/workspaces/KitchenOrdersWorkspace';
 import WastageWorkspace from '@/components/workspaces/WastageWorkspace';
 import HRWorkspace from '@/components/workspaces/HRWorkspace';
 import ClosingWorkspace from '@/components/workspaces/ClosingWorkspace';
