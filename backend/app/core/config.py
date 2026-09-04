@@ -9,7 +9,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "APEX Multi-Outlet Restaurant ERP"
-    VERSION: str = "2.0.0-greenfield"
+    VERSION: str = "2.0.1-food-cost"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = os.getenv("NODE_ENV", os.getenv("ENVIRONMENT", "development"))
     PORT: int = int(os.getenv("PORT", 10000))
