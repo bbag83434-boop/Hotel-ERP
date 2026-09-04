@@ -482,7 +482,7 @@ export const MainKitchenWorkspace: React.FC<MainKitchenWorkspaceProps> = ({ init
                      </div>
                   </div>
                   
-                  <Button variant="success" size="lg" onClick={handleExecuteProduction} disabled={executing || !(preview as any).allIngredientsAvailable} loading={executing} icon={<Play className="w-4 h-4" />}>
+                  <Button variant="success" size="lg" onClick={handleExecuteProduction} disabled={executing || !((preview as any).allIngredientsAvailable || (preview as any).all_ingredients_available)} loading={executing} icon={<Play className="w-4 h-4" />}>
                     SAVE PRODUCTION
                   </Button>
                 </div>

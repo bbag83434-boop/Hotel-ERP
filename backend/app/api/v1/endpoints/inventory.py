@@ -1044,12 +1044,12 @@ def get_stock_ledger(
     ).filter(Item.company_id == current_user.company_id)
     
     if outlet_id:
-        query = query.filter(StockLedger.branch_id == outlet_id)
+        query = query.join(Warehouse, Warehouse.id == StockLedger.warehouse_id).filter(Warehouse.branch_id == outlet_id)
     elif not _is_inventory_manager(current_user):
         user_bids = list(_user_branch_ids(current_user))
         if not user_bids:
             return []
-        query = query.filter(StockLedger.branch_id.in_(user_bids))
+        query = query.join(Warehouse, Warehouse.id == StockLedger.warehouse_id).filter(Warehouse.branch_id.in_(user_bids))
 
     if warehouse_id:
         query = query.filter(StockLedger.warehouse_id == warehouse_id)
@@ -1136,12 +1136,12 @@ def get_stock_movement_timeline(
     ).filter(Item.company_id == current_user.company_id)
     
     if outlet_id:
-        query = query.filter(StockLedger.branch_id == outlet_id)
+        query = query.join(Warehouse, Warehouse.id == StockLedger.warehouse_id).filter(Warehouse.branch_id == outlet_id)
     elif not _is_inventory_manager(current_user):
         user_bids = list(_user_branch_ids(current_user))
         if not user_bids:
             return []
-        query = query.filter(StockLedger.branch_id.in_(user_bids))
+        query = query.join(Warehouse, Warehouse.id == StockLedger.warehouse_id).filter(Warehouse.branch_id.in_(user_bids))
 
     if item_id:
         query = query.filter(StockLedger.item_id == item_id)
@@ -2216,12 +2216,22 @@ def get_stock_batches(
     is_active: Optional[bool] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
 ):
     query = (
         db.query(StockBatch)
         .join(Warehouse, Warehouse.id == StockBatch.warehouse_id)
         .filter(Warehouse.company_id == current_user.company_id)
     )
+    
+    if outlet_id:
+        query = query.filter(Warehouse.branch_id == outlet_id)
+    elif not _is_inventory_manager(current_user):
+        user_bids = list(_user_branch_ids(current_user))
+        if not user_bids:
+            return []
+        query = query.filter(Warehouse.branch_id.in_(user_bids))
+
     if warehouse_id:
         query = query.filter(StockBatch.warehouse_id == warehouse_id)
     if item_id:
@@ -2279,6 +2289,7 @@ def get_expiring_batches(
     warehouse_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
 ):
     query = (
         db.query(StockBatch)
@@ -2290,6 +2301,15 @@ def get_expiring_batches(
             StockBatch.expiry_date.isnot(None),
         )
     )
+    
+    if outlet_id:
+        query = query.filter(Warehouse.branch_id == outlet_id)
+    elif not _is_inventory_manager(current_user):
+        user_bids = list(_user_branch_ids(current_user))
+        if not user_bids:
+            return []
+        query = query.filter(Warehouse.branch_id.in_(user_bids))
+
     if warehouse_id:
         query = query.filter(StockBatch.warehouse_id == warehouse_id)
 
