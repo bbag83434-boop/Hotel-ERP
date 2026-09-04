@@ -238,7 +238,7 @@ export const AppContent = () => {
 
           {activeWorkspace === 'centralKitchenProduction' && (
             <div className="w-full min-w-0">
-              <MainKitchenWorkspace />
+              <MainKitchenWorkspace initialView="kitchen" />
             </div>
           )}
 
@@ -352,7 +352,8 @@ export const AppContent = () => {
 
           {!isManagement &&
             activeWorkspace !== 'purchase' &&
-            activeWorkspace !== 'kitchenOrders' && (
+            activeWorkspace !== 'kitchenOrders' &&
+            activeWorkspace !== 'centralKitchenProduction' && (
               <div className="w-full min-w-0">
                 <div className="p-12 text-center rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
                   <ShieldCheck className="w-10 h-10 text-red-500 mx-auto mb-3 opacity-70" />

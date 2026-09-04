@@ -74,9 +74,9 @@ export const MainKitchenWorkspace: React.FC<MainKitchenWorkspaceProps> = ({ init
   const userRole = typeof user?.role === 'object' ? (user.role.name || '') : (user?.role || '');
   const isCentralOutlet = CENTRAL_OUTLET_TYPES.includes((activeOutlet?.type || '').toUpperCase());
   
-  const isKitchen = activeOutlet 
-    ? isCentralOutlet 
-    : Boolean(initialView === 'kitchen' || KITCHEN_ROLES.includes(userRole.toUpperCase()));
+  const isKitchen = initialView !== undefined 
+    ? initialView === 'kitchen' 
+    : (activeOutlet?.code === 'BB-01' || (activeOutlet ? isCentralOutlet : KITCHEN_ROLES.includes(userRole.toUpperCase())));
 
   const isAdmin = ADMIN_ROLES.includes(userRole.toUpperCase());
 
@@ -180,6 +180,9 @@ export const MainKitchenWorkspace: React.FC<MainKitchenWorkspaceProps> = ({ init
   }, [selectedRecipeId, productionQty, centralConfig, isKitchen]);
 
   const filteredOrders = orders.filter((o) => {
+    // If we are acting as Main Kitchen, do not show BB-01's own requested demands in the incoming queue
+    if (isKitchen && activeOutlet?.code === 'BB-01' && o.branch_code === 'BB-01') return false;
+    
     if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();

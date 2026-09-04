@@ -215,6 +215,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       defaultOpen: true,
       items: [{ id: 'kitchenOrders', label: 'Kitchen Orders', icon: ChefHat, initialTab: undefined, badge: null }],
     },
+    ...(activeOutlet?.code === 'BB-01' ? [{
+      label: 'Main Kitchen Operations',
+      defaultOpen: true,
+      items: [
+        { id: 'centralKitchenProduction', label: 'Kitchen Operations', icon: ChefHat, initialTab: undefined, badge: 'MK' },
+      ],
+    }] : []),
     {
       label: 'Outlet Sales & Consumption',
       defaultOpen: true,
