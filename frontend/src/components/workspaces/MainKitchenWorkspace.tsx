@@ -311,7 +311,7 @@ export const MainKitchenWorkspace: React.FC<MainKitchenWorkspaceProps> = ({ init
 
   const renderOrderCard = (o: KitchenOrder, isDispatchTab: boolean = false) => {
     const badge = statusBadge[o.status] || { label: o.status, cls: 'bg-gray-100 text-gray-700' };
-    const canApprove = isKitchen && o.status === 'SUBMITTED' && isAdmin;
+    const canApprove = !isKitchen && o.status === 'SUBMITTED' && isAdmin;
     const canDispatch = isKitchen && o.status === 'APPROVED';
     const canApproveDispatch = isKitchen && o.status === 'IN_PRODUCTION' && isAdmin;
     const canReceive = !isKitchen && o.status === 'DISPATCHED';
@@ -429,15 +429,14 @@ export const MainKitchenWorkspace: React.FC<MainKitchenWorkspaceProps> = ({ init
               <div className="p-3 border-b border-gray-100 flex gap-3">
                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="text-xs bg-[#FAF8F5] border border-gray-200 rounded-xl px-3 py-1.5 font-semibold">
                    <option value="ALL">All Statuses</option>
-                   <option value="SUBMITTED">Pending HO Approval</option>
                    <option value="APPROVED">Approved (Ready to Dispatch)</option>
                  </select>
               </div>
-              {filteredOrders.filter(o => o.status === 'SUBMITTED' || o.status === 'APPROVED').length === 0 ? (
-                <EmptyState title="No Demands" description="No pending or approved demands found." icon={<CheckCircle2 className="w-6 h-6"/>} />
+              {filteredOrders.filter(o => o.status === 'APPROVED').length === 0 ? (
+                <EmptyState title="No Demands" description="No approved demands found." icon={<CheckCircle2 className="w-6 h-6"/>} />
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {filteredOrders.filter(o => o.status === 'SUBMITTED' || o.status === 'APPROVED').map(o => renderOrderCard(o, false))}
+                  {filteredOrders.filter(o => o.status === 'APPROVED').map(o => renderOrderCard(o, false))}
                 </div>
               )}
             </div>

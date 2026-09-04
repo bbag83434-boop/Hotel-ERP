@@ -203,7 +203,7 @@ export const AppContent = () => {
 
           {activeWorkspace === 'kitchenOrders' && (
             <div className="w-full min-w-0">
-              <MainKitchenWorkspace initialView={isManagement ? 'kitchen' : 'outlet'} />
+              <MainKitchenWorkspace initialView="outlet" />
             </div>
           )}
 
