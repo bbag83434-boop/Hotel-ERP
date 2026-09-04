@@ -2,7 +2,8 @@ import uuid
 from decimal import Decimal
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.models.inventory import Item, StockBalance, StockLedger, UnitConversion, Warehouse
+from app.models.inventory import Item, StockBalance, StockLedger, UnitConversion
+from app.models.organization import Warehouse
 from app.models.recipe import Recipe, RecipeItem
 from app.models.outlet_sales import OutletSale, OutletSaleIngredient
 from app.schemas.outlet_sales import (

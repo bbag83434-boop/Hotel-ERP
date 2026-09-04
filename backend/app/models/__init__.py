@@ -1,4 +1,4 @@
-��from app.models.base import BaseModel
+﻿from app.models.base import BaseModel
 from app.models.user import User, Role, Permission, RolePermission, UserBranch
 from app.models.organization import Company, Branch, Department, Warehouse, StoreLocation, BranchType
 from app.models.hr import (
