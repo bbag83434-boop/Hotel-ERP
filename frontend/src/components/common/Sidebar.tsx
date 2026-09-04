@@ -34,6 +34,7 @@ import {
   MessageCircle,
   FileText,
   LogOut,
+  Calculator,
 } from 'lucide-react';
 
 export type WorkspaceId =
@@ -74,7 +75,8 @@ export type WorkspaceId =
   | 'aiDocuments'
   | 'aiWastageSales'
   | 'whatsappBusiness'
-  | 'outletSales';
+  | 'outletSales'
+  | 'foodCost';
 
 // Outlet-scope sidebar flow ids that map onto PurchaseWorkspace tabs or the
 // KitchenOrders module (kept internal to the Sidebar for scoped navigation).
@@ -166,6 +168,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'finance' as WorkspaceId, label: 'Accounts & Finance', icon: BookOpen, badge: 'GL' },
         { id: 'financeControl' as WorkspaceId, label: 'Expense & Reconciliation', icon: Banknote, badge: 'Control' },
         { id: 'reports' as WorkspaceId, label: 'Reports & Cost Control', icon: BarChart3, badge: null },
+        ...(isAdmin ? [{ id: 'foodCost' as WorkspaceId, label: 'Food Cost', icon: Calculator, badge: null }] : []),
         ...(isAdmin ? [{ id: 'scheduledReports' as WorkspaceId, label: 'Scheduled Reports & Alerts', icon: CalendarDays, badge: 'Alerts' }] : []),
         { id: 'closing' as WorkspaceId, label: 'Bi-Monthly Closing', icon: CalendarDays, badge: '1st–15th' },
       ],

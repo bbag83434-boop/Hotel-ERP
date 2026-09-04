@@ -50,6 +50,7 @@ import AIWastageSalesIntelligenceWorkspace from '@/components/workspaces/AIWasta
 import WhatsAppBusinessWorkspace from '@/components/workspaces/WhatsAppBusinessWorkspace';
 import MainKitchenWorkspace from '@/components/workspaces/MainKitchenWorkspace';
 import OutletSalesWorkspace from '@/components/workspaces/OutletSalesWorkspace';
+import FoodCostModule from '@/components/workspaces/FoodCostModule';
 
 export const AppContent = () => {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
@@ -66,6 +67,12 @@ export const AppContent = () => {
     ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN',
      'CENTRAL_PURCHASE_MANAGER', 'CENTRAL_STORE_MANAGER', 'DESSERT_KITCHEN_HEAD',
      'GENERAL_MANAGER', 'DIRECTOR', 'KITCHEN_CHEF', 'PRODUCTION_MANAGER'].includes(userRole.toUpperCase());
+
+  // Food Cost is ADMIN ONLY on both the frontend route and the backend API.
+  const isFoodCostAdmin =
+    ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN'].includes(
+      userRole.toUpperCase()
+    );
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -203,6 +210,23 @@ export const AppContent = () => {
           {activeWorkspace === 'outletSales' && (
             <div className="w-full min-w-0">
               <OutletSalesWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'foodCost' && (
+            <div className="w-full min-w-0">
+              {isFoodCostAdmin ? (
+                <FoodCostModule />
+              ) : (
+                <div className="p-12 text-center rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
+                  <ShieldCheck className="w-10 h-10 text-red-500 mx-auto mb-3 opacity-70" />
+                  <h3 className="text-sm font-bold text-[#1C1C1C]">Access Restricted</h3>
+                  <p className="text-xs text-[#707070] mt-1 max-w-sm mx-auto">
+                    Food Cost is available to Admin users only. Your role does not grant
+                    access to this module.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

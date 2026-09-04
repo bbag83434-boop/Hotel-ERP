@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, auth, users, organization, hr, inventory, recipe, procurement, wastage, reports, ai, orders, billing, customer_support, maintenance, beverage, finance, hotel, cashier_shift, expense, ai_provider, ai_tools, notifications, ai_document, whatsapp, dashboard, kitchen_orders, outlet_sales
+from app.api.v1.endpoints import health, auth, users, organization, hr, inventory, recipe, procurement, wastage, reports, ai, orders, billing, customer_support, maintenance, beverage, finance, hotel, cashier_shift, expense, ai_provider, ai_tools, notifications, ai_document, whatsapp, dashboard, kitchen_orders, outlet_sales, food_cost
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication & RBAC"])
@@ -37,3 +37,4 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 api_router.include_router(ai_document.router, prefix="/ai/documents", tags=["AI Invoice & Document Processing"])
 
 api_router.include_router(whatsapp.router, prefix="/whatsapp", tags=["WhatsApp Business Integration"])
+api_router.include_router(food_cost.router, prefix="/food-cost", tags=["Food Cost Calculator"])
