@@ -36,6 +36,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=4096
+      - key: NODE_VERSION
+        value: 20.14.0
       - key: PORT
         value: 3000
       - key: NEXT_PUBLIC_API_URL
