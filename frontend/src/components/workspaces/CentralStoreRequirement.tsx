@@ -415,7 +415,7 @@ export const CentralStoreRequirement: React.FC = () => {
               {showCreate ? 'Close' : 'New Requirement'}
             </Button>
           ) : (
-            <Badge variant="warning">Central Store scope required</Badge>
+            <Badge variant="warning" icon={<Warehouse className="w-3 h-3" />}>Central Store scope required</Badge>
           )}
         </div>
       </div>

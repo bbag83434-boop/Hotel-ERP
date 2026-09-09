@@ -111,6 +111,7 @@ class ItemBase(BaseModel):
     # Item Master supply routing — used to auto-route Outlet Requirements
     # (internal-source demands( to the correct supply area.
     supply_source: str = "CENTRAL_STORE"
+    supplier_id: Optional[str] = None
 
 class ItemCreate(ItemBase):
     pass
@@ -129,6 +130,7 @@ class ItemUpdate(BaseModel):
     reorder_qty: Optional[Decimal] = None
     is_active: Optional[bool] = None
     supply_source: Optional[str] = None
+    supplier_id: Optional[str] = None
 
 class ItemResponse(BaseModel):
     id: str
@@ -146,6 +148,7 @@ class ItemResponse(BaseModel):
     reorder_qty: Decimal
     is_active: bool
     supply_source: str = "CENTRAL_STORE"
+    supplier_id: Optional[str] = None
     category_name: Optional[str] = None
     unit_symbol: Optional[str] = None
     unit_name: Optional[str] = None

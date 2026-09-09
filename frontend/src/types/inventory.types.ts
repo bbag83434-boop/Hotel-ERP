@@ -61,6 +61,8 @@ export interface Item {
   category_name?: string;
   unit_symbol?: string;
   unit_name?: string;
+  supply_source?: string;
+  supplier_id?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -78,6 +80,8 @@ export interface ItemCreateInput {
   min_stock_level?: number;
   reorder_qty?: number;
   is_active?: boolean;
+  supply_source?: string;
+  supplier_id?: string;
 }
 
 export interface StockBalance {

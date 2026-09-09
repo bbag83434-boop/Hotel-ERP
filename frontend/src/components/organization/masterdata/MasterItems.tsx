@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Package, Plus, RefreshCw, Search, Filter, Layers, DollarSign, AlertTriangle } from 'lucide-react';
 import { inventoryApi } from '@/api/inventory';
+import { procurementApi } from '@/api/procurement';
 import { Item, Category, Unit, ItemCreateInput } from '@/types/inventory.types';
 import {
   FeedbackBanner,
@@ -30,6 +31,14 @@ const itemTypes = [
   { value: 'ASSET', label: 'Asset / Equipment' },
 ];
 
+const supplyTypes = [
+  { value: 'CENTRAL_STORE', label: 'Central Store' },
+  { value: 'DIRECT_VENDOR', label: 'Direct Vendor' },
+  { value: 'RAW_MATERIAL', label: 'Raw Material' },
+  { value: 'DAILY_OUTLET_SUPPLY', label: 'Daily Outlet Supply' },
+  { value: 'DESSERT_KITCHEN', label: 'Dessert Kitchen' },
+];
+
 const emptyItemForm: ItemCreateInput = {
   name: '',
   code: '',
@@ -43,12 +52,15 @@ const emptyItemForm: ItemCreateInput = {
   min_stock_level: 10,
   reorder_qty: 50,
   is_active: true,
+  supply_source: 'CENTRAL_STORE',
+  supplier_id: '',
 };
 
 export const MasterItems: React.FC = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
 
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -69,14 +81,16 @@ export const MasterItems: React.FC = () => {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [itemsData, catsData, unitsData] = await Promise.all([
+      const [itemsData, catsData, unitsData, suppData] = await Promise.all([
         inventoryApi.getItems(),
         inventoryApi.getCategories(),
         inventoryApi.getUnits(),
+        procurementApi.getSuppliers(),
       ]);
       setItems(itemsData);
       setCategories(catsData);
       setUnits(unitsData);
+      setSuppliers(suppData);
 
       if (catsData.length > 0 && !createForm.category_id) {
         setCreateForm((prev) => ({ ...prev, category_id: catsData[0].id }));
@@ -119,6 +133,7 @@ export const MasterItems: React.FC = () => {
         selling_price: Number(createForm.selling_price || 0),
         min_stock_level: Number(createForm.min_stock_level || 0),
         reorder_qty: Number(createForm.reorder_qty || 0),
+        supplier_id: createForm.supplier_id || undefined,
       });
       setFeedback({ type: 'success', message: `Item "${createForm.name}" created successfully.` });
       setShowCreate(false);
@@ -148,6 +163,7 @@ export const MasterItems: React.FC = () => {
         selling_price: Number(editForm.selling_price || 0),
         min_stock_level: Number(editForm.min_stock_level || 0),
         reorder_qty: Number(editForm.reorder_qty || 0),
+        supplier_id: editForm.supplier_id || undefined,
       });
       setFeedback({ type: 'success', message: `Item "${editForm.name}" updated successfully.` });
       setEditing(null);
@@ -345,6 +361,13 @@ export const MasterItems: React.FC = () => {
                   <span>Type: <span className="font-semibold text-[#1C1C1C]">{item.type.replace('_', ' ')}</span></span>
                   {item.barcode && <span className="font-mono text-[10px]">Barcode: {item.barcode}</span>}
                 </div>
+                
+                <div className="text-[11px] text-[#707070] flex flex-col gap-0.5">
+                  <span>Supply: <span className="font-semibold text-[#C79A3B]">{supplyTypes.find(t => t.value === (item.supply_source || 'CENTRAL_STORE'))?.label || item.supply_source}</span></span>
+                  {item.supplier_id && (
+                    <span>Vendor: <span className="font-medium text-[#1C1C1C]">{suppliers.find(s => s.id === item.supplier_id)?.name || 'Unknown'}</span></span>
+                  )}
+                </div>
 
                 <CardActionRow>
                   <div className="flex items-center gap-2">
@@ -372,6 +395,8 @@ export const MasterItems: React.FC = () => {
                           min_stock_level: Number(item.min_stock_level || 0),
                           reorder_qty: Number(item.reorder_qty || 0),
                           is_active: item.is_active,
+                          supply_source: item.supply_source || 'CENTRAL_STORE',
+                          supplier_id: item.supplier_id || '',
                         });
                       }}
                     />
@@ -467,6 +492,34 @@ export const MasterItems: React.FC = () => {
                   onChange={(e) => setCreateForm({ ...createForm, barcode: e.target.value })}
                   className={inputCls}
                 />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Supply Type (Fulfillment)" required>
+                <select
+                  required
+                  value={createForm.supply_source || 'CENTRAL_STORE'}
+                  onChange={(e) => setCreateForm({ ...createForm, supply_source: e.target.value, supplier_id: '' })}
+                  className={inputCls}
+                >
+                  {supplyTypes.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Default Vendor (If applicable)">
+                <select
+                  value={createForm.supplier_id || ''}
+                  onChange={(e) => setCreateForm({ ...createForm, supplier_id: e.target.value })}
+                  className={inputCls}
+                  disabled={!['DIRECT_VENDOR', 'DAILY_OUTLET_SUPPLY'].includes(createForm.supply_source || '')}
+                >
+                  <option value="">Select Vendor...</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                  ))}
+                </select>
               </Field>
             </div>
 
@@ -602,6 +655,34 @@ export const MasterItems: React.FC = () => {
                   onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
                   className={inputCls}
                 />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Supply Type (Fulfillment)" required>
+                <select
+                  required
+                  value={editForm.supply_source || 'CENTRAL_STORE'}
+                  onChange={(e) => setEditForm({ ...editForm, supply_source: e.target.value, supplier_id: '' })}
+                  className={inputCls}
+                >
+                  {supplyTypes.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Default Vendor (If applicable)">
+                <select
+                  value={editForm.supplier_id || ''}
+                  onChange={(e) => setEditForm({ ...editForm, supplier_id: e.target.value })}
+                  className={inputCls}
+                  disabled={!['DIRECT_VENDOR', 'DAILY_OUTLET_SUPPLY'].includes(editForm.supply_source || '')}
+                >
+                  <option value="">Select Vendor...</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                  ))}
+                </select>
               </Field>
             </div>
 
