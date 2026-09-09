@@ -133,6 +133,7 @@ def _format_kitchen_order(order: KitchenOrder, db: Session, user: User) -> Kitch
         item_code=item.code if item else None,
         item_type=item.type.value if item and hasattr(item.type, "value") else (item.type if item else None),
         unit_symbol=unit_symbol,
+        supply_source=item.supply_source if item else None,
         order_number=order.order_number,
         requested_qty=Decimal(str(order.requested_qty or 0)),
         issued_qty=Decimal(str(order.issued_qty or 0)),

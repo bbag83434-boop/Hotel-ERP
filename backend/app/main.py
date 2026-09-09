@@ -1,3 +1,4 @@
+
 from fastapi.encoders import jsonable_encoder
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +26,8 @@ from app.core.ai_document_schema_bootstrap import ensure_ai_document_schema
 from app.core.master_data_schema_bootstrap import ensure_master_data_schema
 from app.core.kitchen_order_schema_bootstrap import ensure_kitchen_order_schema
 from app.core.food_cost_schema_bootstrap import ensure_food_cost_schema
+from app.core.main_kitchen_schema_bootstrap import ensure_main_kitchen_schema
+from app.core.outlet_requirement_schema_bootstrap import ensure_outlet_requirement_schema
 from app.core.exceptions import AppException
 from app.api.v1.api import api_router
 
@@ -59,6 +62,8 @@ async def lifespan(app: FastAPI):
         ensure_master_data_schema()
         ensure_kitchen_order_schema()
         ensure_food_cost_schema()
+        ensure_main_kitchen_schema()
+        ensure_outlet_requirement_schema()
         logger.info("✅ Notification, master data, kitchen order & Food Cost schema check complete")
     except Exception as exc:
         logger.warning("Schema bootstrap skipped: %s", exc)

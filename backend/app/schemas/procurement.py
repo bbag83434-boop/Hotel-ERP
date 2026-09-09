@@ -104,7 +104,9 @@ class PurchaseRequestItemResponse(BaseModel):
     item_id: str
     item_name: Optional[str] = None
     item_code: Optional[str] = None
+    unit: Optional[str] = None
     unit_symbol: Optional[str] = None
+    supply_source: Optional[str] = None
     supplier_id: Optional[str] = None
     supplier_name: Optional[str] = None
     requested_qty: Decimal
@@ -119,7 +121,64 @@ class PurchaseRequestCreate(BaseModel):
     required_date: Optional[datetime] = None
     priority: Optional[str] = "MEDIUM"
     notes: Optional[str] = None
+    # "PURCHASE" (supplier indent), "MAIN_KITCHEN" (internal Main Kitchen demand) or
+    # "CENTRAL_STORE" (Central Store's own requirement).
+    # All live on the same purchase_requests entity — no duplicate requisition data.
+    requisition_type: Optional[str] = "PURCHASE"
     items: List[PurchaseRequestItemCreate]
+
+    @field_validator("requisition_type")
+    @classmethod
+    def validate_requisition_type(cls, v):
+        if v is None:
+            return "PURCHASE"
+        normalized = str(v).strip().upper()
+        if normalized not in ("PURCHASE", "MAIN_KITCHEN", "CENTRAL_STORE"):
+            raise ValueError("requisition_type must be one of 'PURCHASE', 'MAIN_KITCHEN' or 'CENTRAL_STORE'")
+        return normalized
+
+
+# ==========================================
+# PART 3 — Central Store Own Requirement Schemas
+# ==========================================
+class CentralStoreRequirementItemCreate(BaseModel):
+    # NOTE: There is intentionally NO supplier_id field here.
+    # The vendor is always auto-resolved from the Item/Vendor Master so the
+    # Central Store user can never manually pick/override a vendor.
+    item_id: str
+    requested_qty: Decimal = Field(..., gt=0)
+    notes: Optional[str] = None
+
+
+class CentralStoreRequirementCreate(BaseModel):
+    """Central Store's own requirement — NOT an outlet requirement.
+
+    The branch must be a CENTRAL_STORE type location. Vendors are resolved
+    automatically for every selected item from the existing Item/Vendor Master.
+    """
+    branch_id: str
+    required_date: Optional[datetime] = None
+    priority: Optional[str] = "MEDIUM"
+    notes: Optional[str] = None
+    items: List[CentralStoreRequirementItemCreate] = Field(..., min_length=1)
+
+
+class CentralStoreVendorCatalogItem(BaseModel):
+    """Item + auto-resolved vendor from the Item/Vendor Master.
+
+    vendor_source describes where the vendor came from:
+      - "PREFERRED_VENDOR_MASTER"  -> active preferred SupplierItem mapping
+      - "ITEM_MASTER_DEFAULT"      -> default supplier configured on the Item Master
+      - "NOT_CONFIGURED"           -> no vendor configured for this item
+    """
+    item_id: str
+    item_name: str
+    item_code: str
+    unit_symbol: Optional[str] = None
+    supplier_id: Optional[str] = None
+    supplier_name: Optional[str] = None
+    vendor_source: str = "NOT_CONFIGURED"
+    vendor_configured: bool = False
 
 class PurchaseRequestUpdate(BaseModel):
     required_date: Optional[datetime] = None
@@ -144,6 +203,7 @@ class PurchaseRequestResponse(BaseModel):
     status: PRStatus
     priority: str
     purchase_type: Optional[str] = None
+    requisition_type: Optional[str] = "PURCHASE"
     notes: Optional[str] = None
     approved_by_id: Optional[str] = None
     approved_at: Optional[datetime] = None

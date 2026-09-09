@@ -169,6 +169,8 @@ def execute_tool(
             if not item:
                 raise NotFoundException(f"Inventory item '{item_id}' not found.")
             db.add(PurchaseRequestItem(request_id=req.id, item_id=item_id, requested_qty=qty,
+                                       unit=item.unit.symbol if item.unit else None,
+                                       supply_source=item.supply_source or "CENTRAL_STORE",
                                        estimated_price=Decimal(str(raw.get("estimated_price") or item.cost_price or 0)),
                                        supplier_id=raw.get("supplier_id"), notes="AI guarded tool"))
             created += 1

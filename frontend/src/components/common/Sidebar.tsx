@@ -35,6 +35,7 @@ import {
   FileText,
   LogOut,
   Calculator,
+  Warehouse,
 } from 'lucide-react';
 
 export type WorkspaceId =
@@ -76,7 +77,8 @@ export type WorkspaceId =
   | 'aiWastageSales'
   | 'whatsappBusiness'
   | 'outletSales'
-  | 'foodCost';
+  | 'foodCost'
+  | 'centralStoreRequirement';
 
 // Outlet-scope sidebar flow ids that map onto PurchaseWorkspace tabs or the
 // KitchenOrders module (kept internal to the Sidebar for scoped navigation).
@@ -151,6 +153,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
     {
+      label: 'Central Store',
+      defaultOpen: true,
+      items: [
+        { id: 'centralStoreRequirement' as WorkspaceId, label: 'Own Requirement', icon: Warehouse, badge: 'CS' },
+      ],
+    },
+    {
       label: 'Management',
       defaultOpen: true,
       items: [
@@ -220,6 +229,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       defaultOpen: true,
       items: [
         { id: 'centralKitchenProduction', label: 'Kitchen Operations', icon: ChefHat, initialTab: undefined, badge: 'MK' },
+      ],
+    }] : []),
+    ...(activeOutlet && String(activeOutlet.type).toUpperCase() === 'CENTRAL_STORE' ? [{
+      label: 'Central Store',
+      defaultOpen: true,
+      items: [
+        { id: 'centralStoreRequirement', label: 'Own Requirement', icon: Warehouse, initialTab: undefined, badge: 'CS' },
       ],
     }] : []),
     {

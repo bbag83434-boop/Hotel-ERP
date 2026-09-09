@@ -425,33 +425,77 @@ export const MainKitchenWorkspace: React.FC<MainKitchenWorkspaceProps> = ({ init
       {isKitchen ? (
         <div className="space-y-4">
           {activeKitchenTab === 'demands' && (
-            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden">
-              <div className="p-3 border-b border-gray-100 flex gap-3">
+            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden p-4">
+              <div className="pb-3 mb-4 border-b border-gray-100 flex gap-3">
                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="text-xs bg-[#FAF8F5] border border-gray-200 rounded-xl px-3 py-1.5 font-semibold">
                    <option value="ALL">All Statuses</option>
                    <option value="APPROVED">Approved (Ready to Dispatch)</option>
                  </select>
               </div>
-              {filteredOrders.filter(o => o.status === 'APPROVED').length === 0 ? (
-                <EmptyState title="No Demands" description="No approved demands found." icon={<CheckCircle2 className="w-6 h-6"/>} />
-              ) : (
-                <div className="divide-y divide-gray-100">
-                  {filteredOrders.filter(o => o.status === 'APPROVED').map(o => renderOrderCard(o, false))}
-                </div>
-              )}
+              {(() => {
+                const visibleOrders = filteredOrders.filter(o => statusFilter === 'ALL' || o.status === statusFilter);
+                if (visibleOrders.length === 0) {
+                  return <EmptyState title="No Demands" description="No demands found for current filter." icon={<CheckCircle2 className="w-6 h-6"/>} />;
+                }
+                
+                // Group by supply source
+                const grouped = visibleOrders.reduce((acc, order) => {
+                  const source = (order.supply_source || 'CENTRAL_STORE').toUpperCase().replace(/_/g, ' ');
+                  if (!acc[source]) acc[source] = [];
+                  acc[source].push(order);
+                  return acc;
+                }, {} as Record<string, KitchenOrder[]>);
+
+                return (
+                  <div className="space-y-6">
+                    {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([source, groupOrders]) => (
+                      <div key={source} className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="bg-gray-100 px-4 py-2 font-bold text-sm text-[#1C1C1C] border-b border-gray-200 tracking-wider">
+                          {source}
+                        </div>
+                        <div className="divide-y divide-gray-100 bg-white">
+                          {groupOrders.map(o => renderOrderCard(o, false))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
           {activeKitchenTab === 'dispatch' && (
-            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden">
-              <div className="p-3 border-b border-gray-100 text-sm font-bold">Dispatches in Transit / Pending Approval</div>
-              {filteredOrders.filter(o => o.status === 'IN_PRODUCTION' || o.status === 'DISPATCHED').length === 0 ? (
-                <EmptyState title="No Active Dispatches" description="No dispatches currently in transit or pending approval." icon={<Truck className="w-6 h-6"/>} />
-              ) : (
-                <div className="divide-y divide-gray-100">
-                  {filteredOrders.filter(o => o.status === 'IN_PRODUCTION' || o.status === 'DISPATCHED').map(o => renderOrderCard(o, true))}
-                </div>
-              )}
+            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden p-4">
+              <div className="pb-3 mb-4 border-b border-gray-100 text-sm font-bold">Dispatches in Transit / Pending Approval</div>
+              {(() => {
+                const dispatchOrders = filteredOrders.filter(o => o.status === 'IN_PRODUCTION' || o.status === 'DISPATCHED');
+                if (dispatchOrders.length === 0) {
+                  return <EmptyState title="No Active Dispatches" description="No dispatches currently in transit or pending approval." icon={<Truck className="w-6 h-6"/>} />;
+                }
+
+                // Group by supply source
+                const grouped = dispatchOrders.reduce((acc, order) => {
+                  const source = (order.supply_source || 'CENTRAL_STORE').toUpperCase().replace(/_/g, ' ');
+                  if (!acc[source]) acc[source] = [];
+                  acc[source].push(order);
+                  return acc;
+                }, {} as Record<string, KitchenOrder[]>);
+
+                return (
+                  <div className="space-y-6">
+                    {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([source, groupOrders]) => (
+                      <div key={source} className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="bg-gray-100 px-4 py-2 font-bold text-sm text-[#1C1C1C] border-b border-gray-200 tracking-wider">
+                          {source}
+                        </div>
+                        <div className="divide-y divide-gray-100 bg-white">
+                          {groupOrders.map(o => renderOrderCard(o, true))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -531,11 +575,32 @@ export const MainKitchenWorkspace: React.FC<MainKitchenWorkspaceProps> = ({ init
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden">
-          {orders.length === 0 ? <EmptyState title="No Demands" description="No demands found." icon={<ChefHat className="w-6 h-6"/>} /> : (
-            <div className="divide-y divide-gray-100">
-              {filteredOrders.map(o => renderOrderCard(o))}
-            </div>
+        <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] overflow-hidden p-4">
+          {filteredOrders.length === 0 ? <EmptyState title="No Demands" description="No demands found." icon={<ChefHat className="w-6 h-6"/>} /> : (
+            (() => {
+              // Group by supply source
+              const grouped = filteredOrders.reduce((acc, order) => {
+                const source = (order.supply_source || 'CENTRAL_STORE').toUpperCase().replace(/_/g, ' ');
+                if (!acc[source]) acc[source] = [];
+                acc[source].push(order);
+                return acc;
+              }, {} as Record<string, KitchenOrder[]>);
+
+              return (
+                <div className="space-y-6">
+                  {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([source, groupOrders]) => (
+                    <div key={source} className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                      <div className="bg-gray-100 px-4 py-2 font-bold text-sm text-[#1C1C1C] border-b border-gray-200 tracking-wider">
+                        {source}
+                      </div>
+                      <div className="divide-y divide-gray-100 bg-white">
+                        {groupOrders.map(o => renderOrderCard(o))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()
           )}
         </div>
       )}

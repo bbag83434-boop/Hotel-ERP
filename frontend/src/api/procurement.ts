@@ -19,6 +19,8 @@ import {
   BranchRequirementConfig,
   SmartAIAskResponse,
   SmartRequirementItem,
+  CentralStoreVendorCatalogItem,
+  CentralStoreRequirementCreate,
 } from '../types/purchase.types';
 
 export const procurementApi = {
@@ -284,6 +286,73 @@ export const procurementApi = {
   },
   processScheduledRequirements: async (): Promise<any> => {
     const res = await apiClient.post('/procurement/smart-requirements/process-schedules');
+    return res.data;
+  },
+
+  // =============================================================
+  // Main Kitchen Requisitions (Stage 1)
+  // Reuses the SAME purchase_requests entity/approval endpoints —
+  // a Main Kitchen requisition is flagged via requisition_type =
+  // "MAIN_KITCHEN". No stock change happens at create or approve.
+  // =============================================================
+  createKitchenRequisition: async (payload: {
+    branch_id: string;
+    required_date?: string;
+    priority?: string;
+    notes?: string;
+    items: Array<{ item_id: string; requested_qty: number; notes?: string }>;
+  }): Promise<PurchaseRequest> => {
+    const res = await apiClient.post<PurchaseRequest>('/procurement/requests', {
+      ...payload,
+      requisition_type: 'MAIN_KITCHEN',
+    });
+    return res.data;
+  },
+
+  getKitchenRequisitions: async (params?: {
+    branch_id?: string;
+    status?: string;
+    search?: string;
+  }): Promise<PurchaseRequest[]> => {
+    const res = await apiClient.get<PurchaseRequest[]>('/procurement/requests', {
+      params: {
+        ...params,
+        requisition_type: 'MAIN_KITCHEN',
+        status_filter: params?.status,
+      },
+    });
+    return res.data;
+  },
+
+  // =============================================================
+  // PART 3 — Central Store Own Requirement
+  // Central Store is an independent stock location that raises its OWN
+  // requirement. The vendor for every item is AUTO-RESOLVED from the existing
+  // Item/Vendor Master — the Central Store user NEVER picks a vendor.
+  // =============================================================
+  getCentralStoreRequirementCatalog: async (): Promise<CentralStoreVendorCatalogItem[]> => {
+    const res = await apiClient.get<CentralStoreVendorCatalogItem[]>('/procurement/central-store-requirements/catalog');
+    return res.data;
+  },
+
+  createCentralStoreRequirement: async (payload: CentralStoreRequirementCreate): Promise<PurchaseRequest> => {
+    // NOTE: There is intentionally NO supplier_id anywhere in the payload —
+    // the backend resolves the vendor automatically from the Item/Vendor Master.
+    const res = await apiClient.post<PurchaseRequest>('/procurement/central-store-requirements', payload);
+    return res.data;
+  },
+
+  getCentralStoreRequirements: async (params?: {
+    branch_id?: string;
+    status_filter?: string;
+    search?: string;
+  }): Promise<PurchaseRequest[]> => {
+    const res = await apiClient.get<PurchaseRequest[]>('/procurement/requests', {
+      params: {
+        ...params,
+        requisition_type: 'CENTRAL_STORE',
+      },
+    });
     return res.data;
   },
 };

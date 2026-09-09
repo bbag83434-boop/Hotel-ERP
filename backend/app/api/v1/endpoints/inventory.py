@@ -664,6 +664,7 @@ def get_items(
                 min_stock_level=Decimal(str(it.min_stock_level or 0)),
                 reorder_qty=Decimal(str(it.reorder_qty or 0)),
                 is_active=it.is_active,
+                supply_source=it.supply_source,
                 category_name=it.category.name if it.category else None,
                 unit_symbol=it.unit.symbol if it.unit else None,
                 unit_name=it.unit.name if it.unit else None,
@@ -711,6 +712,7 @@ def create_item(
         min_stock_level=item_in.min_stock_level or Decimal("0.0000"),
         reorder_qty=item_in.reorder_qty or Decimal("0.0000"),
         is_active=item_in.is_active if item_in.is_active is not None else True,
+        supply_source=item_in.supply_source or "CENTRAL_STORE",
     )
     db.add(item)
     db.commit()
@@ -731,6 +733,7 @@ def create_item(
         min_stock_level=Decimal(str(item.min_stock_level or 0)),
         reorder_qty=Decimal(str(item.reorder_qty or 0)),
         is_active=item.is_active,
+supply_source=item.supply_source,
         category_name=cat.name,
         unit_symbol=u.symbol,
         unit_name=u.name,
@@ -768,6 +771,7 @@ def get_item(
         min_stock_level=Decimal(str(item.min_stock_level or 0)),
         reorder_qty=Decimal(str(item.reorder_qty or 0)),
         is_active=item.is_active,
+supply_source=item.supply_source,
         category_name=cat.name if cat else None,
         unit_symbol=u.symbol if u else None,
         unit_name=u.name if u else None,
@@ -813,6 +817,8 @@ def update_item(
         item.reorder_qty = item_in.reorder_qty
     if item_in.is_active is not None:
         item.is_active = item_in.is_active
+    if item_in.supply_source is not None:
+        item.supply_source = item_in.supply_source
 
     db.commit()
     db.refresh(item)
@@ -833,6 +839,7 @@ def update_item(
         selling_price=Decimal(str(item.selling_price or 0)),
         min_stock_level=Decimal(str(item.min_stock_level or 0)),
         reorder_qty=Decimal(str(item.reorder_qty or 0)),
+supply_source=item.supply_source,
         is_active=item.is_active,
         category_name=cat.name if cat else None,
         unit_symbol=u.symbol if u else None,

@@ -80,6 +80,7 @@ class KitchenOrderResponse(BaseModel):
     item_code: Optional[str] = None
     item_type: Optional[str] = None
     unit_symbol: Optional[str] = None
+    supply_source: Optional[str] = None
 
     order_number: str
     requested_qty: Decimal

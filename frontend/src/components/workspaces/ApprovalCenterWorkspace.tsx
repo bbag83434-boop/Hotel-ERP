@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Clock3, RefreshCw, XCircle, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, Clock3, RefreshCw, XCircle, ShieldCheck, Eye } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { Button, Badge, EmptyState, StatCard } from '@/components/ui';
 import { procurementApi } from '@/api/procurement';
@@ -47,6 +47,7 @@ export default function ApprovalCenterWorkspace() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [viewItem, setViewItem] = useState<ApprovalItem | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setMessage('');
@@ -60,11 +61,22 @@ export default function ApprovalCenterWorkspace() {
         apiClient.get('/hr/leaves', { params: { branch_id, status: 'PENDING' } }).then(unwrap).catch(() => []),
       ]);
       const next: ApprovalItem[] = [
-        ...prs.map((x: any) => ({ id:x.id, type:'PURCHASE_REQUEST', title:'Purchase Request', reference:x.request_number, amount:x.total_amount, branch:x.branch?.name, createdAt:x.created_at, payload:x })),
-        ...pos.map((x: any) => ({ id:x.id, type:'PURCHASE_ORDER', title:'Purchase Order', reference:x.po_number, amount:x.net_amount ?? x.total_amount, branch:x.branch?.name, createdAt:x.created_at, payload:x })),
-        ...grns.map((x: any) => ({ id:x.id, type:'GRN', title:'Goods Receipt', reference:x.grn_number, amount:x.total_amount, branch:x.branch?.name, createdAt:x.created_at, payload:x })),
-        ...wastage.map((x: any) => ({ id:x.id, type:'WASTAGE', title:'Wastage Entry', reference:x.entry_number, amount:x.total_cost, branch:x.branch?.name, createdAt:x.created_at, payload:x })),
-        ...leaves.map((x: any) => ({ id:x.id, type:'LEAVE', title:'Leave Request', reference:x.id.slice(0,8).toUpperCase(), amount:0, branch:x.branch?.name, createdAt:x.created_at, payload:x })),
+        ...prs.map((x: any) => {
+          let reqTitle = 'Purchase Request';
+          if (x.requisition_type === 'CENTRAL_STORE') reqTitle = 'CENTRAL STORE PURCHASE REQUEST';
+          else if (x.items && x.items.length > 0) {
+            const src = (x.items[0].supply_source || 'CENTRAL_STORE').toUpperCase();
+            if (src === 'DESSERT_KITCHEN') reqTitle = 'DESSERT KITCHEN REQUIREMENT';
+            else if (src === 'RAW_MATERIAL' || src === 'RAW_MATERIAL_SUPPLY') reqTitle = 'RAW MATERIAL SUPPLY REQUIREMENT';
+            else if (src === 'DAILY_OUTLET' || src === 'DAILY_OUTLET_SUPPLY') reqTitle = 'DAILY OUTLET SUPPLY REQUIREMENT';
+            else reqTitle = 'OUTLET → CENTRAL STORE INTERNAL REQUEST';
+          }
+          return { id:x.id, type:'PURCHASE_REQUEST', title:reqTitle, reference:x.request_number, amount:x.total_amount, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x };
+        }),
+        ...pos.map((x: any) => ({ id:x.id, type:'PURCHASE_ORDER', title:'Purchase Order', reference:x.po_number, amount:x.net_amount ?? x.total_amount, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x })),
+        ...grns.map((x: any) => ({ id:x.id, type:'GRN', title:'Goods Receipt', reference:x.grn_number, amount:x.total_amount, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x })),
+        ...wastage.map((x: any) => ({ id:x.id, type:'WASTAGE', title:'Wastage Entry', reference:x.entry_number, amount:x.total_cost, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x })),
+        ...leaves.map((x: any) => ({ id:x.id, type:'LEAVE', title:'Leave Request', reference:x.id.slice(0,8).toUpperCase(), amount:0, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x })),
       ];
       setItems(next.sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||''))));
     } finally { setLoading(false); }
@@ -140,6 +152,9 @@ export default function ApprovalCenterWorkspace() {
                 <div className="font-bold text-sm">{money(item.amount)}</div>
               </div>
               <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setViewItem(item)}>
+                  <Eye className="w-4 h-4"/> View
+                </Button>
                 <span title={approveTooltip}>
                   <Button size="sm" variant="primary" disabled={approveDisabled} onClick={()=>act(item,'APPROVE')}>
                     <CheckCircle2 className="w-4 h-4"/> Approve
@@ -156,5 +171,57 @@ export default function ApprovalCenterWorkspace() {
         </div>
       );
     })}</div>}
+
+    {viewItem && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+        <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="font-bold text-lg">Requirement Details</h3>
+            <button onClick={() => setViewItem(null)} className="text-gray-400 hover:text-gray-700">
+              <XCircle className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-4 overflow-y-auto flex-1">
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Request Number</div><div className="font-mono text-sm">{viewItem.reference}</div></div>
+              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Source/Destination</div><div className="text-sm font-semibold text-[#1C1C1C]">{viewItem.title}</div></div>
+              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Outlet</div><div className="text-sm">{viewItem.branch || '—'}</div></div>
+              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Status</div><div className="text-sm"><Badge variant="outlet">PENDING APPROVAL</Badge></div></div>
+              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Total Amount</div><div className="text-sm font-bold">{money(viewItem.amount)}</div></div>
+              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Notes</div><div className="text-sm">{viewItem.payload?.notes || '—'}</div></div>
+            </div>
+            
+            <div className="border border-gray-100 rounded-xl overflow-hidden">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-50 text-gray-500 border-b border-gray-100">
+                  <tr>
+                    <th className="px-3 py-2 font-bold">Item</th>
+                    <th className="px-3 py-2 text-right font-bold">Quantity</th>
+                    <th className="px-3 py-2 font-bold">Unit</th>
+                    <th className="px-3 py-2 font-bold">Vendor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(viewItem.payload?.items || []).map((it: any) => (
+                    <tr key={it.id || it.item_id}>
+                      <td className="px-3 py-2 font-medium">{it.item_name || it.item?.name || 'Item'}</td>
+                      <td className="px-3 py-2 text-right font-mono">{it.requested_qty || it.quantity || it.ordered_qty || it.received_qty || 0}</td>
+                      <td className="px-3 py-2">{it.unit_symbol || it.unit || '—'}</td>
+                      <td className="px-3 py-2 text-[#2F6B3B] font-medium">{it.supplier_name || viewItem.payload?.supplier_name || '—'}</td>
+                    </tr>
+                  ))}
+                  {(!viewItem.payload?.items || viewItem.payload.items.length === 0) && (
+                    <tr><td colSpan={4} className="px-3 py-4 text-center text-gray-500">No items available</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setViewItem(null)}>Close</Button>
+          </div>
+        </div>
+      </div>
+    )}
   </div>;
 }

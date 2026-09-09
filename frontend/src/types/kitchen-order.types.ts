@@ -33,6 +33,7 @@ export interface KitchenOrder {
   item_code?: string | null;
   item_type?: string | null;
   unit_symbol?: string | null;
+  supply_source?: string | null;
 
   order_number: string;
   requested_qty: number | string;

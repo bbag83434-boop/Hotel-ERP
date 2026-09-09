@@ -49,6 +49,7 @@ import AIDocumentProcessingWorkspace from '@/components/workspaces/AIDocumentPro
 import AIWastageSalesIntelligenceWorkspace from '@/components/workspaces/AIWastageSalesIntelligenceWorkspace';
 import WhatsAppBusinessWorkspace from '@/components/workspaces/WhatsAppBusinessWorkspace';
 import MainKitchenWorkspace from '@/components/workspaces/MainKitchenWorkspace';
+import CentralStoreRequirement from '@/components/workspaces/CentralStoreRequirement';
 import OutletSalesWorkspace from '@/components/workspaces/OutletSalesWorkspace';
 import FoodCostModule from '@/components/workspaces/FoodCostModule';
 
@@ -242,6 +243,12 @@ export const AppContent = () => {
             </div>
           )}
 
+          {activeWorkspace === 'centralStoreRequirement' && (
+            <div className="w-full min-w-0">
+              <CentralStoreRequirement />
+            </div>
+          )}
+
           {activeWorkspace === 'wastage' && (
             <div className="w-full min-w-0">
               <WastageWorkspace />
@@ -353,7 +360,8 @@ export const AppContent = () => {
           {!isManagement &&
             activeWorkspace !== 'purchase' &&
             activeWorkspace !== 'kitchenOrders' &&
-            activeWorkspace !== 'centralKitchenProduction' && (
+            activeWorkspace !== 'centralKitchenProduction' &&
+            activeWorkspace !== 'centralStoreRequirement' && (
               <div className="w-full min-w-0">
                 <div className="p-12 text-center rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
                   <ShieldCheck className="w-10 h-10 text-red-500 mx-auto mb-3 opacity-70" />

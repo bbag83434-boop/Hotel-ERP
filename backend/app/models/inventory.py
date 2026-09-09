@@ -106,6 +106,9 @@ class Item(BaseModel):
     reorder_qty = Column("reorderQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     supplier_id = Column("supplierId", String(36), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
     is_active = Column("isActive", Boolean, default=True, nullable=False)
+    # Item Master supply routing — the system auto-routes Outlet Requirements
+    # (and internal demands( to the correct internal supply source.
+    supply_source = Column("supplySource", String(30), nullable=False, default="CENTRAL_STORE", index=True)
 
     companyId = synonym("company_id")
     categoryId = synonym("category_id")

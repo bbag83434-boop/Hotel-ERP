@@ -80,6 +80,10 @@ class PurchaseRequest(BaseModel):
     status = Column(SQLEnum(PRStatus, name="PRStatus"), default=PRStatus.PENDING_APPROVAL, nullable=False, index=True)
     priority = Column(SQLEnum(PRPriority, name="PRPriority"), default=PRPriority.MEDIUM, nullable=False)
     notes = Column(String(500), nullable=True)
+    # Requisition classification: "PURCHASE" for the existing supplier-driven indent
+    # workflow and "MAIN_KITCHEN" for internal demands raised by an outlet against the
+    # Main Kitchen. Both live in the SAME table/entity (no duplicate requisition data).
+    requisition_type = Column("requisitionType", String(30), default="PURCHASE", nullable=False, index=True)
     approved_by_id = Column("approvedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column("approvedAt", DateTime, nullable=True)
     rejection_reason = Column("rejectionReason", String(500), nullable=True)
@@ -92,6 +96,7 @@ class PurchaseRequest(BaseModel):
     approvedById = synonym("approved_by_id")
     approvedAt = synonym("approved_at")
     rejectionReason = synonym("rejection_reason")
+    requisitionType = synonym("requisition_type")
 
     branch = relationship("Branch")
     requested_by = relationship("User", foreign_keys=[requested_by_id])
@@ -108,6 +113,10 @@ class PurchaseRequestItem(Base):
     requested_qty = Column("requestedQty", Numeric(14, 4), nullable=False)
     estimated_price = Column("estimatedPrice", Numeric(14, 4), default=0, nullable=False)
     notes = Column(String(255), nullable=True)
+    # Outlet Requirement snapshot: unit (symbol( and auto-determined supply source,
+    # resolved from the Item Master at requirement-creation time.
+    unit = Column("unit", String(20), nullable=True)
+    supply_source = Column("supplySource", String(30), nullable=True, index=True)
 
     requestId = synonym("request_id")
     itemId = synonym("item_id")

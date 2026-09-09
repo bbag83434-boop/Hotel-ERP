@@ -34,6 +34,16 @@ interface PurchaseWorkspaceProps {
 
 type PurchaseTab = 'needs' | 'receiving' | 'my_bills';
 
+const SUPPLY_SOURCE_LABELS: Record<string, string> = {
+  CENTRAL_STORE: 'Central Store',
+  DESSERT_KITCHEN: 'Dessert Kitchen',
+  RAW_MATERIAL_SUPPLY: 'Raw Material Supply',
+  DAILY_OUTLET_SUPPLY: 'Daily Outlet Supply',
+};
+
+const formatSupplySource = (src?: string): string =>
+  src ? SUPPLY_SOURCE_LABELS[src] || src.replace(/_/g, ' ') : '—';
+
 export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigateWorkspace, initialTab }) => {
   const { activeOutlet, isHeadOffice } = useOutlet();
 
@@ -82,7 +92,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
   );
   const [newPRNotes, setNewPRNotes] = useState<string>('');
   const [newPRLines, setNewPRLines] = useState<
-    Array<{ item_id: string; requested_qty: number; estimated_price: number; supplier_id?: string; supplier_name?: string; notes?: string }>
+    Array<{ item_id: string; requested_qty: number; estimated_price: number; unit?: string; supply_source?: string; supplier_id?: string; supplier_name?: string; notes?: string }>
   >([{ item_id: '', requested_qty: 10, estimated_price: 0 }]);
 
   // New GRN / Receiving Form State
@@ -178,6 +188,8 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
     updated[index] = {
       ...updated[index],
       item_id: itemId,
+      unit: itemObj?.unit?.symbol || itemObj?.unit_symbol || '',
+      supply_source: itemObj?.supply_source || 'CENTRAL_STORE',
       supplier_id: mapping?.supplier_id || itemObj?.supplier_id || undefined,
       supplier_name: mapping?.supplier_name || matchedSupplier?.name || undefined,
       estimated_price: price,
@@ -613,6 +625,15 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                           {req.items?.length > 3 ? '...' : ''}
                         </span>
                       </div>
+{req.items?.length > 0 && (
+                        <p className="text-[11px] text-[#8A641D] font-semibold">
+                          {req.items
+                            .slice(0, 3)
+                            .map((it: any) => `${it.item_name} → Source: ${formatSupplySource(it.supply_source)}`)
+                            .join('  ·  ')}
+                          {req.items?.length > 3 ? '...' : ''}
+                        </p>
+                      )}
 
                       {req.notes && (
                         <p className="text-[11px] text-[#8A641D] bg-[#FAF8F5] px-2 py-0.5 rounded inline-block">
@@ -983,6 +1004,12 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                         <Check className="w-3 h-3" /> Auto-mapped Supplier: {line.supplier_name}
                       </p>
                     )}
+                    {line.supply_source && (
+                      <p className="text-[10px] text-[#B8862D] font-semibold flex items-center gap-1">
+                        <PackageCheck className="w-3 h-3" />
+                        Auto-routed Source: {formatSupplySource(line.supply_source)}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1349,9 +1376,13 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                         {it.supplier_name && (
                           <span className="block text-[10px] text-gray-500">Supplier: {it.supplier_name}</span>
                         )}
+                        <span className="block text-[10px] text-gray-500">
+                          Source: <span className="font-semibold text-[#B8862D]">{formatSupplySource(it.supply_source)}</span>
+                          {it.unit || it.unit_symbol ? ` · ${it.unit || it.unit_symbol}` : ''}
+                        </span>
                       </div>
                       <span className="font-mono font-bold text-xs">
-                        {it.requested_qty} {it.unit_symbol || 'Units'}
+                        {it.requested_qty} {it.unit || it.unit_symbol || 'Units'}
                       </span>
                     </div>
                   ))}

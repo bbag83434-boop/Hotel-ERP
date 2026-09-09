@@ -213,6 +213,21 @@ def normalize_branch_type(b_type: Optional[str]) -> str:
     if not b_type:
         return "RESTAURANT"
     b_upper = b_type.strip().upper()
+    # PART 3 — Central Store is an independent stock location; its branch type
+    # must be preserved verbatim or Central Store Requirements can never be
+    # raised (they require a CENTRAL_STORE location). Preserve every known
+    # BranchType value instead of collapsing to RESTAURANT.
+    valid_types = {
+        "HEAD_OFFICE",
+        "CENTRAL_STORE",
+        "DESSERT_KITCHEN",
+        "RESTAURANT",
+        "RESTAURANT_OUTLET",
+        "HOTEL",
+        "HYBRID",
+    }
+    if b_upper in valid_types:
+        return b_upper
     if b_upper in ["HOTEL"]:
         return "HOTEL"
     elif b_upper in ["HYBRID", "HEAD_OFFICE"]:

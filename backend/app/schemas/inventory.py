@@ -108,6 +108,9 @@ class ItemBase(BaseModel):
     min_stock_level: Optional[Decimal] = Decimal("0.0000")
     reorder_qty: Optional[Decimal] = Decimal("0.0000")
     is_active: Optional[bool] = True
+    # Item Master supply routing — used to auto-route Outlet Requirements
+    # (internal-source demands( to the correct supply area.
+    supply_source: str = "CENTRAL_STORE"
 
 class ItemCreate(ItemBase):
     pass
@@ -125,6 +128,7 @@ class ItemUpdate(BaseModel):
     min_stock_level: Optional[Decimal] = None
     reorder_qty: Optional[Decimal] = None
     is_active: Optional[bool] = None
+    supply_source: Optional[str] = None
 
 class ItemResponse(BaseModel):
     id: str
@@ -141,6 +145,7 @@ class ItemResponse(BaseModel):
     min_stock_level: Decimal
     reorder_qty: Decimal
     is_active: bool
+    supply_source: str = "CENTRAL_STORE"
     category_name: Optional[str] = None
     unit_symbol: Optional[str] = None
     unit_name: Optional[str] = None

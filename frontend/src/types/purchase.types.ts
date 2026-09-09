@@ -130,6 +130,8 @@ export interface PurchaseRequest {
   requiredDate: string;
   status: PRStatus;
   priority: PRPriority;
+  // "PURCHASE" (supplier indent) or "MAIN_KITCHEN" (internal Main Kitchen demand)
+  requisition_type?: string;
   notes?: string;
   rejectionReason?: string;
   createdAt: string;
@@ -441,5 +443,33 @@ export interface PurchaseOrderCreate {
   discount_amount?: number;
   notes?: string;
   items: PurchaseOrderItemCreate[];
+}
+
+// =============================================================
+// PART 3 — Central Store Own Requirement
+// =============================================================
+
+/**
+ * Item + AUTO-RESOLVED vendor from the existing Item/Vendor Master.
+ * The Central Store user never picks a vendor — the system always resolves it.
+ */
+export interface CentralStoreVendorCatalogItem {
+  item_id: string;
+  item_name: string;
+  item_code: string;
+  unit_symbol?: string;
+  supplier_id?: string;
+  supplier_name?: string;
+  vendor_source: 'PREFERRED_VENDOR_MASTER' | 'ITEM_MASTER_DEFAULT' | 'NOT_CONFIGURED';
+  vendor_configured: boolean;
+}
+
+/** Create payload — there is intentionally NO supplier_id anywhere in this type. */
+export interface CentralStoreRequirementCreate {
+  branch_id: string;
+  required_date?: string;
+  priority?: string;
+  notes?: string;
+  items: Array<{ item_id: string; requested_qty: number; notes?: string }>;
 }
 
