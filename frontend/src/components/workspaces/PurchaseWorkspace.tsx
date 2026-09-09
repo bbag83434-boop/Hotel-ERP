@@ -685,7 +685,10 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                         </span>
                       </div>
                       <p className="text-xs font-semibold text-[#1C1C1C] mt-1">
-                        Supplier: {po.supplier_name || 'Mapped Vendor'}
+                        Vendor: {po.supplier_name || po.supplier?.name || 'Mapped Vendor'}
+                      </p>
+                      <p className="text-[11px] font-semibold text-green-700 mt-0.5">
+                        Phone/WhatsApp: {po.supplier?.whatsapp_number || po.supplier?.phone || 'N/A'}
                       </p>
                       <p className="text-[11px] text-[#707070] mt-0.5">
                         Items: {po.items?.map((it: any) => `${it.item_name} (${it.ordered_qty})`).join(', ')}
@@ -696,6 +699,24 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                       <span className="text-xs font-bold text-[#1C1C1C]">
                         ₹{Number(po.net_amount || po.total_amount || 0).toFixed(2)}
                       </span>
+                      <div className="flex items-center gap-2">
+                        {(!po.status || po.status === 'APPROVED' || po.status === 'WHATSAPP_OPENED') && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await procurementApi.getWhatsAppLink(po.id);
+                                if (res?.whatsapp_url) {
+                                  window.open(res.whatsapp_url, '_blank');
+                                }
+                              } catch (e: any) {
+                                alert(e?.response?.data?.detail || e?.response?.data?.message || 'Error opening WhatsApp.');
+                              }
+                            }}
+                            className="px-3 py-1.5 rounded-xl border border-green-200 text-green-700 bg-green-50 text-xs font-bold hover:bg-green-100 shadow-xs flex items-center gap-1"
+                          >
+                            [ SEND WHATSAPP ]
+                          </button>
+                        )}
                       <button
                         onClick={() => {
                           setNewGRNPOId(po.id);
@@ -707,6 +728,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                       >
                         <PackageCheck className="w-3.5 h-3.5" /> Receive Delivery
                       </button>
+                      </div>
                     </div>
                   </div>
                 ))}

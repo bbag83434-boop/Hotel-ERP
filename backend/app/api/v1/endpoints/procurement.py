@@ -119,7 +119,7 @@ def validate_whatsapp_number(raw_number: Optional[str], supplier_name: str) -> s
     Returns sanitized numeric string for wa.me URL (E.164 without leading +).
     """
     if not raw_number or not str(raw_number).strip():
-        raise BadRequestException(f"Missing WhatsApp number: Supplier '{supplier_name}' does not have a registered WhatsApp number.")
+        raise BadRequestException("Vendor WhatsApp number is not available. Please update Vendor Master.")
 
     clean_str = str(raw_number).strip()
     
@@ -270,50 +270,46 @@ def format_whatsapp_message(
     allocations_by_outlet: Dict[str, Any]
 ) -> str:
     lines = []
-    lines.append(f"Vendor {supplier_name} (ID: {supplier_id})")
+    lines.append(f"Hello {supplier_name},")
+    lines.append("")
+    lines.append(f"Purchase Order: {po_number}")
+    lines.append("")
+    lines.append("Please supply the following:")
     lines.append("")
 
-    for item in items_summary:
-        lines.append(f"{item['item_name']} (ID: {item.get('item_id', 'N/A')})")
-        
+    for idx, item in enumerate(items_summary, 1):
         qty_formatted = f"{item['total_qty']:g}" if isinstance(item['total_qty'], (int, float, Decimal)) else str(item['total_qty'])
         unit_str = f" {item.get('unit_symbol', '')}".rstrip()
         
-        lines.append("Total Purchase Qty:")
-        lines.append(f"{qty_formatted}{unit_str}".strip())
+        lines.append(f"{idx}. {item['item_name']} — {qty_formatted}{unit_str}".strip())
         lines.append("")
         
-        lines.append("Breakdown:")
-        lines.append("")
-        
-        # Group allocations by destination ID and request ID
+        # Group allocations by destination ID
         destinations = {}
         for alloc in item.get("allocations", []):
             bid = alloc.get("branch_id", "UNKNOWN_BRANCH")
-            rid = alloc.get("request_id", "UNKNOWN_REQ")
-            rnum = alloc.get("request_number", rid)
             bname = alloc.get("branch_name", bid)
             
-            key = f"{bid}_{rid}"
+            key = bid
             q = float(alloc.get("quantity", alloc.get("qty", 0)))
             
             if key not in destinations:
                 destinations[key] = {
-                    "name": bname.upper() if "central store" in bname.lower() else bname,
-                    "branch_id": bid,
-                    "request_id": rid,
-                    "request_number": rnum,
+                    "name": "Central Store" if "central store" in bname.lower() else bname,
                     "qty": 0.0
                 }
             destinations[key]["qty"] += q
             
-        for key, d in destinations.items():
-            dq = f"{d['qty']:g}" if isinstance(d['qty'], (int, float)) else str(d['qty'])
-            lines.append(f"{d['name']} (ID: {d['branch_id']}) -> {dq}{unit_str} (Request: {d['request_number']} | ID: {d['request_id']})".strip())
-            
-        lines.append("")
+        if destinations:
+            lines.append("Destination-wise:")
+            for key, d in destinations.items():
+                dq = f"{d['qty']:g}" if isinstance(d['qty'], (int, float)) else str(d['qty'])
+                lines.append(f"• {d['name']} → {dq}{unit_str}".strip())
+            lines.append("")
 
-    lines.append(f"Order Ref: {po_number} (ID: {po_id})")
+    lines.append("Please supply the quantities to the respective destinations.")
+    lines.append("")
+    lines.append("Thank you.")
     return "\n".join(lines).strip()
 
 
