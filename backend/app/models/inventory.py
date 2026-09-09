@@ -129,6 +129,30 @@ class Item(BaseModel):
         Index("idx_item_company_code", "companyId", "code", unique=True),
     )
 
+class ItemRate(BaseModel):
+    __tablename__ = "item_rates"
+
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = Column("itemId", String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    supplier_id = Column("supplierId", String(36), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
+    rate = Column(Numeric(14, 4), nullable=False)
+    unit_id = Column("unitId", String(36), ForeignKey("units.id"), nullable=True)
+    effective_from = Column("effectiveFrom", DateTime, nullable=False, default=datetime.utcnow)
+    effective_to = Column("effectiveTo", DateTime, nullable=True)
+    is_active = Column("isActive", Boolean, default=True, nullable=False)
+
+    companyId = synonym("company_id")
+    itemId = synonym("item_id")
+    supplierId = synonym("supplier_id")
+    unitId = synonym("unit_id")
+    effectiveFrom = synonym("effective_from")
+    effectiveTo = synonym("effective_to")
+    isActive = synonym("is_active")
+
+    item = relationship("Item", foreign_keys=[item_id])
+    supplier = relationship("Supplier", foreign_keys=[supplier_id])
+    unit = relationship("Unit", foreign_keys=[unit_id])
+
 class StockBalance(Base):
     __tablename__ = "stock_balances"
 

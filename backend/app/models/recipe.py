@@ -29,6 +29,8 @@ class Recipe(BaseModel):
     preparation_minutes = Column("preparationMinutes", Integer, default=15, nullable=False)
     instructions = Column(Text, nullable=True)
     is_active = Column("isActive", Boolean, default=True, nullable=False)
+    total_recipe_cost = Column("totalRecipeCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
 
     companyId = synonym("company_id")
     finishedItemId = synonym("finished_item_id")
@@ -38,6 +40,8 @@ class Recipe(BaseModel):
     yieldQty = synonym("yield_qty")
     preparationMinutes = synonym("preparation_minutes")
     isActive = synonym("is_active")
+    totalRecipeCost = synonym("total_recipe_cost")
+    unitCost = synonym("unit_cost")
 
     finished_item = relationship("Item", foreign_keys=[finished_item_id])
     ingredients = relationship("RecipeItem", back_populates="recipe", cascade="all, delete-orphan")
@@ -58,6 +62,7 @@ class RecipeItem(Base):
     gross_quantity = Column("grossQuantity", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     usable_yield = Column("usableYield", Numeric(5, 2), default=Decimal("100.00"), nullable=False)
     waste_percentage = Column("wastePercentage", Numeric(5, 2), default=Decimal("0.00"), nullable=False)
+    unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     cost_contribution = Column("costContribution", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     notes = Column(String(255), nullable=True)
 
@@ -67,6 +72,7 @@ class RecipeItem(Base):
     grossQuantity = synonym("gross_quantity")
     usableYield = synonym("usable_yield")
     wastePercentage = synonym("waste_percentage")
+    unitCost = synonym("unit_cost")
     costContribution = synonym("cost_contribution")
 
     recipe = relationship("Recipe", back_populates="ingredients")

@@ -692,6 +692,20 @@ def create_vendor_item(
         is_active=payload.is_active,
     )
     db.add(new_mapping)
+    db.flush()
+
+    from app.models.inventory import ItemRate
+    initial_rate = ItemRate(
+        id=str(uuid.uuid4()),
+        company_id=new_mapping.company_id,
+        item_id=new_mapping.item_id,
+        supplier_id=new_mapping.supplier_id,
+        rate=new_mapping.purchase_price,
+        unit_id=new_mapping.purchase_unit_id,
+        effective_from=datetime.utcnow(),
+    )
+    db.add(initial_rate)
+
     db.commit()
     db.refresh(new_mapping)
 
@@ -758,6 +772,31 @@ def update_vendor_item(
     update_dict = payload.dict(exclude_unset=True)
     for k, v in update_dict.items():
         setattr(mapping, k, v)
+
+    db.flush()
+    if payload.purchase_price is not None and old_values["purchase_price"] != str(payload.purchase_price):
+        now = datetime.utcnow()
+        from app.models.inventory import ItemRate
+        old_rate_record = db.query(ItemRate).filter(
+            ItemRate.item_id == mapping.item_id,
+            ItemRate.supplier_id == mapping.supplier_id,
+            ItemRate.is_active == True
+        ).order_by(ItemRate.effective_from.desc()).first()
+        
+        if old_rate_record:
+            old_rate_record.effective_to = now
+            old_rate_record.is_active = False
+            
+        new_rate_record = ItemRate(
+            id=str(uuid.uuid4()),
+            company_id=mapping.company_id,
+            item_id=mapping.item_id,
+            supplier_id=mapping.supplier_id,
+            rate=payload.purchase_price,
+            unit_id=mapping.purchase_unit_id,
+            effective_from=now,
+        )
+        db.add(new_rate_record)
 
     db.commit()
     db.refresh(mapping)

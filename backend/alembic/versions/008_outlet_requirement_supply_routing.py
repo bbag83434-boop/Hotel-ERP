@@ -30,4 +30,4 @@ def downgrade() -> None:
     op.drop_column("purchase_request_items", "supplySource")
     op.drop_column("purchase_request_items", "unit")
     op.drop_index("ix_items_supplySource", table_name="items")
-    op.drop_column("items", "supplySource"
+    op.drop_column("items", "supplySource")

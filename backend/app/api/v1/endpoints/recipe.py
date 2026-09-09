@@ -113,7 +113,46 @@ def _calculate_recipe_costs(recipe: Recipe, db: Session) -> tuple[Decimal, Decim
 def _format_recipe_response(recipe: Recipe, db: Session) -> RecipeResponse:
     finished_item = db.query(Item).filter(Item.id == recipe.finished_item_id).first()
     finished_unit = db.query(Unit).filter(Unit.id == finished_item.unit_id).first() if finished_item and finished_item.unit_id else None
-    tot_cost, u_cost, ingredients_res = _calculate_recipe_costs(recipe, db)
+
+    ingredients_res = []
+    for ing in recipe.ingredients:
+        raw_item = db.query(Item).filter(Item.id == ing.raw_item_id).first()
+        raw_unit = db.query(Unit).filter(Unit.id == ing.unit_id).first() if ing.unit_id else (
+            db.query(Unit).filter(Unit.id == raw_item.unit_id).first() if raw_item and raw_item.unit_id else None
+        )
+        sub_recipe = None
+        is_sub = False
+        if raw_item and raw_item.type == ItemType.SEMI_FINISHED:
+            sub_rec = db.query(Recipe).filter(
+                Recipe.finished_item_id == raw_item.id,
+                Recipe.company_id == recipe.company_id,
+                Recipe.is_active == True,
+            ).first()
+            if sub_rec and sub_rec.id != recipe.id:
+                sub_recipe = sub_rec
+                is_sub = True
+
+        ingredients_res.append(
+            RecipeItemResponse(
+                id=ing.id,
+                recipe_id=recipe.id,
+                raw_item_id=ing.raw_item_id,
+                unit_id=ing.unit_id or (raw_item.unit_id if raw_item else None),
+                quantity=Decimal(str(ing.quantity or 1.0)),
+                gross_quantity=Decimal(str(getattr(ing, "gross_quantity", None) or 0.0)),
+                usable_yield=Decimal(str(getattr(ing, "usable_yield", 100.0) or 100.0)),
+                waste_percentage=Decimal(str(getattr(ing, "waste_percentage", 0.0) or 0.0)),
+                cost_contribution=Decimal(str(getattr(ing, "cost_contribution", 0.0))),
+                notes=ing.notes,
+                item_name=raw_item.name if raw_item else None,
+                item_code=raw_item.code if raw_item else None,
+                item_type=raw_item.type.value if raw_item and hasattr(raw_item.type, "value") else str(raw_item.type if raw_item else ""),
+                unit_symbol=raw_unit.symbol if raw_unit else None,
+                unit_cost=Decimal(str(getattr(ing, "unit_cost", 0.0))),
+                is_sub_recipe=is_sub,
+                sub_recipe_id=sub_recipe.id if sub_recipe else None,
+            )
+        )
 
     return RecipeResponse(
         id=recipe.id,
@@ -133,8 +172,8 @@ def _format_recipe_response(recipe: Recipe, db: Session) -> RecipeResponse:
         preparation_minutes=recipe.preparation_minutes,
         instructions=recipe.instructions,
         is_active=recipe.is_active,
-        total_recipe_cost=tot_cost,
-        unit_cost=u_cost,
+        total_recipe_cost=Decimal(str(getattr(recipe, "total_recipe_cost", 0.0))),
+        unit_cost=Decimal(str(getattr(recipe, "unit_cost", 0.0))),
         ingredients=ingredients_res,
         created_at=recipe.created_at,
         updated_at=recipe.updated_at,
@@ -245,6 +284,7 @@ def create_recipe(
             gross_quantity=gross_qty,
             usable_yield=usable_yield,
             waste_percentage=waste_pct,
+            unit_cost=Decimal(str(raw.cost_price or 0)),
             cost_contribution=cost_contrib,
             notes=ing.notes.strip() if ing.notes else None,
         )
@@ -252,6 +292,14 @@ def create_recipe(
 
     db.commit()
     db.refresh(new_recipe)
+    
+    # Calculate and store snapshot cost
+    tot_cost, u_cost, _ = _calculate_recipe_costs(new_recipe, db)
+    new_recipe.total_recipe_cost = tot_cost
+    new_recipe.unit_cost = u_cost
+    db.commit()
+    db.refresh(new_recipe)
+
     return _format_recipe_response(new_recipe, db)
 
 
@@ -298,52 +346,83 @@ def update_recipe(
             )
         recipe.code = recipe_in.code.strip().upper()
 
-    if recipe_in.name is not None:
-        recipe.name = recipe_in.name.strip()
-    if recipe_in.description is not None:
-        recipe.description = recipe_in.description.strip() if recipe_in.description else None
-    if recipe_in.yield_qty is not None:
-        recipe.yield_qty = Decimal(str(recipe_in.yield_qty))
-    if recipe_in.preparation_minutes is not None:
-        recipe.preparation_minutes = recipe_in.preparation_minutes
-    if recipe_in.instructions is not None:
-        recipe.instructions = recipe_in.instructions.strip() if recipe_in.instructions else None
-    if recipe_in.is_active is not None:
-        recipe.is_active = recipe_in.is_active
+    # Versioning logic: When a recipe is updated, we create a new version and deprecate the old one.
+    now = datetime.utcnow()
+    
+    # 1. Deprecate old version
+    recipe.is_current = False
+    recipe.effective_to = now
+    recipe.is_active = False # Deactivate old version so it doesn't show in active lists
+    
+    # 2. Create new version
+    new_version = recipe.version + 1 if hasattr(recipe, "version") and recipe.version else 2
+    
+    new_recipe = Recipe(
+        company_id=recipe.company_id,
+        finished_item_id=recipe.finished_item_id,
+        name=recipe_in.name.strip() if recipe_in.name is not None else recipe.name,
+        code=recipe_in.code.strip().upper() if recipe_in.code else recipe.code,
+        version=new_version,
+        effective_date=now,
+        is_current=True,
+        description=recipe_in.description.strip() if recipe_in.description is not None else recipe.description,
+        yield_qty=Decimal(str(recipe_in.yield_qty)) if recipe_in.yield_qty is not None else recipe.yield_qty,
+        preparation_minutes=recipe_in.preparation_minutes if recipe_in.preparation_minutes is not None else recipe.preparation_minutes,
+        instructions=recipe_in.instructions.strip() if recipe_in.instructions is not None else recipe.instructions,
+        is_active=recipe_in.is_active if recipe_in.is_active is not None else True,
+    )
+    
+    db.add(new_recipe)
+    db.flush()
 
-    if recipe_in.ingredients is not None:
-        # Remove old ingredients and add new
-        db.query(RecipeItem).filter(RecipeItem.recipe_id == recipe.id).delete()
-        for ing in recipe_in.ingredients:
-            raw = db.query(Item).filter(
-                Item.id == ing.raw_item_id,
-                Item.company_id == current_user.company_id,
-            ).first()
-            if not raw:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingredient '{ing.raw_item_id}' not found")
-            net_qty = Decimal(str(ing.quantity))
-            waste_pct = Decimal(str(ing.waste_percentage or 0))
-            usable_yield = Decimal(str(ing.usable_yield or 100))
-            gross_qty = Decimal(str(ing.gross_quantity)) if ing.gross_quantity is not None else (
-                net_qty / (Decimal("1") - waste_pct / Decimal("100")) if waste_pct < Decimal("100") else net_qty
-            )
-            cost_contrib = gross_qty * Decimal(str(raw.cost_price or 0))
-            rec_item = RecipeItem(
-                recipe_id=recipe.id,
-                raw_item_id=ing.raw_item_id,
-                unit_id=ing.unit_id or raw.unit_id,
-                quantity=net_qty,
-                gross_quantity=gross_qty,
-                usable_yield=usable_yield,
-                waste_percentage=waste_pct,
-                cost_contribution=cost_contrib,
-                notes=ing.notes.strip() if ing.notes else None,
-            )
-            db.add(rec_item)
+    # Determine ingredients to use (new if provided, else copy old)
+    ingredients_to_process = recipe_in.ingredients if recipe_in.ingredients is not None else recipe.ingredients
+    
+    for ing in ingredients_to_process:
+        raw = db.query(Item).filter(
+            Item.id == ing.raw_item_id,
+            Item.company_id == current_user.company_id,
+        ).first()
+        if not raw:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ingredient '{ing.raw_item_id}' not found")
+        
+        net_qty = Decimal(str(ing.quantity))
+        waste_pct = Decimal(str(ing.waste_percentage or 0))
+        usable_yield = Decimal(str(getattr(ing, "usable_yield", 100) or 100))
+        gross_qty_val = getattr(ing, "gross_quantity", None)
+        gross_qty = Decimal(str(gross_qty_val)) if gross_qty_val is not None else (
+            net_qty / (Decimal("1") - waste_pct / Decimal("100")) if waste_pct < Decimal("100") else net_qty
+        )
+        
+        # When recalculating/updating, we use the LATEST raw item cost
+        unit_cost = Decimal(str(raw.cost_price or 0))
+        cost_contrib = gross_qty * unit_cost
+        
+        rec_item = RecipeItem(
+            recipe_id=new_recipe.id,
+            raw_item_id=ing.raw_item_id,
+            unit_id=ing.unit_id or raw.unit_id,
+            quantity=net_qty,
+            gross_quantity=gross_qty,
+            usable_yield=usable_yield,
+            waste_percentage=waste_pct,
+            unit_cost=unit_cost,
+            cost_contribution=cost_contrib,
+            notes=getattr(ing, "notes", "").strip() if getattr(ing, "notes", "") else None,
+        )
+        db.add(rec_item)
 
     db.commit()
-    db.refresh(recipe)
-    return _format_recipe_response(recipe, db)
+    db.refresh(new_recipe)
+    
+    # Calculate and store snapshot cost for new version
+    tot_cost, u_cost, _ = _calculate_recipe_costs(new_recipe, db)
+    new_recipe.total_recipe_cost = tot_cost
+    new_recipe.unit_cost = u_cost
+    db.commit()
+    db.refresh(new_recipe)
+
+    return _format_recipe_response(new_recipe, db)
 
 
 @router.delete("/{recipe_id}", status_code=status.HTTP_200_OK)
@@ -363,6 +442,25 @@ def delete_recipe(
     db.commit()
     return {"success": True, "message": f"Recipe '{recipe.name}' ({recipe.code}) deactivated successfully"}
 
+@router.get("/{recipe_id}/history", response_model=List[RecipeResponse])
+def get_recipe_history(
+    recipe_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    recipe = db.query(Recipe).filter(
+        Recipe.id == recipe_id,
+        Recipe.company_id == current_user.company_id,
+    ).first()
+    if not recipe:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+
+    history = db.query(Recipe).filter(
+        Recipe.code == recipe.code,
+        Recipe.company_id == current_user.company_id,
+    ).order_by(Recipe.version.desc()).all()
+    
+    return [_format_recipe_response(r, db) for r in history]
 
 # =============================================================
 # 2. Recipe Versioning / Cloning Endpoint
@@ -414,11 +512,21 @@ def clone_recipe(
             raw_item_id=ing.raw_item_id,
             unit_id=ing.unit_id,
             quantity=ing.quantity,
+            gross_quantity=ing.gross_quantity,
+            usable_yield=ing.usable_yield,
+            waste_percentage=ing.waste_percentage,
+            unit_cost=ing.unit_cost,
             cost_contribution=ing.cost_contribution,
             notes=ing.notes,
         )
         db.add(cloned_item)
 
+    db.commit()
+    db.refresh(new_recipe)
+    
+    # Calculate and store snapshot cost for cloned version
+    new_recipe.total_recipe_cost = recipe.total_recipe_cost
+    new_recipe.unit_cost = recipe.unit_cost
     db.commit()
     db.refresh(new_recipe)
     return _format_recipe_response(new_recipe, db)

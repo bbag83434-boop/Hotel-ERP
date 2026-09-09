@@ -716,6 +716,21 @@ def create_item(
         supplier_id=item_in.supplier_id,
     )
     db.add(item)
+    db.flush() # flush to get item.id
+
+    # Store rate history
+    from app.models.inventory import ItemRate
+    initial_rate = ItemRate(
+        id=str(uuid.uuid4()),
+        company_id=item.company_id,
+        item_id=item.id,
+        supplier_id=None,
+        rate=item.cost_price,
+        unit_id=item.unit_id,
+        effective_from=datetime.utcnow(),
+    )
+    db.add(initial_rate)
+
     db.commit()
     db.refresh(item)
 
@@ -796,6 +811,8 @@ def update_item(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
+    old_cost_price = Decimal(str(item.cost_price or 0))
+
     if item_in.name is not None:
         item.name = item_in.name
     if item_in.code is not None:
@@ -827,6 +844,35 @@ def update_item(
     elif hasattr(item_in, "supplier_id") and item_in.supplier_id is None and "supplier_id" in item_in.model_dump(exclude_unset=True):
         item.supplier_id = None
         
+    db.flush()
+
+    # Track rate changes
+    from app.models.inventory import ItemRate
+    if item_in.cost_price is not None and old_cost_price != Decimal(str(item_in.cost_price)):
+        now = datetime.utcnow()
+        # Deprecate old rate
+        old_rate_record = db.query(ItemRate).filter(
+            ItemRate.item_id == item.id,
+            ItemRate.supplier_id == None, # Global rate
+            ItemRate.is_active == True
+        ).order_by(ItemRate.effective_from.desc()).first()
+        
+        if old_rate_record:
+            old_rate_record.effective_to = now
+            old_rate_record.is_active = False
+            
+        # Insert new rate
+        new_rate_record = ItemRate(
+            id=str(uuid.uuid4()),
+            company_id=item.company_id,
+            item_id=item.id,
+            supplier_id=None,
+            rate=item_in.cost_price,
+            unit_id=item.unit_id,
+            effective_from=now,
+        )
+        db.add(new_rate_record)
+
     db.commit()
     db.refresh(item)
 
@@ -855,6 +901,40 @@ def update_item(
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
+
+@router.get("/items/{item_id}/rate-history")
+def get_item_rate_history(
+    item_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    item = db.query(Item).filter(
+        Item.id == item_id,
+        Item.company_id == current_user.company_id,
+    ).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+        
+    from app.models.inventory import ItemRate
+    history = db.query(ItemRate).filter(
+        ItemRate.item_id == item_id,
+        ItemRate.company_id == current_user.company_id,
+    ).order_by(ItemRate.effective_from.desc()).all()
+    
+    return [
+        {
+            "id": h.id,
+            "item_id": h.item_id,
+            "supplier_id": h.supplier_id,
+            "rate": Decimal(str(h.rate)),
+            "unit_id": h.unit_id,
+            "effective_from": h.effective_from,
+            "effective_to": h.effective_to,
+            "is_active": h.is_active,
+        }
+        for h in history
+    ]
+
 
 @router.delete("/items/{item_id}")
 def delete_item(
