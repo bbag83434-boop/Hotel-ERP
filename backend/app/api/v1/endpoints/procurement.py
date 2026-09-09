@@ -269,47 +269,115 @@ def format_whatsapp_message(
     items_summary: List[Dict[str, Any]],
     allocations_by_outlet: Dict[str, Any]
 ) -> str:
+    # Determine all unique destinations and if Central Store is present
+    destinations_set = set()
+    has_cs = False
+    
+    for item in items_summary:
+        for alloc in item.get("allocations", []):
+            bname = alloc.get("branch_name", "UNKNOWN").strip()
+            if "central store" in bname.lower():
+                has_cs = True
+            destinations_set.add(bname)
+
     lines = []
     lines.append(f"Hello {supplier_name},")
     lines.append("")
-    lines.append(f"Purchase Order: {po_number}")
-    lines.append("")
-    lines.append("Please supply the following:")
-    lines.append("")
-
-    for idx, item in enumerate(items_summary, 1):
-        qty_formatted = f"{item['total_qty']:g}" if isinstance(item['total_qty'], (int, float, Decimal)) else str(item['total_qty'])
-        unit_str = f" {item.get('unit_symbol', '')}".rstrip()
-        
-        lines.append(f"{idx}. {item['item_name']} — {qty_formatted}{unit_str}".strip())
+    if po_number:
+        lines.append(f"Purchase Order: {po_number}")
         lines.append("")
-        
-        # Group allocations by destination ID
-        destinations = {}
-        for alloc in item.get("allocations", []):
-            bid = alloc.get("branch_id", "UNKNOWN_BRANCH")
-            bname = alloc.get("branch_name", bid)
-            
-            key = bid
-            q = float(alloc.get("quantity", alloc.get("qty", 0)))
-            
-            if key not in destinations:
-                destinations[key] = {
-                    "name": "Central Store" if "central store" in bname.lower() else bname,
-                    "qty": 0.0
-                }
-            destinations[key]["qty"] += q
-            
-        if destinations:
-            lines.append("Destination-wise:")
-            for key, d in destinations.items():
-                dq = f"{d['qty']:g}" if isinstance(d['qty'], (int, float)) else str(d['qty'])
-                lines.append(f"• {d['name']} → {dq}{unit_str}".strip())
-            lines.append("")
 
-    lines.append("Please supply the quantities to the respective destinations.")
+    if len(destinations_set) == 1:
+        dest_name = list(destinations_set)[0]
+        if has_cs:
+            lines.append("Please supply the following items to:")
+            lines.append("")
+            lines.append("Central Store")
+            lines.append("")
+            for idx, item in enumerate(items_summary, 1):
+                qty = item.get('total_qty', 0)
+                unit = item.get('unit_symbol', '').strip()
+                qty_fmt = f"{qty:g}" if isinstance(qty, (int, float, Decimal)) else str(qty)
+                lines.append(f"{idx}. {item['item_name']} — {qty_fmt} {unit}".strip())
+            lines.append("")
+            lines.append("Please deliver the above quantities to Central Store.")
+        else:
+            lines.append("Please supply the following items for:")
+            lines.append("")
+            lines.append(f"Outlet: {dest_name}")
+            lines.append("")
+            for idx, item in enumerate(items_summary, 1):
+                qty = item.get('total_qty', 0)
+                unit = item.get('unit_symbol', '').strip()
+                qty_fmt = f"{qty:g}" if isinstance(qty, (int, float, Decimal)) else str(qty)
+                lines.append(f"{idx}. {item['item_name']} — {qty_fmt} {unit}".strip())
+            lines.append("")
+            lines.append(f"Please deliver the above quantities to {dest_name}.")
+
+    elif has_cs and len(destinations_set) > 1:
+        # MIXED: CS + Outlets
+        for item in items_summary:
+            for alloc in item.get("allocations", []):
+                bname = alloc.get("branch_name", "UNKNOWN").strip()
+                if "central store" in bname.lower():
+                    bname = "CENTRAL STORE"
+                else:
+                    bname = bname.upper()
+                
+                # We group by destination
+                pass
+                
+        # Actually group by destination
+        dest_map = {}
+        for item in items_summary:
+            for alloc in item.get("allocations", []):
+                bname = alloc.get("branch_name", "UNKNOWN").strip()
+                if "central store" in bname.lower():
+                    bname = "CENTRAL STORE"
+                else:
+                    bname = bname.upper()
+                
+                if bname not in dest_map:
+                    dest_map[bname] = []
+                q = float(alloc.get("quantity", alloc.get("qty", 0)))
+                q_fmt = f"{q:g}" if isinstance(q, (int, float)) else str(q)
+                unit = item.get('unit_symbol', '').strip()
+                dest_map[bname].append(f"{item['item_name']} → {q_fmt} {unit}".strip())
+                
+        for bname, items_list in dest_map.items():
+            lines.append(bname)
+            for it in items_list:
+                lines.append(it)
+            lines.append("")
+            
+        lines.append("Please deliver each quantity to the respective destination.")
+        
+    else:
+        # MULTIPLE OUTLETS, NO CS
+        lines.append("Please supply:")
+        lines.append("")
+        for item in items_summary:
+            qty = item.get('total_qty', 0)
+            unit = item.get('unit_symbol', '').strip()
+            qty_fmt = f"{qty:g}" if isinstance(qty, (int, float, Decimal)) else str(qty)
+            
+            lines.append(f"{item['item_name']} — Total {qty_fmt} {unit}".strip())
+            lines.append("")
+            lines.append("Outlet-wise:")
+            lines.append("")
+            
+            for alloc in item.get("allocations", []):
+                bname = alloc.get("branch_name", "UNKNOWN").strip()
+                q = float(alloc.get("quantity", alloc.get("qty", 0)))
+                q_fmt = f"{q:g}" if isinstance(q, (int, float)) else str(q)
+                lines.append(f"• {bname} → {q_fmt} {unit}".strip())
+            lines.append("")
+            
+        lines.append("Please deliver each quantity to the respective Outlet.")
+        
     lines.append("")
     lines.append("Thank you.")
+    
     return "\n".join(lines).strip()
 
 
