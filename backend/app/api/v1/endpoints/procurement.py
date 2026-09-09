@@ -264,63 +264,57 @@ def format_central_store_catalog_item(db: Session, item: Item) -> CentralStoreVe
 def format_whatsapp_message(
     supplier_name: str,
     po_number: str,
+    po_id: str,
+    supplier_id: str,
     items_summary: List[Dict[str, Any]],
-    allocations_by_outlet: Dict[str, List[Dict[str, Any]]]
+    allocations_by_outlet: Dict[str, Any]
 ) -> str:
-    """
-    Generates exact pre-filled WhatsApp message matching specification:
-    
-    Dear [Supplier Name],
-
-    Please supply:
-
-    1. Rice — 35 KG
-    2. Oil — 15 L
-
-    Outlet allocation:
-    Outlet 1:
-    Rice — 20 KG
-    Oil — 10 L
-
-    Outlet 2:
-    Rice — 15 KG
-    Oil — 5 L
-
-    Order Ref: [ORDER NUMBER]
-    """
     lines = []
-    lines.append(f"Dear {supplier_name},")
-    lines.append("")
-    lines.append("Please supply:")
+    lines.append(f"Vendor {supplier_name} (ID: {supplier_id})")
     lines.append("")
 
-    for idx, item in enumerate(items_summary, 1):
+    for item in items_summary:
+        lines.append(f"{item['item_name']} (ID: {item.get('item_id', 'N/A')})")
+        
         qty_formatted = f"{item['total_qty']:g}" if isinstance(item['total_qty'], (int, float, Decimal)) else str(item['total_qty'])
-        unit_str = f" {item['unit_symbol']}" if item.get('unit_symbol') else ""
-        lines.append(f"{idx}. {item['item_name']} — {qty_formatted}{unit_str}")
+        unit_str = f" {item.get('unit_symbol', '')}".rstrip()
+        
+        lines.append("Total Purchase Qty:")
+        lines.append(f"{qty_formatted}{unit_str}".strip())
+        lines.append("")
+        
+        lines.append("Breakdown:")
+        lines.append("")
+        
+        # Group allocations by destination ID and request ID
+        destinations = {}
+        for alloc in item.get("allocations", []):
+            bid = alloc.get("branch_id", "UNKNOWN_BRANCH")
+            rid = alloc.get("request_id", "UNKNOWN_REQ")
+            rnum = alloc.get("request_number", rid)
+            bname = alloc.get("branch_name", bid)
+            
+            key = f"{bid}_{rid}"
+            q = float(alloc.get("quantity", alloc.get("qty", 0)))
+            
+            if key not in destinations:
+                destinations[key] = {
+                    "name": bname.upper() if "central store" in bname.lower() else bname,
+                    "branch_id": bid,
+                    "request_id": rid,
+                    "request_number": rnum,
+                    "qty": 0.0
+                }
+            destinations[key]["qty"] += q
+            
+        for key, d in destinations.items():
+            dq = f"{d['qty']:g}" if isinstance(d['qty'], (int, float)) else str(d['qty'])
+            lines.append(f"{d['name']} (ID: {d['branch_id']}) -> {dq}{unit_str} (Request: {d['request_number']} | ID: {d['request_id']})".strip())
+            
+        lines.append("")
 
-    lines.append("")
-    
-    is_single_central_store = False
-    if len(allocations_by_outlet) == 1:
-        only_outlet = list(allocations_by_outlet.keys())[0]
-        if "central store" in only_outlet.lower():
-            is_single_central_store = True
-            lines.append(f"Destination:\n{only_outlet.upper()}")
-            lines.append("")
-    
-    if not is_single_central_store:
-        lines.append("Outlet allocation:")
-        for outlet_name, outlet_items in allocations_by_outlet.items():
-            lines.append(f"{outlet_name}:")
-            for oi in outlet_items:
-                qty_fmt = f"{oi['qty']:g}" if isinstance(oi['qty'], (int, float, Decimal)) else str(oi['qty'])
-                u_str = f" {oi.get('unit_symbol', '')}" if oi.get('unit_symbol') else ""
-                lines.append(f"{oi['item_name']} — {qty_fmt}{u_str}")
-            lines.append("")
-
-    lines.append(f"Order Ref: {po_number}")
-    return "\n".join(lines)
+    lines.append(f"Order Ref: {po_number} (ID: {po_id})")
+    return "\n".join(lines).strip()
 
 
 # ==============================================================================
@@ -1996,6 +1990,7 @@ def open_supplier_whatsapp(
                 "item_name": po_item.item.name if po_item.item else f"Item-{po_item.item_id[:6]}",
                 "total_qty": float(po_item.ordered_qty),
                 "unit_symbol": unit_name,
+                "allocations": json.loads(po_item.allocations) if po_item.allocations else []
             })
             if po_item.allocations:
                 try:
@@ -2016,6 +2011,8 @@ def open_supplier_whatsapp(
     prefilled_message = format_whatsapp_message(
         supplier_name=supplier.name,
         po_number=po.po_number,
+        po_id=po.id,
+        supplier_id=supplier.id,
         items_summary=items_summary,
         allocations_by_outlet=allocations_by_outlet,
     )
