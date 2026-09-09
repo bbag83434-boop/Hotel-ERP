@@ -102,6 +102,8 @@ from app.schemas.procurement import (
     BranchRequirementConfigResponse,
     SmartAIAskRequest,
     SmartAIAskResponse,
+    CentralStoreRequirementCreate,
+    CentralStoreVendorCatalogItem,
 )
 
 router = APIRouter()
@@ -190,6 +192,75 @@ def check_user_outlet_access(user: User, branch_id: str, db: Session):
     return True
 
 
+# Valid requisition classifications on the shared purchase_requests entity.
+REQUISITION_TYPES = {"PURCHASE", "MAIN_KITCHEN", "CENTRAL_STORE"}
+
+
+def normalize_requisition_type(value: Optional[str]) -> str:
+    """
+    Normalizes & validates the requisition_type classification used on the
+    shared purchase_requests table. Accepts lowercase input, stores uppercase.
+    """
+    normalized = (value or "PURCHASE").strip().upper()
+    if normalized not in REQUISITION_TYPES:
+        raise BadRequestException("requisition_type must be one of 'PURCHASE', 'MAIN_KITCHEN' or 'CENTRAL_STORE'")
+    return normalized
+
+
+def resolve_default_item_vendor(db: Session, item: Item) -> Tuple[Optional[str], str]:
+    """
+    PART 3 — Auto-resolves the default vendor for an item from the existing
+    Item/Vendor Master (supplier_items + items.supplierId). The Central Store
+    user must NEVER manually choose the vendor:
+
+    1. Active PREFERRED SupplierItem mapping (Item/Vendor Master) -> PREFERRED_VENDOR_MASTER
+    2. Item Master default supplier (items.supplierId)            -> ITEM_MASTER_DEFAULT
+    3. Nothing configured                                         -> NOT_CONFIGURED
+
+    Returns (supplier_id, vendor_source).
+    """
+    if item is None:
+        return None, "NOT_CONFIGURED"
+
+    preferred = None
+    try:
+        preferred = db.query(SupplierItem).filter(
+            SupplierItem.company_id == item.company_id,
+            SupplierItem.item_id == item.id,
+            SupplierItem.is_preferred == True,  # noqa: E712
+            SupplierItem.is_active == True,  # noqa: E712
+        ).order_by(SupplierItem.updated_at.desc()).first()
+    except Exception:
+        preferred = None
+
+    if preferred:
+        return preferred.supplier_id, "PREFERRED_VENDOR_MASTER"
+
+    if item.supplier_id:
+        return item.supplier_id, "ITEM_MASTER_DEFAULT"
+
+    return None, "NOT_CONFIGURED"
+
+
+def format_central_store_catalog_item(db: Session, item: Item) -> CentralStoreVendorCatalogItem:
+    """Builds the catalog row with the auto-resolved vendor for a single item."""
+    supplier_id, vendor_source = resolve_default_item_vendor(db, item)
+    supplier_name = None
+    if supplier_id:
+        sup = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+        supplier_name = sup.name if sup else None
+    return CentralStoreVendorCatalogItem(
+        item_id=item.id,
+        item_name=item.name,
+        item_code=item.code,
+        unit_symbol=item.unit.symbol if item.unit else None,
+        supplier_id=supplier_id,
+        supplier_name=supplier_name,
+        vendor_source=vendor_source,
+        vendor_configured=bool(supplier_id),
+    )
+
+
 def format_whatsapp_message(
     supplier_name: str,
     po_number: str,
@@ -229,15 +300,24 @@ def format_whatsapp_message(
         lines.append(f"{idx}. {item['item_name']} — {qty_formatted}{unit_str}")
 
     lines.append("")
-    lines.append("Outlet allocation:")
-
-    for outlet_name, outlet_items in allocations_by_outlet.items():
-        lines.append(f"{outlet_name}:")
-        for oi in outlet_items:
-            qty_fmt = f"{oi['qty']:g}" if isinstance(oi['qty'], (int, float, Decimal)) else str(oi['qty'])
-            u_str = f" {oi.get('unit_symbol', '')}" if oi.get('unit_symbol') else ""
-            lines.append(f"{oi['item_name']} — {qty_fmt}{u_str}")
-        lines.append("")
+    
+    is_single_central_store = False
+    if len(allocations_by_outlet) == 1:
+        only_outlet = list(allocations_by_outlet.keys())[0]
+        if "central store" in only_outlet.lower():
+            is_single_central_store = True
+            lines.append(f"Destination:\n{only_outlet.upper()}")
+            lines.append("")
+    
+    if not is_single_central_store:
+        lines.append("Outlet allocation:")
+        for outlet_name, outlet_items in allocations_by_outlet.items():
+            lines.append(f"{outlet_name}:")
+            for oi in outlet_items:
+                qty_fmt = f"{oi['qty']:g}" if isinstance(oi['qty'], (int, float, Decimal)) else str(oi['qty'])
+                u_str = f" {oi.get('unit_symbol', '')}" if oi.get('unit_symbol') else ""
+                lines.append(f"{oi['item_name']} — {qty_fmt}{u_str}")
+            lines.append("")
 
     lines.append(f"Order Ref: {po_number}")
     return "\n".join(lines)
@@ -688,6 +768,8 @@ def format_pr_response(req: PurchaseRequest, db: Session) -> PurchaseRequestResp
                 item_name=db_item.name if db_item else "Unknown Item",
                 item_code=db_item.code if db_item else "",
                 unit_symbol=unit_sym,
+                unit=item.unit or unit_sym,
+                supply_source=(item.supply_source or (db_item.supply_source if db_item else None)) or "CENTRAL_STORE",
                 supplier_id=item.supplier_id,
                 supplier_name=sup_name,
                 requested_qty=item.requested_qty,
@@ -706,6 +788,7 @@ def format_pr_response(req: PurchaseRequest, db: Session) -> PurchaseRequestResp
         status=req.status,
         priority=str(req.priority.value if hasattr(req.priority, "value") else req.priority),
         purchase_type=ptype,
+        requisition_type=req.requisition_type or "PURCHASE",
         notes=req.notes,
         approved_by_id=req.approved_by_id,
         approved_at=req.approved_at,
@@ -721,7 +804,20 @@ def format_po_response(po: PurchaseOrder, db: Session) -> PurchaseOrderResponse:
     branch_name = branch.name if branch else ("Multi-Outlet Consolidated" if po.allocations else "Central Store")
     
     if po.allocations:
-        ptype = "MULTI_DESTINATION_PURCHASE"
+        # Check if it's a single destination Central Store allocation
+        is_single_central_store = False
+        if branch and getattr(branch, "type", "") == "CENTRAL_STORE":
+            try:
+                alloc_data = json.loads(po.allocations)
+                if "outlets" in alloc_data and len(alloc_data["outlets"]) == 1:
+                    is_single_central_store = True
+            except Exception:
+                pass
+        
+        if is_single_central_store:
+            ptype = "CENTRAL_STORE_PURCHASE"
+        else:
+            ptype = "MULTI_DESTINATION_PURCHASE"
     elif branch and getattr(branch, "type", "") == "CENTRAL_STORE":
         ptype = "CENTRAL_STORE_PURCHASE"
     elif branch and getattr(branch, "type", "") == "DESSERT_KITCHEN":
@@ -800,7 +896,34 @@ def create_purchase_request(
         raise NotFoundException(f"Outlet branch '{payload.branch_id}' not found.")
 
     company_id = branch.company_id or current_user.company_id
-    req_number = f"PR-{datetime.utcnow().strftime('%Y%m%d')}-{abs(hash(str(datetime.utcnow()) + payload.branch_id)) % 100000:05d}"
+    requisition_type = normalize_requisition_type(payload.requisition_type)
+
+    # PART 3 — Central Store own requirement:
+    # Pre-validate the whole requirement BEFORE creating any row so an invalid
+    # purchase request (item without a configured vendor) can never proceed.
+    if requisition_type == "CENTRAL_STORE":
+        if (branch.type or "").upper() != "CENTRAL_STORE":
+            raise BadRequestException(
+                f"Central Store Requirement can only be raised for a CENTRAL_STORE location; "
+                f"branch '{branch.name}' is type '{branch.type or 'UNKNOWN'}'."
+            )
+        missing_vendor: List[str] = []
+        for item_in in payload.items:
+            db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
+            if not db_item:
+                raise NotFoundException(f"Inventory Item '{item_in.item_id}' not found.")
+            supplier_id, _ = resolve_default_item_vendor(db, db_item)
+            if not supplier_id:
+                missing_vendor.append(db_item.name)
+        if missing_vendor:
+            raise BadRequestException(
+                "Vendor is not configured for this item: "
+                + ", ".join(sorted(set(missing_vendor)))
+                + ". Assign a preferred vendor in the Item/Vendor Master before creating the Central Store Requirement."
+            )
+
+    req_prefix = {"MAIN_KITCHEN": "MR-", "CENTRAL_STORE": "CR-"}.get(requisition_type, "PR-")
+    req_number = f"{req_prefix}{datetime.utcnow().strftime('%Y%m%d')}-{abs(hash(str(datetime.utcnow()) + payload.branch_id + requisition_type)) % 100000:05d}"
 
     req = PurchaseRequest(
         company_id=company_id,
@@ -810,6 +933,7 @@ def create_purchase_request(
         required_date=payload.required_date or datetime.utcnow(),
         status=PRStatus.PENDING_APPROVAL,
         priority=payload.priority or "MEDIUM",
+        requisition_type=requisition_type,
         notes=payload.notes,
     )
     db.add(req)
@@ -820,13 +944,26 @@ def create_purchase_request(
         if not db_item:
             raise NotFoundException(f"Inventory Item '{item_in.item_id}' not found.")
 
-        # Determine supplier: explicit -> item master -> None
-        supplier_id = item_in.supplier_id or db_item.supplier_id
+        # Determine supplier: explicit -> item master -> None.
+        # PART 3: Central Store own requirement NEVER carries a manually chosen
+        # vendor — it is always auto-resolved from the Item/Vendor Master.
+        if requisition_type == "CENTRAL_STORE":
+            supplier_id, _ = resolve_default_item_vendor(db, db_item)
+        else:
+            supplier_id = item_in.supplier_id or db_item.supplier_id
+
+        # Resolve unit & supply source automatically from the Item Master supply routing —
+        # the Outlet Requirement NEVER carries a manually chosen source.
+
+        item_unit = db_item.unit.symbol if db_item.unit else None
+        item_supply_source = db_item.supply_source or "CENTRAL_STORE"
 
         pr_item = PurchaseRequestItem(
             request_id=req.id,
             item_id=item_in.item_id,
             supplier_id=supplier_id,
+            unit=item_unit,
+            supply_source=item_supply_source,
             requested_qty=item_in.requested_qty,
             estimated_price=item_in.estimated_price or db_item.cost_price or Decimal("0.0000"),
             notes=item_in.notes,
@@ -855,6 +992,7 @@ def list_purchase_requests(
     branch_id: Optional[str] = None,
     status_filter: Optional[PRStatus] = None,
     priority: Optional[str] = None,
+    requisition_type: Optional[str] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -870,6 +1008,8 @@ def list_purchase_requests(
         query = query.filter(PurchaseRequest.status == status_filter)
     if priority:
         query = query.filter(PurchaseRequest.priority == priority)
+    if requisition_type:
+        query = query.filter(PurchaseRequest.requisition_type == normalize_requisition_type(requisition_type))
     if search:
         s_term = f"%{search}%"
         query = query.filter(or_(
@@ -922,17 +1062,49 @@ def update_purchase_request(
         req.notes = payload.notes
 
     if payload.items is not None:
+        # PART 3 — Central Store own requirement update: validate vendor presence
+        # BEFORE touching existing rows so an invalid PR can never be saved.
+        if req.requisition_type == "CENTRAL_STORE":
+            missing_vendor: List[str] = []
+            for item_in in payload.items:
+                db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
+                if not db_item:
+                    raise NotFoundException(f"Item '{item_in.item_id}' not found.")
+                supplier_id, _ = resolve_default_item_vendor(db, db_item)
+                if not supplier_id:
+                    missing_vendor.append(db_item.name)
+            if missing_vendor:
+                raise BadRequestException(
+                    "Vendor is not configured for this item: "
+                    + ", ".join(sorted(set(missing_vendor)))
+                    + ". Assign a preferred vendor in the Item/Vendor Master before updating this Central Store Requirement."
+                )
+
         # Replace items
         db.query(PurchaseRequestItem).filter(PurchaseRequestItem.request_id == req.id).delete()
         for item_in in payload.items:
             db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
             if not db_item:
                 raise NotFoundException(f"Item '{item_in.item_id}' not found.")
-            supplier_id = item_in.supplier_id or db_item.supplier_id
+            # PART 3: Central Store own requirement vendors are ALWAYS resolved
+            # automatically from the Item/Vendor Master — no manual override.
+            if req.requisition_type == "CENTRAL_STORE":
+                supplier_id, _ = resolve_default_item_vendor(db, db_item)
+            else:
+                supplier_id = item_in.supplier_id or db_item.supplier_id
+            # Resolve unit & supply source automatically from the Item Master supply routing —
+            # the Outlet Requirement NEVER carries a manually chosen source.
+
+
+            item_unit = db_item.unit.symbol if db_item.unit else None
+            item_supply_source = db_item.supply_source or "CENTRAL_STORE"
+
             pr_item = PurchaseRequestItem(
                 request_id=req.id,
                 item_id=item_in.item_id,
                 supplier_id=supplier_id,
+                unit=item_unit,
+                supply_source=item_supply_source,
                 requested_qty=item_in.requested_qty,
                 estimated_price=item_in.estimated_price or db_item.cost_price or Decimal("0.0000"),
                 notes=item_in.notes,
@@ -950,6 +1122,132 @@ def update_purchase_request(
         entity_type="PurchaseRequest",
         entity_id=req.id,
         new_values={"status": req.status.value, "priority": str(req.priority)}
+    )
+    db.commit()
+    return format_pr_response(req, db)
+
+
+# ==============================================================================
+# PART 3 — Central Store Own Requirement
+# Central Store is an independent stock location. It raises its OWN requirement
+# for items it needs. This is NOT an outlet requirement. The vendor for every
+# selected item is auto-resolved from the existing Item/Vendor Master.
+# ==============================================================================
+
+@router.get("/central-store-requirements/catalog", response_model=List[CentralStoreVendorCatalogItem])
+def get_central_store_requirement_catalog(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Returns every active item with its AUTO-RESOLVED vendor from the existing
+    Item/Vendor Master. The Central Store user never picks a vendor — the system
+    reads the preferred SupplierItem mapping and falls back to the Item Master
+    default supplier. Items without a configured vendor are flagged so the UI can
+    show "Vendor is not configured for this item." and block them from submission.
+    """
+    items = (
+        db.query(Item)
+        .filter(Item.company_id == current_user.company_id, Item.is_active == True)  # noqa: E712
+        .order_by(Item.name.asc())
+        .all()
+    )
+    return [format_central_store_catalog_item(db, it) for it in items]
+
+
+@router.post("/central-store-requirements", response_model=PurchaseRequestResponse, status_code=status.HTTP_201_CREATED)
+def create_central_store_requirement(
+    payload: CentralStoreRequirementCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Creates a CENTRAL_STORE requisition (own requirement of the Central Store).
+
+    Vendor is NEVER accepted from the client — it is auto-resolved per line from
+    the Item/Vendor Master. If ANY selected item has no configured vendor the
+    whole requirement is rejected ("Vendor is not configured for this item.")
+    and no purchase request row is created, so an invalid PR cannot proceed.
+    """
+    check_user_outlet_access(current_user, payload.branch_id, db)
+
+    branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
+    if not branch:
+        raise NotFoundException(f"Central Store branch '{payload.branch_id}' not found.")
+    if (branch.type or "").upper() != "CENTRAL_STORE":
+        raise BadRequestException(
+            f"Central Store Requirement can only be created for a CENTRAL_STORE location; "
+            f"branch '{branch.name}' is type '{branch.type or 'UNKNOWN'}'."
+        )
+
+    company_id = branch.company_id or current_user.company_id
+
+    # 1) Auto-resolve vendors & validate ALL lines up-front (no partial saves).
+    resolved_lines = []
+    missing_vendor: List[str] = []
+    for item_in in payload.items:
+        db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
+        if not db_item:
+            raise NotFoundException(f"Inventory Item '{item_in.item_id}' not found.")
+        supplier_id, vendor_source = resolve_default_item_vendor(db, db_item)
+        if not supplier_id:
+            missing_vendor.append(db_item.name)
+            continue
+        resolved_lines.append((item_in, db_item, supplier_id))
+
+    if missing_vendor:
+        raise BadRequestException(
+            "Vendor is not configured for this item: "
+            + ", ".join(sorted(set(missing_vendor)))
+            + ". Assign a preferred vendor in the Item/Vendor Master before creating the Central Store Requirement."
+        )
+
+    # 2) Create the purchase request (requisition_type = CENTRAL_STORE).
+    requisition_type = "CENTRAL_STORE"
+    req_number = (
+        f"CR-{branch.code.upper() if branch.code else 'CS'}-"
+        f"{datetime.utcnow().strftime('%Y%m%d')}-"
+        f"{abs(hash(str(datetime.utcnow()) + payload.branch_id + requisition_type)) % 100000:05d}"
+    )
+    req = PurchaseRequest(
+        company_id=company_id,
+        branch_id=payload.branch_id,
+        request_number=req_number,
+        requested_by_id=current_user.id,
+        required_date=payload.required_date or datetime.utcnow(),
+        status=PRStatus.PENDING_APPROVAL,
+        priority=payload.priority or "MEDIUM",
+        requisition_type=requisition_type,
+        notes=payload.notes,
+    )
+    db.add(req)
+    db.flush()
+
+    for item_in, db_item, supplier_id in resolved_lines:
+        pr_item = PurchaseRequestItem(
+            request_id=req.id,
+            item_id=item_in.item_id,
+            supplier_id=supplier_id,
+            unit=db_item.unit.symbol if db_item.unit else None,
+            supply_source=db_item.supply_source or "CENTRAL_STORE",
+            requested_qty=item_in.requested_qty,
+            estimated_price=db_item.cost_price or Decimal("0.0000"),
+            notes=item_in.notes,
+        )
+        db.add(pr_item)
+
+    db.commit()
+    db.refresh(req)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="CREATE_CENTRAL_STORE_REQUIREMENT",
+        entity_type="PurchaseRequest",
+        entity_id=req.id,
+        company_id=company_id,
+        branch_id=payload.branch_id,
+        new_values={"request_number": req.request_number, "items_count": len(resolved_lines)}
     )
     db.commit()
     return format_pr_response(req, db)
@@ -993,6 +1291,23 @@ def approve_purchase_request(
         new_values={"status": "APPROVED", "approved_by": current_user.email}
     )
     db.commit()
+
+    # PART 7: Auto-generate PO for Central Store Requirements
+    if req.requisition_type == "CENTRAL_STORE":
+        try:
+            consolidate_outlet_orders(
+                payload=ConsolidateOrdersRequest(
+                    request_ids=[req.id],
+                    auto_submit=False,
+                    notes=f"Auto-generated PO from Central Store Requirement {req.request_number}"
+                ),
+                db=db,
+                current_user=current_user
+            )
+            db.refresh(req)
+        except Exception:
+            pass
+
     return format_pr_response(req, db)
 
 
@@ -1244,10 +1559,13 @@ def consolidate_outlet_orders(
             ]
         }
 
+        unique_branch_ids = {r.branch_id for r in requests if r.id in s_data["participating_requests"]}
+        assigned_branch_id = list(unique_branch_ids)[0] if len(unique_branch_ids) == 1 else None
+
         # Create PO
         po = PurchaseOrder(
             company_id=company_id,
-            branch_id=None,  # Nullable for centralized multi-outlet consolidated order
+            branch_id=assigned_branch_id,
             supplier_id=supplier.id,
             po_number=po_num,
             status=po_status,
@@ -3785,6 +4103,8 @@ def confirm_smart_requirement_draft(
             request_id=pr.id,
             item_id=itm.item_id,
             supplier_id=itm.supplier_id or (itm.item.supplier_id if itm.item else None),
+            unit=(itm.item.unit.symbol if (itm.item and itm.item.unit) else None),
+            supply_source=(itm.item.supply_source if itm.item else None) or "CENTRAL_STORE",
             requested_qty=itm.final_order_qty,
             estimated_price=cost,
             notes=itm.notes or itm.reason,
