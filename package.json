@@ -11,8 +11,7 @@
     "build:backend": "python -m venv backend/.venv && backend/.venv/bin/pip install --upgrade pip && backend/.venv/bin/pip install -r backend/requirements.txt || python3 -m venv backend/.venv && backend/.venv/bin/pip install --upgrade pip && backend/.venv/bin/pip install -r backend/requirements.txt",
     "start:backend": "backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-10000}",
     "build:frontend": "npm --prefix frontend run build",
-    "start:frontend": "npm --prefix frontend run start",
-    "test:backend": "python backend/test_part1_part2_fastapi.py"
+    "start:frontend": "npm --prefix frontend run start"
   },
   "keywords": [],
   "author": "",

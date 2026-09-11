@@ -573,6 +573,7 @@ class ConsolidateOrdersRequest(BaseModel):
     request_ids: List[str] = Field(..., min_items=1, description="List of Purchase Request / Indent IDs to consolidate")
     auto_submit: bool = Field(False, description="If True, moves PO to PENDING_APPROVAL; else DRAFT")
     notes: Optional[str] = None
+    supply_source_filter: Optional[List[str]] = None
 
 class ConsolidateOrdersResponse(BaseModel):
     success: bool

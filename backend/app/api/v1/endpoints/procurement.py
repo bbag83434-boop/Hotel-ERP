@@ -1389,8 +1389,9 @@ def approve_purchase_request(
     )
     db.commit()
 
-    # PART 7: Auto-generate PO for Central Store Requirements
+    # Phase 6 & 7: Auto split downstream workflow
     if req.requisition_type == "CENTRAL_STORE":
+        # Central Store own requirement -> auto-generate PO for all items
         try:
             consolidate_outlet_orders(
                 payload=ConsolidateOrdersRequest(
@@ -1401,9 +1402,84 @@ def approve_purchase_request(
                 db=db,
                 current_user=current_user
             )
-            db.refresh(req)
         except Exception:
             pass
+    else:
+        # Outlet requirement -> Split based on Item Master supply routing
+        has_direct_vendor = False
+        has_central_store = False
+        central_store_items = []
+        for itm in req.items:
+            db_item = db.query(Item).filter(Item.id == itm.item_id).first()
+            supply = (itm.supply_source or (db_item.supply_source if db_item else "CENTRAL_STORE"))
+            if supply == "DIRECT_VENDOR":
+                has_direct_vendor = True
+            else:
+                has_central_store = True
+                central_store_items.append(itm)
+
+        if has_direct_vendor:
+            try:
+                consolidate_outlet_orders(
+                    payload=ConsolidateOrdersRequest(
+                        request_ids=[req.id],
+                        auto_submit=False,
+                        supply_source_filter=["DIRECT_VENDOR"],
+                        notes=f"Auto-generated PO from Outlet Requirement {req.request_number}"
+                    ),
+                    db=db,
+                    current_user=current_user
+                )
+            except Exception as e:
+                import logging
+                logging.error(f"Error creating PO for DIRECT_VENDOR items: {e}")
+                pass
+                
+        if has_central_store and central_store_items:
+            # Create a StockTransfer (REQUESTED state) for Central Store queue
+            central_wh = db.query(Warehouse).filter(
+                Warehouse.is_central == True, 
+                Warehouse.company_id == req.company_id,
+                Warehouse.is_active == True
+            ).first()
+            outlet_wh = db.query(Warehouse).filter(
+                Warehouse.branch_id == req.branch_id,
+                Warehouse.company_id == req.company_id,
+                Warehouse.is_active == True
+            ).first()
+            
+            if central_wh and outlet_wh and central_wh.id != outlet_wh.id:
+                trf_num = f"TRF-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+                transfer = StockTransfer(
+                    company_id=req.company_id,
+                    from_warehouse_id=central_wh.id,
+                    to_warehouse_id=outlet_wh.id,
+                    source_branch_id=central_wh.branch_id,
+                    destination_branch_id=outlet_wh.branch_id,
+                    transfer_number=trf_num,
+                    status="REQUESTED",
+                    transfer_date=datetime.utcnow(),
+                    notes=f"Auto-generated transfer request from {req.request_number}",
+                    created_by_id=current_user.id,
+                    requested_by_id=req.requested_by_id,
+                )
+                db.add(transfer)
+                db.flush()
+                
+                for pr_item in central_store_items:
+                    db_item = db.query(Item).filter(Item.id == pr_item.item_id).first()
+                    trf_item = StockTransferItem(
+                        transfer_id=transfer.id,
+                        item_id=pr_item.item_id,
+                        requested_qty=pr_item.requested_qty,
+                        quantity=pr_item.requested_qty,
+                        unit_cost=db_item.cost_price if db_item else Decimal("0.0000"),
+                        notes=pr_item.notes,
+                    )
+                    db.add(trf_item)
+                db.commit()
+
+    db.refresh(req)
 
     return format_pr_response(req, db)
 
@@ -1547,6 +1623,11 @@ def consolidate_outlet_orders(
                 db_item = db.query(Item).filter(Item.id == pr_item.item_id).first()
                 if not db_item:
                     raise NotFoundException(f"Item '{pr_item.item_id}' not found in catalog.")
+
+            # Identify Supply Source & apply filter
+            effective_supply_source = pr_item.supply_source or db_item.supply_source or "CENTRAL_STORE"
+            if payload.supply_source_filter and effective_supply_source not in payload.supply_source_filter:
+                continue
 
             # Identify Supplier: PR item explicit -> Item Master supplier_id
             effective_supplier_id = pr_item.supplier_id or db_item.supplier_id
