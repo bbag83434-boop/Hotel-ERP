@@ -1,227 +1,449 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Clock3, RefreshCw, XCircle, ShieldCheck, Eye } from 'lucide-react';
-import { apiClient } from '@/api/client';
-import { Button, Badge, EmptyState, StatCard } from '@/components/ui';
+import { CheckCircle2, Clock3, Eye, FileText, RefreshCw, Send, ShieldCheck, XCircle, Package } from 'lucide-react';
 import { procurementApi } from '@/api/procurement';
+import { Button, Badge, EmptyState, StatCard } from '@/components/ui';
 import { useOutlet } from '@/context/OutletContext';
 import { useAuth } from '@/context/AuthContext';
 
-const HQ_APPROVER_ROLES = [
-  'SUPER_ADMIN',
-  'OWNER',
-  'HQ_ADMIN',
-  'HEAD_OFFICE_ADMIN',
-  'CENTRAL_PURCHASE_MANAGER',
-  'GENERAL_MANAGER',
-  'DIRECTOR',
-];
+const HQ_APPROVER_ROLES = new Set([
+  'SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN',
+  'HEAD_OFFICE_ADMIN', 'CENTRAL_PURCHASE_MANAGER', 'GENERAL_MANAGER', 'DIRECTOR',
+]);
 
-const isHqApprover = (user: any): boolean => {
-  if (!user) return false;
-  const roleName = typeof user.role === 'string' ? user.role : user.role?.name;
-  if (!roleName) return false;
-  return HQ_APPROVER_ROLES.includes(roleName.trim().toUpperCase());
+const money = (value: any) =>
+  `₹${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+const isHqApprover = (user: any) => {
+  const rawRole = typeof user?.role === 'string'
+    ? user.role
+    : user?.role?.name ?? user?.role_name ?? user?.roleName;
+  return rawRole
+    ? HQ_APPROVER_ROLES.has(String(rawRole).trim().toUpperCase().replace(/[\s-]+/g, '_'))
+    : false;
+};
+
+const parseJson = (value: any) => {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch { return {}; }
+};
+
+const qtyOf = (line: any) => Number(line?.requested_qty ?? line?.requestedQty ?? line?.quantity ?? line?.ordered_qty ?? 0);
+const rateOf = (line: any) => Number(line?.estimated_price ?? line?.estimatedPrice ?? line?.unit_price ?? line?.unitPrice ?? 0);
+const amountOf = (line: any) => qtyOf(line) * rateOf(line);
+
+const requestAmount = (request: any) => {
+  const total = Number(request?.total_amount ?? request?.totalAmount);
+  if (Number.isFinite(total)) return total;
+  return (request?.items || []).reduce((sum: number, line: any) => sum + amountOf(line), 0);
+};
+
+const sourceLabel = (value: any) => {
+  const source = String(value || 'CENTRAL_STORE').toUpperCase();
+  if (source === 'DIRECT_VENDOR') return 'Direct Vendor';
+  if (source === 'CENTRAL_STORE') return 'Central Store';
+  return source.replaceAll('_', ' ');
+};
+
+const isOpenVendorPO = (po: any) => {
+  if (String(po?.status || '').toUpperCase() !== 'APPROVED') return false;
+  const allocation = parseJson(po?.allocations);
+  return allocation?.consolidation_open === true;
 };
 
 interface ApprovalItem {
   id: string;
-  type: 'PURCHASE_REQUEST' | 'PURCHASE_ORDER' | 'GRN' | 'WASTAGE' | 'LEAVE';
-  title: string;
   reference: string;
-  amount?: number;
+  title: string;
+  amount: number;
   branch?: string;
+  status?: string;
   createdAt?: string;
   payload: any;
 }
 
-const money = (v: any) => `₹${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
-const unwrap = (r: any) => r?.data?.data ?? r?.data ?? [];
-
 export default function ApprovalCenterWorkspace() {
   const { activeOutlet, isHeadOffice } = useOutlet();
   const { user } = useAuth();
-  const [items, setItems] = useState<ApprovalItem[]>([]);
-  const [filter, setFilter] = useState<'ALL' | ApprovalItem['type']>('ALL');
+
+  const [tab, setTab] = useState<'APPROVE' | 'HISTORY' | 'SEND_PO'>('APPROVE');
+  const [pending, setPending] = useState<ApprovalItem[]>([]);
+  const [history, setHistory] = useState<ApprovalItem[]>([]);
+  const [openPOs, setOpenPOs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState<string | null>(null);
+  const [poLoading, setPoLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [viewItem, setViewItem] = useState<ApprovalItem | null>(null);
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [viewRequest, setViewRequest] = useState<ApprovalItem | null>(null);
+  const [viewPO, setViewPO] = useState<any | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true); setMessage('');
+  const branchId = isHeadOffice ? undefined : activeOutlet?.id;
+  const canApprove = useMemo(() => isHqApprover(user), [user]);
+
+  const loadPRData = useCallback(async () => {
+    setLoading(true);
+    setMessage('');
     try {
-      const branch_id = isHeadOffice ? undefined : activeOutlet?.id;
-      const [prs, pos, grns, wastage, leaves] = await Promise.all([
-        procurementApi.getPurchaseRequests({ branch_id, status_filter: 'PENDING_APPROVAL' }).catch(() => []),
-        procurementApi.getPurchaseOrders({ branch_id, status_filter: 'PENDING_APPROVAL' }).catch(() => []),
-        procurementApi.getGoodsReceiveNotes({ branch_id, status_filter: 'PENDING_APPROVAL' }).catch(() => []),
-        apiClient.get('/wastage/entries', { params: { branch_id, status: 'PENDING_APPROVAL' } }).then(unwrap).catch(() => []),
-        apiClient.get('/hr/leaves', { params: { branch_id, status: 'PENDING' } }).then(unwrap).catch(() => []),
+      const [pendingPRs, allPRs] = await Promise.all([
+        procurementApi.getPurchaseRequests({ branch_id: branchId, status_filter: 'PENDING_APPROVAL' }),
+        procurementApi.getPurchaseRequests({ branch_id: branchId }),
       ]);
-      const next: ApprovalItem[] = [
-        ...prs.map((x: any) => {
-          let reqTitle = 'Purchase Request';
-          if (x.requisition_type === 'CENTRAL_STORE') reqTitle = 'CENTRAL STORE PURCHASE REQUEST';
-          else if (x.items && x.items.length > 0) {
-            const src = (x.items[0].supply_source || 'CENTRAL_STORE').toUpperCase();
-            if (src === 'DESSERT_KITCHEN') reqTitle = 'DESSERT KITCHEN REQUIREMENT';
-            else if (src === 'RAW_MATERIAL' || src === 'RAW_MATERIAL_SUPPLY') reqTitle = 'RAW MATERIAL SUPPLY REQUIREMENT';
-            else if (src === 'DAILY_OUTLET' || src === 'DAILY_OUTLET_SUPPLY') reqTitle = 'DAILY OUTLET SUPPLY REQUIREMENT';
-            else reqTitle = 'OUTLET → CENTRAL STORE INTERNAL REQUEST';
-          }
-          return { id:x.id, type:'PURCHASE_REQUEST', title:reqTitle, reference:x.request_number, amount:x.total_amount, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x };
-        }),
-        ...pos.map((x: any) => ({ id:x.id, type:'PURCHASE_ORDER', title:'Purchase Order', reference:x.po_number, amount:x.net_amount ?? x.total_amount, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x })),
-        ...grns.map((x: any) => ({ id:x.id, type:'GRN', title:'Goods Receipt', reference:x.grn_number, amount:x.total_amount, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x })),
-        ...wastage.map((x: any) => ({ id:x.id, type:'WASTAGE', title:'Wastage Entry', reference:x.entry_number, amount:x.total_cost, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x })),
-        ...leaves.map((x: any) => ({ id:x.id, type:'LEAVE', title:'Leave Request', reference:x.id.slice(0,8).toUpperCase(), amount:0, branch:x.branch_name || x.branch?.name, createdAt:x.created_at, payload:x })),
-      ];
-      setItems(next.sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||''))));
-    } finally { setLoading(false); }
-  }, [activeOutlet?.id, isHeadOffice]);
 
-  useEffect(() => { load(); }, [load]);
+      setPending((pendingPRs || []).map((x: any) => ({
+        id: String(x.id),
+        reference: x.request_number,
+        title: x.requisition_type === 'CENTRAL_STORE' ? 'CENTRAL STORE REQUEST' : 'PURCHASE REQUEST',
+        amount: requestAmount(x),
+        branch: x.branch_name || x.branch?.name,
+        status: x.status,
+        createdAt: x.created_at,
+        payload: x,
+      })));
 
-  const visible = useMemo(() => filter === 'ALL' ? items : items.filter(x => x.type === filter), [items, filter]);
-  const counts = useMemo(() => ({
-    total: items.length,
-    purchase: items.filter(x=>x.type==='PURCHASE_REQUEST'||x.type==='PURCHASE_ORDER').length,
-    operations: items.filter(x=>x.type==='GRN'||x.type==='WASTAGE').length,
-    people: items.filter(x=>x.type==='LEAVE').length,
-  }), [items]);
+      const historyStatuses = new Set(['APPROVED', 'ORDERED', 'REJECTED', 'CANCELLED']);
+      setHistory((allPRs || [])
+        .filter((x: any) => historyStatuses.has(String(x?.status || '').toUpperCase()))
+        .map((x: any) => ({
+          id: String(x.id),
+          reference: x.request_number,
+          title: x.requisition_type === 'CENTRAL_STORE' ? 'CENTRAL STORE REQUEST' : 'PURCHASE REQUEST',
+          amount: requestAmount(x),
+          branch: x.branch_name || x.branch?.name,
+          status: x.status,
+          createdAt: x.created_at,
+          payload: x,
+        }))
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))));
+    } catch (error: any) {
+      const data = error?.response?.data;
+      setMessage(data?.detail || data?.message || error?.message || 'Approval data could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
+  }, [branchId]);
 
-  const hasHqRole = useMemo(() => isHqApprover(user), [user]);
-
-  const act = async (item: ApprovalItem, action: 'APPROVE' | 'REJECT') => {
-    setActing(item.id); setMessage('');
+  const loadPOs = useCallback(async () => {
+    setPoLoading(true);
     try {
-      if (item.type === 'PURCHASE_REQUEST') action === 'APPROVE' ? await procurementApi.approvePurchaseRequest(item.id) : await procurementApi.rejectPurchaseRequest(item.id, { reason: 'Rejected from Approval Center' });
-      if (item.type === 'PURCHASE_ORDER') action === 'APPROVE' ? await procurementApi.approveOrder(item.id) : await procurementApi.rejectOrder(item.id, { reason: 'Rejected from Approval Center' });
-      if (item.type === 'GRN') action === 'APPROVE' ? await procurementApi.approveGoodsReceiveNote(item.id) : await procurementApi.rejectGoodsReceiveNote(item.id, { reason: 'Rejected from Approval Center' });
-      if (item.type === 'WASTAGE') action === 'APPROVE' ? await apiClient.post(`/wastage/entries/${item.id}/approve`, {}) : await apiClient.post(`/wastage/entries/${item.id}/reject`, { rejection_reason: 'Rejected from Approval Center' });
-      if (item.type === 'LEAVE') await apiClient.put(`/hr/leaves/${item.id}`, { status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED' });
-      setMessage(`${item.title} ${action === 'APPROVE' ? 'approved' : 'rejected'}.`); await load();
-    } catch (e:any) { setMessage(e?.response?.data?.error?.message || e?.response?.data?.detail || e?.response?.data?.message || 'Approval action failed.'); }
-    finally { setActing(null); }
+      const orders = await procurementApi.getPurchaseOrders({
+        branch_id: branchId,
+        status_filter: 'APPROVED',
+      });
+      const fresh = (orders || []).filter(isOpenVendorPO);
+      setOpenPOs(fresh);
+    } catch (error: any) {
+      const data = error?.response?.data;
+      setMessage(data?.detail || data?.message || error?.message || 'Vendor PO queue could not be loaded.');
+    } finally {
+      setPoLoading(false);
+    }
+  }, [branchId]);
+
+  const loadAll = useCallback(async () => {
+    // Do not load the entire approved-PO list on page startup. That query can be
+    // large and is only needed when the user opens Send PO.
+    await loadPRData();
+    if (tab === 'SEND_PO') {
+      await loadPOs();
+    }
+  }, [loadPRData, loadPOs, tab]);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  const approvePR = async (item: ApprovalItem) => {
+    setActingId(item.id);
+    setMessage('');
+    try {
+      await procurementApi.approvePurchaseRequest(item.id);
+      setMessage(`${item.reference} approved.`);
+      await loadPRData();
+      if (tab === 'SEND_PO') await loadPOs();
+    } catch (error: any) {
+      const data = error?.response?.data;
+      setMessage(data?.error?.message || data?.detail || data?.message || error?.message || 'Approval failed.');
+    } finally {
+      setActingId(null);
+    }
   };
 
-  return <div className="space-y-5">
-    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-      <div><div className="flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-[#B8862D]"/><h1 className="text-xl font-bold">Approval Center</h1></div><p className="text-xs text-[#707070] mt-1">Central queue for operational approvals · {isHeadOffice ? 'Head Office scope' : activeOutlet?.name}</p></div>
-      <Button size="sm" variant="secondary" onClick={load} disabled={loading}><RefreshCw className={`w-4 h-4 ${loading?'animate-spin':''}`}/> Refresh</Button>
-    </div>
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <StatCard title="Pending" value={counts.total} icon={<Clock3 className="w-4 h-4"/>}/><StatCard title="Purchase" value={counts.purchase} icon={<Clock3 className="w-4 h-4"/>}/><StatCard title="Operations" value={counts.operations} icon={<Clock3 className="w-4 h-4"/>}/><StatCard title="People" value={counts.people} icon={<Clock3 className="w-4 h-4"/>}/>
-    </div>
-    <div className="flex gap-2 overflow-x-auto pb-1">{(['ALL','PURCHASE_REQUEST','PURCHASE_ORDER','GRN','WASTAGE','LEAVE'] as const).map(f=><button key={f} onClick={()=>setFilter(f)} className={`px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap border ${filter===f?'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/30':'bg-white text-[#707070] border-[rgba(45,45,45,.08)]'}`}>{f.replaceAll('_',' ')}</button>)}</div>
-    {message && <div className="p-3 rounded-xl bg-white border border-[rgba(45,45,45,.08)] text-xs font-medium">{message}</div>}
-    {loading ? <div className="p-8 text-center text-sm text-[#707070]">Loading approval queue…</div> : visible.length === 0 ? <EmptyState title="No pending approvals" description="There are no approval items in the selected scope/filter." icon={<CheckCircle2 className="w-6 h-6"/>}/> : <div className="grid gap-3">{visible.map(item=>{
-      const isHqGuarded = item.type === 'PURCHASE_REQUEST' || item.type === 'WASTAGE';
-      const isSelfRequester = (item.type === 'PURCHASE_REQUEST' && item.payload?.requested_by_id === user?.id) || (item.type === 'WASTAGE' && item.payload?.reported_by_id === user?.id);
-      const approveDisabled = (isHqGuarded && !hasHqRole) || isSelfRequester || acting === item.id;
-      const rejectDisabled = (isHqGuarded && !hasHqRole) || acting === item.id;
-      const approveTooltip = isSelfRequester
-        ? 'Creator cannot self-approve own request'
-        : (isHqGuarded && !hasHqRole)
-        ? 'Head Office authorization required to approve'
-        : undefined;
-      const rejectTooltip = (isHqGuarded && !hasHqRole)
-        ? 'Head Office authorization required to reject'
-        : undefined;
+  const rejectPR = async (item: ApprovalItem) => {
+    setActingId(item.id);
+    setMessage('');
+    try {
+      await procurementApi.rejectPurchaseRequest(item.id, { reason: 'Rejected from Approval Center' });
+      setMessage(`${item.reference} rejected.`);
+      await loadPRData();
+    } catch (error: any) {
+      const data = error?.response?.data;
+      setMessage(data?.detail || data?.message || error?.message || 'Reject failed.');
+    } finally {
+      setActingId(null);
+    }
+  };
 
-      return (
-        <div key={`${item.type}-${item.id}`} className="bg-white border border-[rgba(45,45,45,.08)] rounded-2xl p-4 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-sm">{item.title}</span>
-                <Badge variant="outlet">PENDING</Badge>
-                <span className="text-[10px] text-[#707070]">{item.type.replaceAll('_',' ')}</span>
-              </div>
-              <div className="text-xs text-[#707070] mt-1">
-                Reference: <span className="font-mono text-[#1C1C1C]">{item.reference}</span>
-                {item.branch ? ` · ${item.branch}` : ''}
-              </div>
-              {item.payload?.reason && <div className="text-xs mt-2">{item.payload.reason}</div>}
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                <div className="text-[10px] text-[#707070]">Amount</div>
-                <div className="font-bold text-sm">{money(item.amount)}</div>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" variant="secondary" onClick={() => setViewItem(item)}>
-                  <Eye className="w-4 h-4"/> View
-                </Button>
-                <span title={approveTooltip}>
-                  <Button size="sm" variant="primary" disabled={approveDisabled} onClick={()=>act(item,'APPROVE')}>
-                    <CheckCircle2 className="w-4 h-4"/> Approve
-                  </Button>
-                </span>
-                <span title={rejectTooltip}>
-                  <Button size="sm" variant="danger" disabled={rejectDisabled} onClick={()=>act(item,'REJECT')}>
-                    <XCircle className="w-4 h-4"/> Reject
-                  </Button>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    })}</div>}
+  const sendWhatsApp = async (po: any) => {
+    setMessage('');
+    try {
+      const response = await procurementApi.getWhatsAppLink(po.id);
+      if (!response?.whatsapp_url) {
+        setMessage('WhatsApp link could not be generated.');
+        return;
+      }
+      window.open(response.whatsapp_url, '_blank', 'noopener,noreferrer');
+      await loadPRData();
+      if (tab === 'SEND_PO') await loadPOs();
+    } catch (error: any) {
+      const data = error?.response?.data;
+      setMessage(data?.detail || data?.message || error?.message || 'WhatsApp send failed.');
+    }
+  };
 
-    {viewItem && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-        <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
-          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="font-bold text-lg">Requirement Details</h3>
-            <button onClick={() => setViewItem(null)} className="text-gray-400 hover:text-gray-700">
-              <XCircle className="w-5 h-5" />
-            </button>
+  const counts = useMemo(() => ({
+    pending: pending.length,
+    history: history.length,
+    sendPO: openPOs.length,
+  }), [pending, history, openPOs]);
+
+  const currentPOItems = useMemo(() => {
+    if (!viewPO) return [];
+    const allocation = parseJson(viewPO.allocations);
+    if (Array.isArray(allocation?.items_summary)) {
+      return allocation.items_summary;
+    }
+    return (viewPO.items || []).map((item: any) => ({
+      item_name: item.item_name,
+      total_qty: item.ordered_qty,
+      unit_symbol: item.unit_symbol || item.unit,
+      unit_price: item.unit_price,
+      allocations: parseJson(item.allocations),
+    }));
+  }, [viewPO]);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-[#B8862D]" />
+            <h1 className="text-xl font-bold">Approval Center</h1>
           </div>
-          <div className="p-4 overflow-y-auto flex-1">
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Request Number</div><div className="font-mono text-sm">{viewItem.reference}</div></div>
-              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Source/Destination</div><div className="text-sm font-semibold text-[#1C1C1C]">{viewItem.title}</div></div>
-              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Outlet</div><div className="text-sm">{viewItem.branch || '—'}</div></div>
-              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Status</div><div className="text-sm"><Badge variant="outlet">PENDING APPROVAL</Badge></div></div>
-              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Total Amount</div><div className="text-sm font-bold">{money(viewItem.amount)}</div></div>
-              <div><div className="text-[10px] text-gray-500 uppercase font-bold">Notes</div><div className="text-sm">{viewItem.payload?.notes || '—'}</div></div>
-            </div>
-            
-            <div className="border border-gray-100 rounded-xl overflow-hidden">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 text-gray-500 border-b border-gray-100">
-                  <tr>
-                    <th className="px-3 py-2 font-bold">Item</th>
-                    <th className="px-3 py-2 text-right font-bold">Quantity</th>
-                    <th className="px-3 py-2 font-bold">Unit</th>
-                    <th className="px-3 py-2 font-bold">Vendor</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(viewItem.payload?.items || []).map((it: any) => (
-                    <tr key={it.id || it.item_id}>
-                      <td className="px-3 py-2 font-medium">{it.item_name || it.item?.name || 'Item'}</td>
-                      <td className="px-3 py-2 text-right font-mono">{it.requested_qty || it.quantity || it.ordered_qty || it.received_qty || 0}</td>
-                      <td className="px-3 py-2">{it.unit_symbol || it.unit || '—'}</td>
-                      <td className="px-3 py-2 text-[#2F6B3B] font-medium">{it.supplier_name || viewItem.payload?.supplier_name || '—'}</td>
-                    </tr>
-                  ))}
-                  {(!viewItem.payload?.items || viewItem.payload.items.length === 0) && (
-                    <tr><td colSpan={4} className="px-3 py-4 text-center text-gray-500">No items available</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setViewItem(null)}>Close</Button>
-          </div>
+          <p className="text-xs text-[#707070] mt-1">Approve requirements, review history, then send vendor POs.</p>
         </div>
+        <Button size="sm" variant="secondary" onClick={loadAll} disabled={loading || poLoading}>
+          <RefreshCw className={`w-4 h-4 ${(loading || poLoading) ? 'animate-spin' : ''}`} /> Refresh
+        </Button>
       </div>
-    )}
-  </div>;
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <StatCard title="Approve" value={counts.pending} icon={<Clock3 className="w-4 h-4" />} />
+        <StatCard title="Approved History" value={counts.history} icon={<CheckCircle2 className="w-4 h-4" />} />
+        <StatCard title="Send PO" value={counts.sendPO} icon={<Send className="w-4 h-4" />} />
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        <button onClick={() => setTab('APPROVE')} className={`px-4 py-2 rounded-xl text-xs font-bold border ${tab === 'APPROVE' ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/30' : 'bg-white text-[#707070] border-gray-200'}`}>Approve</button>
+        <button onClick={() => setTab('HISTORY')} className={`px-4 py-2 rounded-xl text-xs font-bold border ${tab === 'HISTORY' ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/30' : 'bg-white text-[#707070] border-gray-200'}`}>Approved History</button>
+        <button onClick={() => setTab('SEND_PO')} className={`px-4 py-2 rounded-xl text-xs font-bold border ${tab === 'SEND_PO' ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/30' : 'bg-white text-[#707070] border-gray-200'}`}>Send PO</button>
+      </div>
+
+      {message && <div className="p-3 rounded-xl bg-white border border-gray-200 text-xs font-medium">{message}</div>}
+
+      {tab === 'APPROVE' && (
+        <div className="space-y-3">
+          {loading ? (
+            <div className="p-8 text-center text-sm text-[#707070]">Loading approvals…</div>
+          ) : pending.length === 0 ? (
+            <EmptyState title="Nothing to approve" description="All purchase requirements are clear." icon={<CheckCircle2 className="w-6 h-6" />} />
+          ) : (
+            pending.map(item => (
+              <div key={item.id} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-sm">{item.title}</span>
+                      <Badge variant="outlet">{item.status || 'PENDING_APPROVAL'}</Badge>
+                    </div>
+                    <div className="text-xs text-[#707070] mt-1">{item.reference}{item.branch ? ` · ${item.branch}` : ''}</div>
+                    <div className="text-sm font-bold mt-1">{money(item.amount)}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => setViewRequest(item)}>
+                      <Eye className="w-4 h-4" /> View
+                    </Button>
+                    <Button size="sm" variant="primary" disabled={!canApprove || actingId === item.id} onClick={() => approvePR(item)}>
+                      <CheckCircle2 className="w-4 h-4" /> Approve
+                    </Button>
+                    <Button size="sm" variant="danger" disabled={!canApprove || actingId === item.id} onClick={() => rejectPR(item)}>
+                      <XCircle className="w-4 h-4" /> Reject
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab === 'HISTORY' && (
+        <div className="space-y-3">
+          {loading ? (
+            <div className="p-8 text-center text-sm text-[#707070]">Loading history…</div>
+          ) : history.length === 0 ? (
+            <EmptyState title="No approval history" description="Approved purchase requirements will remain here." icon={<FileText className="w-6 h-6" />} />
+          ) : (
+            history.map(item => (
+              <div key={item.id} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-sm">{item.title}</span>
+                      <Badge variant="outlet">{item.status}</Badge>
+                    </div>
+                    <div className="text-xs text-[#707070] mt-1">{item.reference}{item.branch ? ` · ${item.branch}` : ''}</div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">{money(item.amount)}</span>
+                    <Button size="sm" variant="secondary" onClick={() => setViewRequest(item)}>
+                      <Eye className="w-4 h-4" /> View
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab === 'SEND_PO' && (
+        <div className="space-y-3">
+          {poLoading ? (
+            <div className="p-8 text-center text-sm text-[#707070]">Loading vendor POs…</div>
+          ) : openPOs.length === 0 ? (
+            <EmptyState title="No vendor PO ready" description="Approved Direct Vendor requirements will appear here, grouped by vendor." icon={<Package className="w-6 h-6" />} />
+          ) : (
+            openPOs.map((po: any) => {
+              const allocation = parseJson(po.allocations);
+              const itemCount = Array.isArray(allocation?.items_summary) ? allocation.items_summary.length : (po.items?.length || 0);
+              const outletCount = allocation?.outlets ? Object.keys(allocation.outlets).length : 0;
+              return (
+                <div key={po.id} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-sm">{po.supplier_name || 'Vendor'}</span>
+                        <Badge variant="outlet">OPEN PO</Badge>
+                      </div>
+                      <div className="text-xs text-[#707070] mt-1 font-mono">{po.po_number}</div>
+                      <div className="text-xs text-[#707070] mt-1">{itemCount} item types · {outletCount} outlets</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-base">{money(po.net_amount ?? po.total_amount)}</span>
+                      <Button size="sm" variant="secondary" onClick={() => setViewPO(po)}>
+                        <Eye className="w-4 h-4" /> View PO
+                      </Button>
+                      <Button size="sm" variant="primary" onClick={() => sendWhatsApp(po)}>
+                        <Send className="w-4 h-4" /> SEND WHATSAPP
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {viewRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+            <div className="p-4 border-b flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-lg">Requirement Details</h3>
+                <div className="text-xs text-gray-500">{viewRequest.reference} · {viewRequest.status}</div>
+              </div>
+              <button onClick={() => setViewRequest(null)} aria-label="Close"><XCircle className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
+                <div><div className="text-xs text-gray-500">Outlet</div><div>{viewRequest.branch || '—'}</div></div>
+                <div><div className="text-xs text-gray-500">Status</div><div className="font-semibold">{viewRequest.status}</div></div>
+                <div><div className="text-xs text-gray-500">Total</div><div className="font-bold">{money(viewRequest.amount)}</div></div>
+              </div>
+              <div className="border rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-gray-50"><tr>
+                    <th className="px-3 py-2">Item</th><th className="px-3 py-2">Source</th><th className="px-3 py-2">Vendor</th>
+                    <th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2">Unit</th><th className="px-3 py-2 text-right">Rate</th><th className="px-3 py-2 text-right">Amount</th>
+                  </tr></thead>
+                  <tbody className="divide-y">
+                    {(viewRequest.payload?.items || []).map((line: any) => (
+                      <tr key={line.id || line.item_id}>
+                        <td className="px-3 py-2 font-medium">{line.item_name || line.item?.name || 'Item'}</td>
+                        <td className="px-3 py-2">{sourceLabel(line.supply_source || line.supplySource)}</td>
+                        <td className="px-3 py-2">{line.supplier_name || line.supplier?.name || '—'}</td>
+                        <td className="px-3 py-2 text-right font-mono">{qtyOf(line)}</td>
+                        <td className="px-3 py-2">{line.unit_symbol || line.unit || '—'}</td>
+                        <td className="px-3 py-2 text-right">{money(rateOf(line))}</td>
+                        <td className="px-3 py-2 text-right font-semibold">{money(amountOf(line))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="p-4 border-t bg-gray-50 flex justify-end"><Button variant="secondary" onClick={() => setViewRequest(null)}>Close</Button></div>
+          </div>
+        </div>
+      )}
+
+      {viewPO && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+            <div className="p-4 border-b flex items-center justify-between">
+              <div><h3 className="font-bold text-lg">Vendor PO</h3><div className="text-xs text-gray-500">{viewPO.po_number} · {viewPO.supplier_name}</div></div>
+              <button onClick={() => setViewPO(null)} aria-label="Close"><XCircle className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
+                <div><div className="text-xs text-gray-500">Vendor</div><div className="font-semibold">{viewPO.supplier_name}</div></div>
+                <div><div className="text-xs text-gray-500">PO Total</div><div className="font-bold">{money(viewPO.net_amount ?? viewPO.total_amount)}</div></div>
+                <div><div className="text-xs text-gray-500">Status</div><div className="font-semibold">READY TO SEND</div></div>
+              </div>
+              <div className="border rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-gray-50"><tr>
+                    <th className="px-3 py-2">Item</th><th className="px-3 py-2 text-right">Total Qty</th><th className="px-3 py-2">Unit</th><th className="px-3 py-2 text-right">Rate</th><th className="px-3 py-2 text-right">Amount</th><th className="px-3 py-2">Outlet Allocation</th>
+                  </tr></thead>
+                  <tbody className="divide-y">
+                    {currentPOItems.map((item: any, idx: number) => {
+                      const allocations = Array.isArray(item?.allocations) ? item.allocations : [];
+                      const allocationText = allocations.map((a: any) => `${a.branch_name || 'Outlet'} → ${a.quantity ?? a.qty ?? 0} ${item.unit_symbol || ''}`).join(', ');
+                      return (
+                        <tr key={`${item.item_id || item.item_name}-${idx}`}>
+                          <td className="px-3 py-2 font-medium">{item.item_name || 'Item'}</td>
+                          <td className="px-3 py-2 text-right font-mono">{Number(item.total_qty || 0)}</td>
+                          <td className="px-3 py-2">{item.unit_symbol || '—'}</td>
+                          <td className="px-3 py-2 text-right">{money(item.unit_price)}</td>
+                          <td className="px-3 py-2 text-right font-semibold">{money(Number(item.total_qty || 0) * Number(item.unit_price || 0))}</td>
+                          <td className="px-3 py-2">{allocationText || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="p-4 border-t bg-gray-50 flex justify-between gap-2">
+              <Button variant="secondary" onClick={() => setViewPO(null)}>Close</Button>
+              <Button variant="primary" onClick={() => sendWhatsApp(viewPO)}><Send className="w-4 h-4" /> SEND WHATSAPP</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

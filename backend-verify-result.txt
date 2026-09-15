@@ -1,0 +1,3 @@
+BACKEND_IMPORT_OK APEX Multi-Outlet Restaurant ERP
+COMPILE_OK backend/app/schemas/procurement.py
+COMPILE_OK backend/app/api/v1/endpoints/procurement.py

@@ -92,15 +92,63 @@ app.add_middleware(AbuseRateLimitMiddleware, limit=30, window_seconds=60)
 app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS configuration
-if settings.is_production and (not settings.BACKEND_CORS_ORIGINS or "*" in settings.BACKEND_CORS_ORIGINS):
-    raise RuntimeError("BACKEND_CORS_ORIGINS must explicitly list trusted frontend origins in production")
+#
+# Local development:
+# Frontend normally runs on localhost:3000.
+# Backend normally runs on 127.0.0.1:8000.
+#
+# Keep production CORS strict, but always allow the local frontend
+# explicitly during development.
+
+cors_origins = list(settings.BACKEND_CORS_ORIGINS or [])
+
+if not settings.is_production:
+    local_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+    # Never use "*" together with credentials.
+    cors_origins = [
+        origin
+        for origin in cors_origins
+        if origin != "*"
+    ]
+
+    for origin in local_origins:
+        if origin not in cors_origins:
+            cors_origins.append(origin)
+
+if settings.is_production and (
+    not cors_origins or "*" in cors_origins
+):
+    raise RuntimeError(
+        "BACKEND_CORS_ORIGINS must explicitly list trusted frontend origins in production"
+    )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Outlet-Id", "X-Request-ID", "X-Telegram-Bot-Api-Secret-Token", "X-Hub-Signature-256", "X-Requested-With", "Accept", "Origin"],
+    allow_methods=[
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+    ],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Outlet-Id",
+        "X-Request-ID",
+        "X-Telegram-Bot-Api-Secret-Token",
+        "X-Hub-Signature-256",
+        "X-Requested-With",
+        "Accept",
+        "Origin",
+    ],
 )
 
 # Structured Request Logging Middleware

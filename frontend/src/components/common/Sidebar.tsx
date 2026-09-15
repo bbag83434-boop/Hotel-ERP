@@ -120,8 +120,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         'CENTRAL_PURCHASE_MANAGER', 'CENTRAL_STORE_MANAGER', 'DESSERT_KITCHEN_HEAD',
         'GENERAL_MANAGER', 'DIRECTOR', 'KITCHEN_CHEF', 'PRODUCTION_MANAGER'].includes(userRole.toUpperCase()));
         
-  const isOutletScope = Boolean(activeOutlet?.id && !isHeadOffice);
-  const showFullSuite = isOutletScope ? false : (hasManagementRole || !!isHeadOffice);
+  const isOutletScope = Boolean(activeOutlet?.id);
+const showFullSuite = isOutletScope
+  ? false
+  : (hasManagementRole || !!isHeadOffice);
 
   const navGroups = [
     {

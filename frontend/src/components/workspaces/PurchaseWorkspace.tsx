@@ -93,7 +93,8 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
   const [newPRNotes, setNewPRNotes] = useState<string>('');
   const [newPRLines, setNewPRLines] = useState<
     Array<{ item_id: string; requested_qty: number; estimated_price: number; unit?: string; supply_source?: string; supplier_id?: string; supplier_name?: string; notes?: string }>
-  >([{ item_id: '', requested_qty: 10, estimated_price: 0 }]);
+  >([{ item_id: '', requested_qty: 0, estimated_price: 0 }]);
+  const [itemSearchQueries, setItemSearchQueries] = useState<Record<number, string>>({});
 
   // New GRN / Receiving Form State
   const [newGRNPOId, setNewGRNPOId] = useState<string>('');
@@ -176,12 +177,21 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
   // Handle Item Selection in Need Form (Auto-determine vendor from Setup mapping)
   const handleSelectPRItem = (index: number, itemId: string) => {
     const itemObj = inventoryItems.find((i) => i.id === itemId);
-    const mapping = vendorItems.find((m) => m.item_id === itemId && (m.is_preferred || m.is_active));
+    // Vendor-Item Master is authoritative for outlet routing.
+    // If an active Vendor-Item mapping exists, this line is DIRECT_VENDOR
+    // even when the legacy Item Master still says CENTRAL_STORE.
+    const mapping = vendorItems
+      .filter((m) => m.item_id === itemId && m.is_active)
+      .sort((a, b) => Number(Boolean(b.is_preferred)) - Number(Boolean(a.is_preferred)))[0];
     const matchedSupplier = mapping
       ? suppliers.find((s) => s.id === mapping.supplier_id)
       : suppliers.find((s) => s.id === itemObj?.supplier_id);
 
-    const price = mapping?.purchase_price
+    const supplySource = mapping?.supplier_id
+      ? 'DIRECT_VENDOR'
+      : (itemObj?.supply_source || 'CENTRAL_STORE');
+
+    const price = mapping?.purchase_price != null
       ? Number(mapping.purchase_price)
       : itemObj?.cost_price
       ? Number(itemObj.cost_price)
@@ -192,12 +202,13 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       ...updated[index],
       item_id: itemId,
       unit: itemObj?.unit?.symbol || itemObj?.unit_symbol || '',
-      supply_source: itemObj?.supply_source || 'CENTRAL_STORE',
+      supply_source: supplySource,
       supplier_id: mapping?.supplier_id || itemObj?.supplier_id || undefined,
       supplier_name: mapping?.supplier_name || matchedSupplier?.name || undefined,
       estimated_price: price,
     };
     setNewPRLines(updated);
+    setItemSearchQueries((prev) => ({ ...prev, [index]: '' }));
   };
 
   // Submit New Need (PR)
@@ -217,12 +228,14 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
           item_id: l.item_id,
           requested_qty: Number(l.requested_qty),
           estimated_price: Number(l.estimated_price),
+          supplier_id: l.supplier_id || undefined,
           notes: l.notes || undefined,
         })),
       });
       setFeedback({ type: 'success', message: 'Need requirement submitted to Head Office successfully.' });
       setCreatePRModalOpen(false);
-      setNewPRLines([{ item_id: '', requested_qty: 10, estimated_price: 0 }]);
+      setNewPRLines([{ item_id: '', requested_qty: 0, estimated_price: 0 }]);
+      setItemSearchQueries({});
       setNewPRNotes('');
       fetchData();
     } catch (err: any) {
@@ -985,7 +998,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                     onClick={() =>
                       setNewPRLines([
                         ...newPRLines,
-                        { item_id: '', requested_qty: 10, estimated_price: 0 },
+                        { item_id: '', requested_qty: 0, estimated_price: 0 },
                       ])
                     }
                     className="text-[11px] text-[#B8862D] font-bold hover:underline"
@@ -994,59 +1007,158 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                   </button>
                 </div>
 
-                {newPRLines.map((line, idx) => (
-                  <div key={idx} className="p-3 bg-[#FAF8F5] rounded-xl space-y-2 border border-gray-100">
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={line.item_id}
-                        onChange={(e) => handleSelectPRItem(idx, e.target.value)}
-                        className="flex-1 p-2 bg-white border border-gray-200 rounded-xl text-xs"
-                      >
-                        <option value="">-- Choose Item --</option>
-                        {inventoryItems.map((itm) => (
-                          <option key={itm.id} value={itm.id}>
-                            {itm.name} ({itm.unit?.symbol || itm.code || 'Unit'})
-                          </option>
-                        ))}
-                      </select>
+                {newPRLines.map((line, idx) => {
+                  const qty = Number(line.requested_qty || 0);
+                  const unitPrice = Number(line.estimated_price || 0);
+                  const amount = qty * unitPrice;
+                  const query = (itemSearchQueries[idx] || '').trim().toLowerCase();
+                  const filteredItems = inventoryItems.filter((itm) => {
+                    if (!query) return true;
+                    return (
+                      String(itm.name || '').toLowerCase().includes(query) ||
+                      String(itm.code || '').toLowerCase().includes(query) ||
+                      String(itm.id || '').toLowerCase().includes(query)
+                    );
+                  });
 
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="Qty"
-                        value={line.requested_qty}
-                        onChange={(e) => {
-                          const updated = [...newPRLines];
-                          updated[idx].requested_qty = Number(e.target.value);
-                          setNewPRLines(updated);
-                        }}
-                        className="w-20 p-2 bg-white border border-gray-200 rounded-xl text-xs text-right font-mono"
-                      />
+                  return (
+                    <div key={idx} className="p-3 bg-[#FAF8F5] rounded-xl space-y-3 border border-gray-100">
+                      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_75px_70px_105px_120px_auto] gap-2 items-end">
+                        <div className="min-w-0">
+                          <label className="block text-[10px] font-semibold text-[#707070] mb-1">Item</label>
+                          <div className="relative mb-1.5">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={itemSearchQueries[idx] || ''}
+                              onChange={(e) => setItemSearchQueries((prev) => ({ ...prev, [idx]: e.target.value }))}
+                              placeholder="Search item name / code..."
+                              className="w-full pl-8 pr-2.5 py-2 bg-white border border-gray-200 rounded-xl text-xs outline-none focus:border-[#B8862D]"
+                            />
+                          </div>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={itemSearchQueries[idx] || ''}
+                              onChange={(e) =>
+                                setItemSearchQueries((prev) => ({
+                                  ...prev,
+                                  [idx]: e.target.value,
+                                }))
+                              }
+                              onFocus={() => {
+                                if (!itemSearchQueries[idx]) {
+                                  setItemSearchQueries((prev) => ({ ...prev, [idx]: '' }));
+                                }
+                              }}
+                              placeholder={
+                                line.item_id
+                                  ? inventoryItems.find((itm) => itm.id === line.item_id)?.name || 'Search item...'
+                                  : 'Search item name / code...'
+                              }
+                              className="w-full p-2 bg-white border border-gray-200 rounded-xl text-xs outline-none focus:border-[#B8862D]"
+                            />
 
-                      {newPRLines.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setNewPRLines(newPRLines.filter((_, i) => i !== idx))}
-                          className="text-red-500 hover:text-red-700 p-1"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                            {query && (
+                              <div className="absolute z-50 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-lg">
+                                {filteredItems.length > 0 ? (
+                                  filteredItems.slice(0, 30).map((itm) => (
+                                    <button
+                                      key={itm.id}
+                                      type="button"
+                                      onClick={() => handleSelectPRItem(idx, itm.id)}
+                                      className="w-full text-left px-3 py-2 hover:bg-[#F1E4C5]/50 border-b border-gray-50 last:border-b-0"
+                                    >
+                                      <div className="text-xs font-semibold text-[#1C1C1C]">{itm.name}</div>
+                                      <div className="text-[10px] text-[#707070]">
+                                        {itm.code ? `${itm.code} · ` : ''}{itm.unit?.symbol || 'Unit'}
+                                      </div>
+                                    </button>
+                                  ))
+                                ) : (
+                                  <div className="px-3 py-2 text-[10px] text-red-500">
+                                    No matching item found.
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#707070] mb-1">Qty</label>
+                          <input
+                            type="number" min="0" step="0.01" value={line.requested_qty}
+                            onChange={(e) => {
+                              const updated = [...newPRLines];
+                              updated[idx] = { ...updated[idx], requested_qty: Number(e.target.value) };
+                              setNewPRLines(updated);
+                            }}
+                            className="w-full p-2 bg-white border border-gray-200 rounded-xl text-xs text-right font-mono font-semibold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#707070] mb-1">Unit</label>
+                          <div className="w-full p-2 bg-gray-100 border border-gray-200 rounded-xl text-xs text-center font-semibold min-h-[34px]">
+                            {line.unit || '—'}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#707070] mb-1">Unit Price</label>
+                          <div className="w-full p-2 bg-gray-100 border border-gray-200 rounded-xl text-xs text-right font-mono font-semibold min-h-[34px]">
+                            ₹{unitPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#707070] mb-1">Amount</label>
+                          <div className="w-full p-2 bg-[#F1E4C5] border border-[#C79A3B]/30 rounded-xl text-xs text-right font-mono font-bold text-[#8A641F] min-h-[34px]">
+                            ₹{amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+
+                        {newPRLines.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewPRLines(newPRLines.filter((_, i) => i !== idx));
+                              setItemSearchQueries((prev) => {
+                                const next = { ...prev };
+                                delete next[idx];
+                                return next;
+                              });
+                            }}
+                            className="text-red-500 hover:text-red-700 p-1 mb-1"
+                            title="Remove item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {line.supplier_name && (
+                        <p className="text-[10px] text-green-700 font-semibold flex items-center gap-1">
+                          <Check className="w-3 h-3" /> Auto-mapped Supplier: {line.supplier_name}
+                        </p>
+                      )}
+                      {line.supply_source && (
+                        <p className="text-[10px] text-[#B8862D] font-semibold flex items-center gap-1">
+                          <PackageCheck className="w-3 h-3" />
+                          Auto-routed Source: {formatSupplySource(line.supply_source)}
+                        </p>
                       )}
                     </div>
+                  );
+                })}
+              </div>
 
-                    {line.supplier_name && (
-                      <p className="text-[10px] text-green-700 font-semibold flex items-center gap-1">
-                        <Check className="w-3 h-3" /> Auto-mapped Supplier: {line.supplier_name}
-                      </p>
-                    )}
-                    {line.supply_source && (
-                      <p className="text-[10px] text-[#B8862D] font-semibold flex items-center gap-1">
-                        <PackageCheck className="w-3 h-3" />
-                        Auto-routed Source: {formatSupplySource(line.supply_source)}
-                      </p>
-                    )}
-                  </div>
-                ))}
+              <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#1C1C1C] text-white">
+                <span className="text-xs font-semibold">Estimated Total</span>
+                <span className="text-base font-bold font-mono text-[#F1E4C5]">
+                  ₹{newPRLines.reduce((sum, item) => sum + Number(item.requested_qty || 0) * Number(item.estimated_price || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
               </div>
 
               <div>

@@ -208,6 +208,8 @@ class PurchaseRequestResponse(BaseModel):
     approved_by_id: Optional[str] = None
     approved_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
+    # Derived for display/approval only; PR quantities and estimated prices stay immutable.
+    total_amount: Decimal = Decimal("0.0000")
     items: List[PurchaseRequestItemResponse] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
