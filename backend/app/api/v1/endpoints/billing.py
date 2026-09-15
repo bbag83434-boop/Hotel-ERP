@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
@@ -12,6 +13,7 @@ from app.core.exceptions import NotFoundException, BadRequestException, Forbidde
 from app.models.user import User
 from app.models.billing import VendorBill, VendorBillItem, VendorBillGRNLink, Payment, BillStatus
 from app.models.procurement import Supplier, GoodsReceiveNote
+from app.models.audit import AuditLog
 from app.services.billing import BillingService
 
 router = APIRouter()
@@ -20,6 +22,8 @@ class BillLineCreate(BaseModel):
     item_id: str
     quantity: Decimal = Field(..., gt=0)
     unit_price: Decimal = Field(..., ge=0)
+    # Supplier-provided amounts are checked, never stored as authoritative values.
+    line_total: Optional[Decimal] = Field(default=None, ge=0)
 
 class BillCreate(BaseModel):
     supplier_id: str
@@ -27,6 +31,7 @@ class BillCreate(BaseModel):
     invoice_date: datetime
     due_date: Optional[datetime] = None
     tax_amount: Decimal = Field(default=Decimal('0'), ge=0)
+    invoice_total: Optional[Decimal] = Field(default=None, ge=0)
     notes: Optional[str] = None
     grn_ids: List[str] = Field(default_factory=list)
     items: List[BillLineCreate] = Field(..., min_length=1)
@@ -45,6 +50,36 @@ def _company_filter(query, user):
     if user.company_id:
         return query.filter(Supplier.company_id == user.company_id)
     return query
+
+
+def _audit_bill(db: Session, user: User, action: str, bill: VendorBill, old_status, new_status, details=None):
+    """Keep bill workflow decisions in the same immutable audit log used by procurement."""
+    db.add(AuditLog(
+        user_id=user.id,
+        action=action,
+        entity_type="VendorBill",
+        entity_id=bill.id,
+        details=json.dumps({
+            "old_values": {"status": old_status},
+            "new_values": {"status": new_status, "details": details or {}},
+        }, default=str),
+    ))
+
+
+def _audit_payment(db: Session, user: User, payment: Payment, bill: VendorBill, old_status, new_status):
+    db.add(AuditLog(
+        user_id=user.id,
+        action="CREATE_VENDOR_BILL_PAYMENT",
+        entity_type="Payment",
+        entity_id=payment.id,
+        details=json.dumps({
+            "bill_id": bill.id,
+            "supplier_id": bill.supplier_id,
+            "amount": str(payment.amount),
+            "old_values": {"bill_status": old_status},
+            "new_values": {"bill_status": new_status, "payment_status": payment.status},
+        }, default=str),
+    ))
 
 
 @router.get('/bills')
@@ -99,7 +134,13 @@ def create_bill(
     if duplicate:
         raise BadRequestException('A bill with this invoice number already exists for this supplier.')
     total = sum((line.quantity * line.unit_price for line in payload.items), Decimal('0'))
+    for line in payload.items:
+        calculated_line_total = line.quantity * line.unit_price
+        if line.line_total is not None and abs(line.line_total - calculated_line_total) > Decimal('0.01'):
+            raise BadRequestException('Invoice line amount must equal quantity multiplied by unit price.')
     net = total + payload.tax_amount
+    if payload.invoice_total is not None and abs(payload.invoice_total - net) > Decimal('0.01'):
+        raise BadRequestException('Invoice total does not equal the sum of invoice lines plus tax.')
     bill = VendorBill(company_id=supplier.company_id, supplier_id=supplier.id, invoice_number=payload.invoice_number,
                       invoice_date=payload.invoice_date, due_date=payload.due_date, total_amount=total,
                       tax_amount=payload.tax_amount, net_amount=net, notes=payload.notes, status=BillStatus.DRAFT)
@@ -107,13 +148,29 @@ def create_bill(
     for line in payload.items:
         db.add(VendorBillItem(bill_id=bill.id, item_id=line.item_id, quantity=line.quantity,
                               unit_price=line.unit_price, total_price=line.quantity * line.unit_price))
+    linked_po_id = None
+    seen_grn_ids = set()
     for grn_id in payload.grn_ids:
+        if grn_id in seen_grn_ids:
+            raise BadRequestException('The same GRN cannot be linked to a bill more than once.')
+        seen_grn_ids.add(grn_id)
         grn = db.query(GoodsReceiveNote).filter(GoodsReceiveNote.id == grn_id).first()
         if not grn:
             raise NotFoundException(f'GRN not found: {grn_id}')
         if str(grn.supplier_id) != str(supplier.id):
             raise BadRequestException('Bill GRNs must belong to the selected supplier.')
+        if grn.company_id != supplier.company_id:
+            raise BadRequestException('Bill GRNs must belong to the selected company.')
+        if not grn.po_id:
+            raise BadRequestException('Bill GRNs must be linked to a purchase order.')
+        if linked_po_id and grn.po_id != linked_po_id:
+            raise BadRequestException('All GRNs on a bill must belong to the same purchase order.')
+        linked_po_id = grn.po_id
+        existing_link = db.query(VendorBillGRNLink).filter(VendorBillGRNLink.grn_id == grn.id).first()
+        if existing_link:
+            raise BadRequestException('A GRN may be counted on only one vendor bill.')
         db.add(VendorBillGRNLink(bill_id=bill.id, grn_id=grn.id))
+    _audit_bill(db, current_user, 'CREATE_VENDOR_BILL', bill, None, BillStatus.DRAFT.value, {"invoice_number": bill.invoice_number, "grn_ids": payload.grn_ids})
     db.commit(); db.refresh(bill)
     return {'id': bill.id, 'invoice_number': bill.invoice_number, 'status': bill.status.value, 'net_amount': float(bill.net_amount)}
 
@@ -123,11 +180,16 @@ def verify_bill(bill_id: str, db: Session = Depends(get_db), current_user: User 
     bill = db.query(VendorBill).filter(VendorBill.id == bill_id).first()
     if not bill: raise NotFoundException('Bill not found')
     if current_user.company_id and bill.company_id != current_user.company_id: raise ForbiddenException('Access denied')
-    matched = BillingService(db).perform_three_way_match(bill_id)
-    if not matched:
-        raise BadRequestException('3-Way match failed. Check approved GRN quantity and PO rate.')
+    old_status = bill.status.value if hasattr(bill.status, 'value') else bill.status
+    result = BillingService(db).perform_three_way_match(bill_id)
+    if not result.matched:
+        _audit_bill(db, current_user, 'VENDOR_BILL_VARIANCE', bill, old_status, old_status, result.as_dict())
+        db.commit()
+        raise BadRequestException(f'3-Way match failed: {json.dumps(result.as_dict(), default=str)}')
     db.refresh(bill)
-    return {'id': bill.id, 'status': bill.status.value}
+    _audit_bill(db, current_user, 'VERIFY_VENDOR_BILL', bill, old_status, bill.status.value, result.as_dict())
+    db.commit()
+    return {'id': bill.id, 'status': bill.status.value, 'three_way_match': result.as_dict()}
 
 
 @router.post('/bills/{bill_id}/approve')
@@ -135,8 +197,11 @@ def approve_bill(bill_id: str, db: Session = Depends(get_db), current_user: User
     bill = db.query(VendorBill).filter(VendorBill.id == bill_id).first()
     if not bill: raise NotFoundException('Bill not found')
     if current_user.company_id and bill.company_id != current_user.company_id: raise ForbiddenException('Access denied')
+    old_status = bill.status.value if hasattr(bill.status, 'value') else bill.status
     BillingService(db).approve_bill(bill_id, current_user.id)
     db.refresh(bill)
+    _audit_bill(db, current_user, 'APPROVE_VENDOR_BILL', bill, old_status, bill.status.value)
+    db.commit()
     return {'id': bill.id, 'status': bill.status.value}
 
 
@@ -156,23 +221,39 @@ def list_payments(supplier_id: Optional[str] = None, db: Session = Depends(get_d
 def create_payment(payload: PaymentCreate, db: Session = Depends(get_db), current_user: User = Depends(require_permission('procurement:update'))):
     supplier = db.query(Supplier).filter(Supplier.id == payload.supplier_id).first()
     if not supplier or (current_user.company_id and supplier.company_id != current_user.company_id): raise NotFoundException('Supplier not found')
-    if payload.bill_id:
-        bill = db.query(VendorBill).filter(VendorBill.id == payload.bill_id, VendorBill.supplier_id == supplier.id).first()
-        if not bill: raise NotFoundException('Bill not found')
-        if bill.status not in [BillStatus.APPROVED, BillStatus.PAID]: raise BadRequestException('Only an approved bill can receive payment.')
-        allocated = sum((Decimal(str(p.amount)) for p in db.query(Payment).filter(Payment.bill_id == bill.id, Payment.status.in_(['POSTED','PAID'])).all()), Decimal('0'))
-        if payload.amount > Decimal(str(bill.net_amount)) - allocated: raise BadRequestException('Payment exceeds bill outstanding balance.')
+    if not payload.bill_id:
+        raise BadRequestException('A vendor-bill payment must reference an approved vendor bill.')
+    bill = db.query(VendorBill).filter(
+        VendorBill.id == payload.bill_id,
+        VendorBill.supplier_id == supplier.id,
+        VendorBill.company_id == supplier.company_id,
+    ).first()
+    if not bill: raise NotFoundException('Bill not found')
+    # PARTIAL payments are part of the established allocation design.  The
+    # authoritative bill total, not a client-side balance, controls the limit.
+    if bill.status != BillStatus.APPROVED:
+        raise BadRequestException('Only an approved bill can receive payment.')
+    allocated = sum((Decimal(str(p.amount)) for p in db.query(Payment).filter(
+        Payment.bill_id == bill.id,
+        Payment.status.in_(['POSTED', 'PAID']),
+    ).all()), Decimal('0'))
+    remaining = Decimal(str(bill.net_amount)) - allocated
+    if payload.amount > remaining:
+        raise BadRequestException('Payment exceeds bill outstanding balance.')
     payment = Payment(company_id=supplier.company_id, supplier_id=supplier.id, amount=payload.amount,
                       payment_date=payload.payment_date or datetime.utcnow(), payment_method=payload.payment_method,
-                      reference_number=payload.reference_number, status='POSTED', notes=payload.notes)
-    # bill_id is supported as a dynamic attribute only after schema migration; add the column in bootstrap.
-    if payload.bill_id is not None: payment.bill_id = payload.bill_id
+                      reference_number=payload.reference_number, status='POSTED', notes=payload.notes,
+                      bill_id=bill.id)
     db.add(payment)
-    if payload.bill_id:
-        db.flush()
-        bill = db.query(VendorBill).filter(VendorBill.id == payload.bill_id).first()
-        allocated = sum((Decimal(str(p.amount)) for p in db.query(Payment).filter(Payment.bill_id == bill.id, Payment.status.in_(['POSTED','PAID'])).all()), Decimal('0'))
-        if allocated >= Decimal(str(bill.net_amount)): bill.status = BillStatus.PAID
+    # Payment, bill status, and audit entry commit together.  The existing
+    # vendor ledger is derived from these same committed bill/payment records.
+    old_status = bill.status.value if hasattr(bill.status, 'value') else bill.status
+    db.flush()
+    allocated += Decimal(str(payment.amount))
+    if allocated >= Decimal(str(bill.net_amount)):
+        bill.status = BillStatus.PAID
+    new_status = bill.status.value if hasattr(bill.status, 'value') else bill.status
+    _audit_payment(db, current_user, payment, bill, old_status, new_status)
     db.commit(); db.refresh(payment)
     return {'id': payment.id, 'status': payment.status, 'amount': float(payment.amount), 'bill_id': payload.bill_id}
 
@@ -181,17 +262,27 @@ def create_payment(payload: PaymentCreate, db: Session = Depends(get_db), curren
 def vendor_ledger(supplier_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not supplier or (current_user.company_id and supplier.company_id != current_user.company_id): raise NotFoundException('Supplier not found')
-    bills = db.query(VendorBill).filter(VendorBill.supplier_id == supplier_id).order_by(VendorBill.invoice_date.asc()).all()
-    payments = db.query(Payment).filter(Payment.supplier_id == supplier_id, Payment.status.in_(['POSTED','PAID'])).all()
+    bills = db.query(VendorBill).filter(
+        VendorBill.supplier_id == supplier_id,
+        VendorBill.company_id == supplier.company_id,
+        VendorBill.status.in_([BillStatus.APPROVED, BillStatus.PAID]),
+    ).order_by(VendorBill.invoice_date.asc()).all()
+    bill_ids = {bill.id for bill in bills}
+    payments = db.query(Payment).filter(
+        Payment.supplier_id == supplier_id,
+        Payment.company_id == supplier.company_id,
+        Payment.status.in_(['POSTED', 'PAID']),
+        Payment.bill_id.in_(bill_ids) if bill_ids else False,
+    ).all()
     events = []
     for b in bills:
-        events.append((b.invoice_date, b.created_at, 'INVOICE', b.id, b.invoice_number, Decimal(str(b.net_amount)), Decimal('0')))
+        events.append((b.invoice_date, b.created_at, 'INVOICE', b.id, b.invoice_number, Decimal(str(b.net_amount)), Decimal('0'), b.id))
     for p in payments:
-        events.append((p.payment_date, p.created_at, 'PAYMENT', p.id, p.reference_number or p.payment_method, Decimal('0'), Decimal(str(p.amount))))
+        events.append((p.payment_date, p.created_at, 'PAYMENT', p.id, p.reference_number or p.payment_method, Decimal('0'), Decimal(str(p.amount)), p.bill_id))
     events.sort(key=lambda x: (x[0], x[1]))
     balance = Decimal('0'); rows=[]
-    for dt, _, typ, rid, ref, debit, credit in events:
+    for dt, _, typ, rid, ref, debit, credit, bill_id in events:
         balance += debit - credit
         rows.append({'id': rid, 'supplier_id': supplier_id, 'transaction_type': typ, 'debit': float(debit), 'credit': float(credit),
-                     'balance': float(balance), 'reference': ref, 'created_at': dt})
+                     'balance': float(balance), 'reference': ref, 'bill_id': bill_id, 'created_at': dt})
     return {'supplier_id': supplier_id, 'supplier_name': supplier.name, 'closing_balance': float(balance), 'entries': rows}

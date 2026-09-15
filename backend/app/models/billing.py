@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, Numeric, DateTime, Enum as SQLEnum, Text, Index
+from sqlalchemy import Column, String, ForeignKey, Numeric, DateTime, Enum as SQLEnum, Text, Index, UniqueConstraint
 from sqlalchemy.orm import relationship, synonym
 from app.models.base import BaseModel
 import enum
@@ -62,6 +62,7 @@ class VendorBillItem(BaseModel):
 
 class VendorBillGRNLink(BaseModel):
     __tablename__ = "vendor_bill_grn_links"
+    __table_args__ = (UniqueConstraint("billId", "grnId", name="uq_vendor_bill_grn_link"),)
     
     bill_id = Column("billId", String(36), ForeignKey("vendor_bills.id", ondelete="CASCADE"), nullable=False, index=True)
     grn_id = Column("grnId", String(36), ForeignKey("goods_receive_notes.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -77,6 +78,9 @@ class Payment(BaseModel):
     
     company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     supplier_id = Column("supplierId", String(36), ForeignKey("suppliers.id"), nullable=False, index=True)
+    # Payments are bill allocations.  Keeping this as a mapped field (rather
+    # than a runtime attribute) makes every allocation queryable and auditable.
+    bill_id = Column("billId", String(36), ForeignKey("vendor_bills.id", ondelete="RESTRICT"), nullable=True, index=True)
     amount = Column(Numeric(14, 4), nullable=False)
     payment_date = Column("paymentDate", DateTime, default=datetime.utcnow, nullable=False)
     payment_method = Column("paymentMethod", String(50), nullable=False)
@@ -86,7 +90,8 @@ class Payment(BaseModel):
     
     companyId = synonym("company_id")
     supplierId = synonym("supplier_id")
+    billId = synonym("bill_id")
     paymentDate = synonym("payment_date")
     paymentMethod = synonym("payment_method")
     referenceNumber = synonym("reference_number")
-    billId = synonym("bill_id")
+    bill = relationship("VendorBill")

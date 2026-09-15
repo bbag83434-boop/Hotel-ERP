@@ -101,6 +101,9 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
   const [newGRNInvoiceNum, setNewGRNInvoiceNum] = useState<string>('');
   const [newGRNInvoiceAmt, setNewGRNInvoiceAmt] = useState<number>(0);
   const [newGRNNotes, setNewGRNNotes] = useState<string>('');
+  const [newGRNLines, setNewGRNLines] = useState<
+    Array<{ po_item_id: string; item_name: string; unit: string; outstanding_qty: number; received_qty: number; accepted_qty: number }>
+  >([]);
   const [newGRNInvoiceFile, setNewGRNInvoiceFile] = useState<{
     fileName: string;
     fileType: string;
@@ -214,7 +217,6 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
           item_id: l.item_id,
           requested_qty: Number(l.requested_qty),
           estimated_price: Number(l.estimated_price),
-          supplier_id: l.supplier_id || undefined,
           notes: l.notes || undefined,
         })),
       });
@@ -240,6 +242,10 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       setFeedback({ type: 'error', message: 'Please enter the Supplier Invoice / Challan Number.' });
       return;
     }
+    if (!newGRNLines.length || !newGRNLines.some((line) => line.received_qty > 0) || newGRNLines.some((line) => line.accepted_qty < 0 || line.accepted_qty > line.received_qty)) {
+      setFeedback({ type: 'error', message: 'Enter valid delivered and accepted quantities.' });
+      return;
+    }
     setLoading(true);
     try {
       await procurementApi.createGoodsReceiveFromPO({
@@ -249,6 +255,12 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
         invoice_amount: Number(newGRNInvoiceAmt || 0),
         invoice_file_name: newGRNInvoiceFile?.fileName || undefined,
         notes: newGRNNotes || undefined,
+        items: newGRNLines.filter((line) => line.received_qty > 0).map((line) => ({
+          po_item_id: line.po_item_id,
+          received_qty: Number(line.received_qty),
+          accepted_qty: Number(line.accepted_qty),
+          rejected_qty: Number(line.received_qty) - Number(line.accepted_qty),
+        })),
       });
 
       setFeedback({
@@ -260,6 +272,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       setNewGRNInvoiceNum('');
       setNewGRNInvoiceAmt(0);
       setNewGRNNotes('');
+      setNewGRNLines([]);
       setNewGRNInvoiceFile(null);
       fetchData();
     } catch (err: any) {
@@ -1099,6 +1112,19 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                     if (po) {
                       setNewGRNSupplierId(po.supplier_id || '');
                       setNewGRNInvoiceAmt(Number(po.net_amount || po.total_amount || 0));
+                      setNewGRNLines((po.items || []).map((line: any) => {
+                        const outstanding = Math.max(0, Number(line.ordered_qty || 0) - Number(line.received_qty || 0));
+                        return {
+                          po_item_id: line.id,
+                          item_name: line.item_name || line.item?.name || 'Item',
+                          unit: line.unit_symbol || line.item?.unit?.symbol || '',
+                          outstanding_qty: outstanding,
+                          received_qty: outstanding,
+                          accepted_qty: outstanding,
+                        };
+                      }));
+                    } else {
+                      setNewGRNLines([]);
                     }
                   }}
                   className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl font-semibold"
@@ -1111,6 +1137,46 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                   ))}
                 </select>
               </div>
+
+              {newGRNLines.length > 0 && (
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-semibold text-[#707070]">Delivered / Accepted Quantity</label>
+                  {newGRNLines.map((line, index) => (
+                    <div key={line.po_item_id} className="grid grid-cols-[1fr_74px_74px] gap-2 items-center p-2.5 bg-[#FAF8F5] rounded-xl">
+                      <div className="text-xs font-semibold text-[#1C1C1C]">
+                        {line.item_name} <span className="text-[10px] text-[#707070]">(PO balance {line.outstanding_qty} {line.unit})</span>
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        max={line.outstanding_qty}
+                        aria-label={`Delivered quantity for ${line.item_name}`}
+                        value={line.received_qty}
+                        onChange={(e) => {
+                          const value = Math.min(line.outstanding_qty, Math.max(0, Number(e.target.value)));
+                          setNewGRNLines((lines) => lines.map((entry, i) => i === index ? { ...entry, received_qty: value, accepted_qty: Math.min(entry.accepted_qty, value) } : entry));
+                        }}
+                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs text-right font-mono"
+                        title="Delivered"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max={line.received_qty}
+                        aria-label={`Accepted quantity for ${line.item_name}`}
+                        value={line.accepted_qty}
+                        onChange={(e) => {
+                          const value = Math.min(line.received_qty, Math.max(0, Number(e.target.value)));
+                          setNewGRNLines((lines) => lines.map((entry, i) => i === index ? { ...entry, accepted_qty: value } : entry));
+                        }}
+                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs text-right font-mono"
+                        title="Accepted"
+                      />
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-[#707070]">Delivered quantity is recorded against the PO; only accepted quantity posts to outlet stock after approval.</p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

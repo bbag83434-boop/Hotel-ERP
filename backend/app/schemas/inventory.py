@@ -278,6 +278,13 @@ class StockTransferItemResponse(BaseModel):
     transfer_id: str
     item_id: str
     quantity: Decimal
+    # Dispatch / Outlet-receiving lifecycle quantities
+    requested_qty: Optional[Decimal] = None
+    dispatched_qty: Optional[Decimal] = None
+    accepted_qty: Optional[Decimal] = None
+    damaged_qty: Optional[Decimal] = None
+    short_qty: Optional[Decimal] = None
+    shortage_reason_code: Optional[str] = None
     unit_cost: Optional[Decimal] = None
     notes: Optional[str] = None
     item_name: Optional[str] = None
@@ -285,6 +292,24 @@ class StockTransferItemResponse(BaseModel):
     unit_symbol: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class StockTransferReceiveItem(BaseModel):
+    """Outlet-receiving line. accepted_qty is what physically enters outlet stock."""
+    transfer_item_id: Optional[str] = None
+    item_id: Optional[str] = None
+    accepted_qty: Decimal
+    damaged_qty: Optional[Decimal] = None
+    # When omitted, backend derives short = dispatched - already_accepted - accepted
+    short_qty: Optional[Decimal] = None
+    shortage_reason_code: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class StockTransferReceiveRequest(BaseModel):
+    """Outlet confirms what was actually received against a DISPATCHED transfer."""
+    items: List[StockTransferReceiveItem]
+    notes: Optional[str] = None
 
 class StockTransferCreate(BaseModel):
     from_warehouse_id: str
@@ -310,6 +335,19 @@ class StockTransferResponse(BaseModel):
     created_by_id: Optional[str] = None
     from_warehouse_name: Optional[str] = None
     to_warehouse_name: Optional[str] = None
+    # Central Store -> Outlet routing + lifecycle audit
+    source_branch_id: Optional[str] = None
+    destination_branch_id: Optional[str] = None
+    source_branch_name: Optional[str] = None
+    destination_branch_name: Optional[str] = None
+    expected_delivery_date: Optional[datetime] = None
+    dispatch_notes: Optional[str] = None
+    dispatched_by_id: Optional[str] = None
+    dispatched_at: Optional[datetime] = None
+    received_by_id: Optional[str] = None
+    received_at: Optional[datetime] = None
+    reconciled_by_id: Optional[str] = None
+    reconciled_at: Optional[datetime] = None
     items: List[StockTransferItemResponse] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

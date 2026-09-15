@@ -267,8 +267,9 @@ class StockLedger(Base):
 
 class TransferStatus(str, enum.Enum):
     REQUESTED = "REQUESTED"
-    PENDING = "PENDING"        # kept for backward compat
-    APPROVED = "APPROVED"
+    PENDING = "PENDING"                    # kept for backward compat
+    PURCHASE_REQUIRED = "PURCHASE_REQUIRED"  # CS stock check: insufficient stock, replenishment needed
+    APPROVED = "APPROVED"                  # CS stock check: sufficient stock, ready to dispatch
     DISPATCHED = "DISPATCHED"
     IN_TRANSIT = "IN_TRANSIT"
     PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED"

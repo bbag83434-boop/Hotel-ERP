@@ -22,7 +22,7 @@ from app.core.exceptions import (
 )
 from app.models.user import User, UserBranch
 from app.models.organization import Company, Branch, Warehouse
-from app.models.inventory import Item, Unit, StockBalance, StockLedger, StockTransfer, StockMovementType, StockBatch
+from app.models.inventory import Item, Unit, StockBalance, StockLedger, StockTransfer, StockTransferItem, StockMovementType, StockBatch
 from app.models.procurement import (
     Supplier,
     SupplierItem,
@@ -240,6 +240,24 @@ def resolve_default_item_vendor(db: Session, item: Item) -> Tuple[Optional[str],
         return item.supplier_id, "ITEM_MASTER_DEFAULT"
 
     return None, "NOT_CONFIGURED"
+
+
+def get_configured_supplier_item_price(db: Session, item: Item, supplier_id: str) -> Decimal:
+    """Return the master-data price for an already-resolved supplier/item pair.
+
+    This intentionally does not resolve a vendor.  Vendor routing stays in
+    resolve_default_item_vendor(); this helper only prevents a client-side
+    estimate from becoming the Direct Vendor PO amount.
+    """
+    supplier_mapping = db.query(SupplierItem).filter(
+        SupplierItem.company_id == item.company_id,
+        SupplierItem.item_id == item.id,
+        SupplierItem.supplier_id == supplier_id,
+        SupplierItem.is_active == True,  # noqa: E712
+    ).order_by(SupplierItem.is_preferred.desc(), SupplierItem.updated_at.desc()).first()
+    if supplier_mapping and supplier_mapping.purchase_price is not None:
+        return Decimal(str(supplier_mapping.purchase_price))
+    return Decimal(str(item.cost_price or Decimal("0.0000")))
 
 
 def format_central_store_catalog_item(db: Session, item: Item) -> CentralStoreVendorCatalogItem:
@@ -1019,6 +1037,25 @@ def create_purchase_request(
                 + ". Assign a preferred vendor in the Item/Vendor Master before creating the Central Store Requirement."
             )
 
+    # DIRECT_VENDOR follows the same existing Item/Vendor Master resolver.  The
+    # request payload is never a vendor-selection mechanism: every direct line
+    # is validated and mapped before a PurchaseRequest row is persisted.
+    missing_direct_vendor: List[str] = []
+    for item_in in payload.items:
+        db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
+        if not db_item:
+            raise NotFoundException(f"Inventory Item '{item_in.item_id}' not found.")
+        if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
+            supplier_id, _ = resolve_default_item_vendor(db, db_item)
+            if not supplier_id:
+                missing_direct_vendor.append(db_item.name)
+    if missing_direct_vendor:
+        raise BadRequestException(
+            "Vendor is not configured for Direct Vendor item(s): "
+            + ", ".join(sorted(set(missing_direct_vendor)))
+            + ". Assign an active preferred SupplierItem or Item Master supplier before submitting the request."
+        )
+
     req_prefix = {"MAIN_KITCHEN": "MR-", "CENTRAL_STORE": "CR-"}.get(requisition_type, "PR-")
     req_number = f"{req_prefix}{datetime.utcnow().strftime('%Y%m%d')}-{abs(hash(str(datetime.utcnow()) + payload.branch_id + requisition_type)) % 100000:05d}"
 
@@ -1046,6 +1083,10 @@ def create_purchase_request(
         # vendor — it is always auto-resolved from the Item/Vendor Master.
         if requisition_type == "CENTRAL_STORE":
             supplier_id, _ = resolve_default_item_vendor(db, db_item)
+        elif (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
+            # Ignore any supplier_id supplied by the outlet. Direct Vendor
+            # routing is determined solely by Item/Vendor Master configuration.
+            supplier_id, _ = resolve_default_item_vendor(db, db_item)
         else:
             supplier_id = item_in.supplier_id or db_item.supplier_id
 
@@ -1062,7 +1103,11 @@ def create_purchase_request(
             unit=item_unit,
             supply_source=item_supply_source,
             requested_qty=item_in.requested_qty,
-            estimated_price=item_in.estimated_price or db_item.cost_price or Decimal("0.0000"),
+            estimated_price=(
+                get_configured_supplier_item_price(db, db_item, supplier_id)
+                if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR" and supplier_id
+                else item_in.estimated_price or db_item.cost_price or Decimal("0.0000")
+            ),
             notes=item_in.notes,
         )
         db.add(pr_item)
@@ -1177,6 +1222,22 @@ def update_purchase_request(
                     + ". Assign a preferred vendor in the Item/Vendor Master before updating this Central Store Requirement."
                 )
 
+        missing_direct_vendor: List[str] = []
+        for item_in in payload.items:
+            db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
+            if not db_item:
+                raise NotFoundException(f"Item '{item_in.item_id}' not found.")
+            if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
+                supplier_id, _ = resolve_default_item_vendor(db, db_item)
+                if not supplier_id:
+                    missing_direct_vendor.append(db_item.name)
+        if missing_direct_vendor:
+            raise BadRequestException(
+                "Vendor is not configured for Direct Vendor item(s): "
+                + ", ".join(sorted(set(missing_direct_vendor)))
+                + ". Assign an active preferred SupplierItem or Item Master supplier before updating the request."
+            )
+
         # Replace items
         db.query(PurchaseRequestItem).filter(PurchaseRequestItem.request_id == req.id).delete()
         for item_in in payload.items:
@@ -1186,6 +1247,8 @@ def update_purchase_request(
             # PART 3: Central Store own requirement vendors are ALWAYS resolved
             # automatically from the Item/Vendor Master — no manual override.
             if req.requisition_type == "CENTRAL_STORE":
+                supplier_id, _ = resolve_default_item_vendor(db, db_item)
+            elif (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
                 supplier_id, _ = resolve_default_item_vendor(db, db_item)
             else:
                 supplier_id = item_in.supplier_id or db_item.supplier_id
@@ -1203,7 +1266,11 @@ def update_purchase_request(
                 unit=item_unit,
                 supply_source=item_supply_source,
                 requested_qty=item_in.requested_qty,
-                estimated_price=item_in.estimated_price or db_item.cost_price or Decimal("0.0000"),
+                estimated_price=(
+                    get_configured_supplier_item_price(db, db_item, supplier_id)
+                    if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR" and supplier_id
+                    else item_in.estimated_price or db_item.cost_price or Decimal("0.0000")
+                ),
                 notes=item_in.notes,
             )
             db.add(pr_item)
@@ -1371,6 +1438,8 @@ def approve_purchase_request(
     if req.requested_by_id == current_user.id:
         raise ForbiddenException("A Purchase Request creator cannot approve their own request.")
 
+    previous_status = req.status.value
+
     req.status = PRStatus.APPROVED
     req.approved_by_id = current_user.id
     req.approved_at = datetime.utcnow()
@@ -1385,9 +1454,15 @@ def approve_purchase_request(
         action="APPROVE_PURCHASE_REQUEST",
         entity_type="PurchaseRequest",
         entity_id=req.id,
-        new_values={"status": "APPROVED", "approved_by": current_user.email}
+        old_values={"status": previous_status},
+        new_values={
+            "status": "APPROVED",
+            "approved_by": current_user.email,
+            "approved_at": req.approved_at.isoformat() if req.approved_at else None,
+        }
     )
     db.commit()
+
 
     # Phase 6 & 7: Auto split downstream workflow
     if req.requisition_type == "CENTRAL_STORE":
@@ -1412,28 +1487,31 @@ def approve_purchase_request(
         for itm in req.items:
             db_item = db.query(Item).filter(Item.id == itm.item_id).first()
             supply = (itm.supply_source or (db_item.supply_source if db_item else "CENTRAL_STORE"))
-            if supply == "DIRECT_VENDOR":
+            if str(supply).upper() == "DIRECT_VENDOR":
                 has_direct_vendor = True
             else:
                 has_central_store = True
                 central_store_items.append(itm)
 
         if has_direct_vendor:
-            try:
-                consolidate_outlet_orders(
-                    payload=ConsolidateOrdersRequest(
-                        request_ids=[req.id],
-                        auto_submit=False,
-                        supply_source_filter=["DIRECT_VENDOR"],
-                        notes=f"Auto-generated PO from Outlet Requirement {req.request_number}"
-                    ),
+            direct_vendor_orders = consolidate_outlet_orders(
+                payload=ConsolidateOrdersRequest(
+                    request_ids=[req.id],
+                    auto_submit=False,
+                    supply_source_filter=["DIRECT_VENDOR"],
+                    notes=f"Auto-generated PO from Outlet Requirement {req.request_number}"
+                ),
+                db=db,
+                current_user=current_user
+            )
+            # Reuse the established submit lifecycle so every generated Direct
+            # Vendor PO is PENDING_APPROVAL (never vendor-sendable on creation).
+            for direct_vendor_po in direct_vendor_orders.orders:
+                submit_order_for_approval(
+                    order_id=direct_vendor_po.id,
                     db=db,
-                    current_user=current_user
+                    current_user=current_user,
                 )
-            except Exception as e:
-                import logging
-                logging.error(f"Error creating PO for DIRECT_VENDOR items: {e}")
-                pass
                 
         if has_central_store and central_store_items:
             # Create a StockTransfer (REQUESTED state) for Central Store queue
@@ -1601,6 +1679,14 @@ def consolidate_outlet_orders(
             raise BadRequestException(
                 f"Cannot consolidate Purchase Request '{pr.request_number}' because its status is {pr.status.value}."
             )
+        if (
+            payload.supply_source_filter
+            and "DIRECT_VENDOR" in {str(source).upper() for source in payload.supply_source_filter}
+            and pr.status != PRStatus.APPROVED
+        ):
+            raise BadRequestException(
+                f"Direct Vendor Purchase Order for '{pr.request_number}' requires approved Purchase Request status."
+            )
 
     # --------------------------------------------------------------------------
     # Supplier Identification & Grouping
@@ -1625,12 +1711,18 @@ def consolidate_outlet_orders(
                     raise NotFoundException(f"Item '{pr_item.item_id}' not found in catalog.")
 
             # Identify Supply Source & apply filter
-            effective_supply_source = pr_item.supply_source or db_item.supply_source or "CENTRAL_STORE"
-            if payload.supply_source_filter and effective_supply_source not in payload.supply_source_filter:
+            effective_supply_source = (pr_item.supply_source or db_item.supply_source or "CENTRAL_STORE").upper()
+            supply_source_filter = {str(source).upper() for source in (payload.supply_source_filter or [])}
+            if supply_source_filter and effective_supply_source not in supply_source_filter:
                 continue
 
-            # Identify Supplier: PR item explicit -> Item Master supplier_id
-            effective_supplier_id = pr_item.supplier_id or db_item.supplier_id
+            # DIRECT_VENDOR must always use the existing authoritative Item/Vendor
+            # Master resolver; a stored or client-provided PR supplier cannot
+            # override a preferred active SupplierItem mapping.
+            if effective_supply_source == "DIRECT_VENDOR":
+                effective_supplier_id, _ = resolve_default_item_vendor(db, db_item)
+            else:
+                effective_supplier_id = pr_item.supplier_id or db_item.supplier_id
             
             if not effective_supplier_id:
                 raise BadRequestException(
@@ -1648,8 +1740,16 @@ def consolidate_outlet_orders(
                 )
 
             # Initialize supplier group if first time encountered
-            if effective_supplier_id not in supplier_groups:
-                supplier_groups[effective_supplier_id] = {
+            # A direct-vendor delivery is physically received by the requesting
+            # outlet, never by the Central Store.  Keep each outlet's vendor
+            # lines in its own PO even when the vendor is shared.
+            supplier_group_key = (
+                f"{effective_supplier_id}:{pr.branch_id}"
+                if effective_supply_source == "DIRECT_VENDOR"
+                else effective_supplier_id
+            )
+            if supplier_group_key not in supplier_groups:
+                supplier_groups[supplier_group_key] = {
                     "supplier": supplier,
                     "items": {},
                     "outlet_breakdown": {},
@@ -1657,13 +1757,16 @@ def consolidate_outlet_orders(
                     "participating_branches": set(),
                 }
 
-            s_group = supplier_groups[effective_supplier_id]
+            s_group = supplier_groups[supplier_group_key]
             s_group["participating_requests"].add(pr.id)
             s_group["participating_branches"].add(branch_name)
 
             unit_sym = db_item.unit.symbol if db_item.unit else "Units"
             qty = Decimal(str(pr_item.requested_qty))
-            price = Decimal(str(pr_item.estimated_price or db_item.cost_price or 0))
+            # A PR estimate is never a PO rate.  Resolve the actual supplier
+            # price at PO creation, falling back to Item.cost_price only when
+            # this supplier has no active SupplierItem price.
+            price = get_configured_supplier_item_price(db, db_item, effective_supplier_id)
 
             # Consolidate same items
             if db_item.id not in s_group["items"]:
@@ -1800,10 +1903,34 @@ def consolidate_outlet_orders(
             }
         )
 
-    # Update all participating Purchase Requests to ORDERED
+    # Update participating Purchase Requests status.
+    #
+    # A PR must advance to ORDERED only when ALL its items have been consolidated
+    # into a vendor PO.  When a supply_source_filter is active (e.g. DIRECT_VENDOR-only),
+    # any item whose effective supply_source was excluded by that filter is still pending
+    # fulfilment (e.g. a CENTRAL_STORE item whose StockTransfer is REQUESTED).
+    # In that case the PR must stay at APPROVED — marking it ORDERED would incorrectly
+    # hide its pending Central Store work from the CS fulfilment queue.
     for pr in requests:
-        pr.status = PRStatus.ORDERED
+        if payload.supply_source_filter:
+            # Check whether this PR has any item that was excluded by the filter.
+            # If it does, the PR has outstanding CENTRAL_STORE (or other) items
+            # still awaiting fulfilment → keep status at APPROVED.
+            has_excluded_items = any(
+                (pri.supply_source or (
+                    db.query(Item).filter(Item.id == pri.item_id).first()
+                ).supply_source or "CENTRAL_STORE") not in payload.supply_source_filter
+                for pri in pr.items
+            )
+            if not has_excluded_items:
+                # All items matched the filter → every item was consolidated → ORDERED.
+                pr.status = PRStatus.ORDERED
+            # else: leave at APPROVED (mixed or pure-CS outlet PR)
+        else:
+            # No filter: all items were consolidated.
+            pr.status = PRStatus.ORDERED
         pr.updated_at = datetime.utcnow()
+
 
     db.commit()
 
@@ -1855,12 +1982,17 @@ def create_direct_purchase_order(
         db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
         if not db_item:
             raise NotFoundException(f"Item '{item_in.item_id}' not found.")
-        line_total = item_in.ordered_qty * item_in.unit_price
+        # Ignore the client-supplied unit_price.  PO amounts are always derived
+        # from SupplierItem master pricing (or the established item-cost fallback).
+        authoritative_unit_price = get_configured_supplier_item_price(
+            db, db_item, payload.supplier_id
+        )
+        line_total = item_in.ordered_qty * authoritative_unit_price
         total_amount += line_total
         po_items_to_add.append({
             "item_id": item_in.item_id,
             "ordered_qty": item_in.ordered_qty,
-            "unit_price": item_in.unit_price,
+            "unit_price": authoritative_unit_price,
             "total_price": line_total,
             "notes": item_in.notes,
         })
@@ -2001,6 +2133,7 @@ def approve_purchase_order(
     Approves a Purchase Order for supplier issuance.
     Requires manager / approver authorization.
     """
+    require_head_office_role(current_user, db)
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
     if not po:
         raise NotFoundException(f"Purchase Order '{order_id}' not found.")
@@ -2048,6 +2181,7 @@ def reject_purchase_order(
     current_user: User = Depends(get_current_active_user),
 ):
     """Rejects / cancels a purchase order with recorded reason."""
+    require_head_office_role(current_user, db)
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
     if not po:
         raise NotFoundException(f"Purchase Order '{order_id}' not found.")
@@ -2525,6 +2659,10 @@ def create_goods_receive_note(
             raise NotFoundException(f"Purchase Order '{payload.po_id}' not found.")
         if not supplier_id:
             supplier_id = po.supplier_id
+        if po.branch_id and po.branch_id != payload.branch_id:
+            raise BadRequestException("The destination branch must match the Purchase Order destination.")
+        if po.branch_id and wh.branch_id != po.branch_id:
+            raise BadRequestException("The receiving warehouse must match the Purchase Order destination.")
 
     company_id = branch.company_id or current_user.company_id
     grn_num = f"GRN-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(payload.branch_id) + str(datetime.utcnow()))) % 10000:04d}"
@@ -2555,6 +2693,11 @@ def create_goods_receive_note(
         })
 
     is_pending = (payload.auto_approve is False) or (payload.status == "PENDING_APPROVAL")
+    
+    # Enforce approval for Central Store receiving to prevent self-approval bypass
+    if branch and (branch.type or "").upper() == "CENTRAL_STORE":
+        is_pending = True
+        
     init_status = "PENDING_APPROVAL" if is_pending else "RECEIVED"
 
     grn = GoodsReceiveNote(
@@ -2694,7 +2837,9 @@ def create_goods_receive_from_po(
     if not po:
         raise NotFoundException(f"Purchase Order '{payload.po_id}' not found.")
 
-    branch_id = payload.branch_id or po.branch_id
+    if payload.branch_id and po.branch_id and payload.branch_id != po.branch_id:
+        raise BadRequestException("The destination branch must match the Purchase Order destination.")
+    branch_id = po.branch_id or payload.branch_id
     if not branch_id:
         branch_id = (current_user.branches[0].branch_id if getattr(current_user, 'branches', None) else None)
         if not branch_id:
@@ -2715,6 +2860,14 @@ def create_goods_receive_from_po(
         if not wh:
             raise NotFoundException(f"No active warehouse found for destination branch '{branch.name}'.")
         warehouse_id = wh.id
+    else:
+        wh = db.query(Warehouse).filter(
+            Warehouse.id == warehouse_id,
+            Warehouse.branch_id == branch_id,
+            Warehouse.is_active == True,  # noqa: E712
+        ).first()
+        if not wh:
+            raise BadRequestException("The receiving warehouse must be an active warehouse of the Purchase Order destination.")
 
     company_id = branch.company_id or current_user.company_id
     grn_num = f"GRN-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(branch_id) + str(datetime.utcnow()))) % 10000:04d}"
@@ -2726,24 +2879,51 @@ def create_goods_receive_from_po(
 
     total_po_amount = Decimal("0.0000")
     items_to_create = []
-    for pi in po_items:
-        outstanding_qty = pi.ordered_qty - (pi.received_qty or Decimal("0.0000"))
-        if outstanding_qty <= Decimal("0.0000"):
-            outstanding_qty = pi.ordered_qty
+    po_items_by_id = {pi.id: pi for pi in po_items}
+    requested_receipts = payload.items
+    if requested_receipts:
+        requested_ids = [line.po_item_id for line in requested_receipts]
+        if len(requested_ids) != len(set(requested_ids)):
+            raise BadRequestException("A PO line can only appear once in a Goods Receive Note.")
+        receipt_lines = []
+        for line in requested_receipts:
+            pi = po_items_by_id.get(line.po_item_id)
+            if not pi:
+                raise BadRequestException("Every receiving line must belong to the linked Purchase Order.")
+            if line.accepted_qty > line.received_qty:
+                raise BadRequestException("Accepted quantity cannot exceed physically received quantity.")
+            outstanding_qty = pi.ordered_qty - (pi.received_qty or Decimal("0.0000"))
+            if line.accepted_qty > outstanding_qty:
+                raise BadRequestException("Accepted quantity cannot exceed the outstanding Purchase Order quantity.")
+            receipt_lines.append((pi, line, outstanding_qty))
+    else:
+        receipt_lines = []
+        for pi in po_items:
+            outstanding_qty = pi.ordered_qty - (pi.received_qty or Decimal("0.0000"))
+            if outstanding_qty > Decimal("0.0000"):
+                receipt_lines.append((pi, None, outstanding_qty))
 
-        item_tot = outstanding_qty * pi.unit_price
+    if not receipt_lines:
+        raise BadRequestException("The linked purchase order has no outstanding quantities to receive.")
+
+    for pi, receipt_line, outstanding_qty in receipt_lines:
+        received_qty = receipt_line.received_qty if receipt_line else outstanding_qty
+        accepted_qty = receipt_line.accepted_qty if receipt_line else outstanding_qty
+        item_tot = accepted_qty * pi.unit_price
         total_po_amount += item_tot
 
         items_to_create.append({
             "item_id": pi.item_id,
             "po_item_id": pi.id,
-            "received_qty": outstanding_qty,
-            "accepted_qty": outstanding_qty,
-            "rejected_qty": Decimal("0.0000"),
+            "received_qty": received_qty,
+            "accepted_qty": accepted_qty,
+            "rejected_qty": receipt_line.rejected_qty if receipt_line else Decimal("0.0000"),
             "unit_price": pi.unit_price,
             "total_price": item_tot,
-            "qc_status": "PASSED",
-            "qc_notes": "PO-derived quantity locked",
+            "batch_number": receipt_line.batch_number if receipt_line else None,
+            "expiry_date": receipt_line.expiry_date if receipt_line else None,
+            "qc_status": receipt_line.qc_status if receipt_line else "PASSED",
+            "qc_notes": receipt_line.qc_notes if receipt_line else "PO-derived quantity locked",
         })
 
     # Variance detection
@@ -2786,6 +2966,8 @@ def create_goods_receive_from_po(
             rejected_qty=itm["rejected_qty"],
             unit_price=itm["unit_price"],
             total_price=itm["total_price"],
+            batch_number=itm["batch_number"],
+            expiry_date=itm["expiry_date"],
             qc_status=itm["qc_status"],
             qc_notes=itm["qc_notes"],
         )
@@ -2837,7 +3019,14 @@ def approve_goods_receive_note(
     if grn.status in ["APPROVED", "RECEIVED", "QC_PASSED"]:
         raise BadRequestException("Stock has already been posted for this Goods Receive Note.")
 
+    if grn.received_by_id == current_user.id:
+        raise ForbiddenException("A Goods Receive Note creator cannot approve their own receiving.")
+
     post_stock_for_grn(grn, db, current_user)
+    
+    grn.approved_by_id = current_user.id
+    grn.approved_at = datetime.utcnow()
+    
     if payload and payload.notes:
         grn.notes = (grn.notes or "") + f" [Approval Notes: {payload.notes}]"
 
@@ -3020,7 +3209,11 @@ def get_order_3way_match(
         raise NotFoundException(f"Purchase Order '{order_id}' not found.")
 
     branch_name = po.branch.name if po.branch else ("Multi-Outlet Consolidated" if po.allocations else "Central Store")
-    grns = db.query(GoodsReceiveNote).filter(GoodsReceiveNote.po_id == order_id).all()
+    # Pending/rejected receipts are not evidence of a confirmed delivery.
+    grns = db.query(GoodsReceiveNote).filter(
+        GoodsReceiveNote.po_id == order_id,
+        GoodsReceiveNote.status == GRNStatus.APPROVED.value,
+    ).all()
 
     grn_responses = [format_grn_response(g, db) for g in grns]
 
@@ -4716,3 +4909,7 @@ def supplier_performance(
         })
     rows.sort(key=lambda x: (-x['rating'], -x['purchase_spend'], x['supplier_name']))
     return {'days': days, 'supplier_count': len(rows), 'suppliers': rows}
+
+
+
+

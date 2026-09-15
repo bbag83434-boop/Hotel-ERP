@@ -12,5 +12,6 @@ def ensure_billing_schema():
         try:
             conn.execute(text('ALTER TABLE payments ADD COLUMN IF NOT EXISTS "billId" VARCHAR(36)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS ix_payments_billId ON payments ("billId")'))
+            conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS uq_vendor_bill_grn_link ON vendor_bill_grn_links ("billId", "grnId")'))
         except Exception as exc:
             logger.warning('Billing bill-link migration skipped: %s', exc)

@@ -14,6 +14,12 @@ export interface GoodsReceiveFromPOCreateInput {
   invoice_file_name?: string;
   invoice_file_data?: string;
   notes?: string;
+  items?: Array<{
+    po_item_id: string;
+    received_qty: number;
+    accepted_qty: number;
+    rejected_qty?: number;
+  }>;
 }
 
 export interface SupplierInvoiceUploadResult {

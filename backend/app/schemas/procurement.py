@@ -378,6 +378,19 @@ class GoodsReceiveFromPOCreate(BaseModel):
     invoice_file_name: Optional[str] = None
     invoice_file_data: Optional[str] = None
     notes: Optional[str] = None
+    # Optional physical receipt quantities.  When omitted, legacy callers receive
+    # the remaining quantity on every PO line.
+    items: Optional[List["GoodsReceiveFromPOItemCreate"]] = None
+
+class GoodsReceiveFromPOItemCreate(BaseModel):
+    po_item_id: str
+    received_qty: Decimal = Field(..., gt=0)
+    accepted_qty: Decimal = Field(..., ge=0)
+    rejected_qty: Optional[Decimal] = Decimal("0.0000")
+    batch_number: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    qc_status: Optional[str] = "PASSED"
+    qc_notes: Optional[str] = None
 
 class GoodsReceiveNoteApproveRequest(BaseModel):
     notes: Optional[str] = None

@@ -1,15 +1,17 @@
 import uuid
+import json
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, select
 
 from app.core.database import get_db
 from app.core.auth import get_current_active_user, optional_outlet_scope
-from app.models.user import User
+from app.models.user import User, UserBranch
 from app.models.organization import Warehouse, Branch, StoreLocation
+from app.models.audit import AuditLog
 from app.models.inventory import (
     Category,
     Unit,
@@ -48,6 +50,8 @@ from app.schemas.inventory import (
     StockTransferStatusUpdate,
     StockTransferResponse,
     StockTransferItemResponse,
+    StockTransferReceiveItem,
+    StockTransferReceiveRequest,
     StockCountCreate,
     StockCountSubmit,
     StockCountResponse,
@@ -88,6 +92,122 @@ def _is_inventory_manager(user: User) -> bool:
 
 def _user_branch_ids(user: User) -> set:
     return {ub.branch_id for ub in (user.branches or [])}
+
+
+# -------------------------------------------------------------
+# Stock Transfer serialization helpers
+# -------------------------------------------------------------
+
+def _build_transfer_item_response(itm: StockTransferItem, db: Session) -> StockTransferItemResponse:
+    """Single source of truth for StockTransferItem -> response mapping."""
+    item_obj = db.query(Item).filter(Item.id == itm.item_id).first()
+    u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
+    return StockTransferItemResponse(
+        id=itm.id,
+        transfer_id=itm.transfer_id,
+        item_id=itm.item_id,
+        quantity=Decimal(str(itm.quantity)),
+        requested_qty=Decimal(str(itm.requested_qty)) if itm.requested_qty is not None else None,
+        dispatched_qty=Decimal(str(itm.dispatched_qty)) if itm.dispatched_qty is not None else None,
+        accepted_qty=Decimal(str(itm.accepted_qty)) if itm.accepted_qty is not None else None,
+        damaged_qty=Decimal(str(itm.damaged_qty)) if itm.damaged_qty is not None else None,
+        short_qty=Decimal(str(itm.short_qty)) if itm.short_qty is not None else None,
+        shortage_reason_code=itm.shortage_reason_code,
+        unit_cost=Decimal(str(itm.unit_cost)) if itm.unit_cost is not None else None,
+        notes=itm.notes,
+        item_name=item_obj.name if item_obj else None,
+        item_code=item_obj.code if item_obj else None,
+        unit_symbol=u.symbol if u else None,
+    )
+
+
+def _build_transfer_response(transfer: StockTransfer, db: Session) -> StockTransferResponse:
+    """Single source of truth for StockTransfer -> response mapping."""
+    from_wh = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
+    to_wh = db.query(Warehouse).filter(Warehouse.id == transfer.to_warehouse_id).first()
+    source_branch = (
+        db.query(Branch).filter(Branch.id == transfer.source_branch_id).first()
+        if transfer.source_branch_id else None
+    )
+    dest_branch = (
+        db.query(Branch).filter(Branch.id == transfer.destination_branch_id).first()
+        if transfer.destination_branch_id else None
+    )
+    return StockTransferResponse(
+        id=transfer.id,
+        company_id=transfer.company_id,
+        from_warehouse_id=transfer.from_warehouse_id,
+        to_warehouse_id=transfer.to_warehouse_id,
+        transfer_number=transfer.transfer_number,
+        status=transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status),
+        transfer_date=transfer.transfer_date,
+        notes=transfer.notes,
+        created_by_id=transfer.created_by_id,
+        from_warehouse_name=from_wh.name if from_wh else None,
+        to_warehouse_name=to_wh.name if to_wh else None,
+        source_branch_id=transfer.source_branch_id,
+        destination_branch_id=transfer.destination_branch_id,
+        source_branch_name=source_branch.name if source_branch else None,
+        destination_branch_name=dest_branch.name if dest_branch else None,
+        expected_delivery_date=transfer.expected_delivery_date,
+        dispatch_notes=transfer.dispatch_notes,
+        dispatched_by_id=transfer.dispatched_by_id,
+        dispatched_at=transfer.dispatched_at,
+        received_by_id=transfer.received_by_id,
+        received_at=transfer.received_at,
+        reconciled_by_id=transfer.reconciled_by_id,
+        reconciled_at=transfer.reconciled_at,
+        items=[_build_transfer_item_response(itm, db) for itm in transfer.items],
+        created_at=transfer.created_at,
+        updated_at=transfer.updated_at,
+    )
+
+
+# -------------------------------------------------------------
+# Central Store -> Outlet receiving authorization
+# -------------------------------------------------------------
+
+# Company-wide oversight roles that may receive on behalf of any outlet.
+# Central Store specific roles (e.g. CENTRAL_STORE_MANAGER) are intentionally
+# EXCLUDED so that a Central Store source user cannot accidentally book their own
+# outbound transfer as outlet stock. They must be explicitly assigned to the
+# destination outlet branch via UserBranch.
+TRANSFER_RECEIVING_HQ_ROLES = {
+    "SUPER_ADMIN", "SUPERADMIN", "OWNER", "ADMIN",
+    "HQ_ADMIN", "HEAD_OFFICE_ADMIN", "GENERAL_MANAGER", "DIRECTOR",
+}
+
+# Statuses from which an outlet may book received stock.
+TRANSFER_RECEIVABLE_STATUSES = {"DISPATCHED", "IN_TRANSIT", "PARTIALLY_RECEIVED"}
+
+# Statuses that already consumed the dispatch stock movement.
+TRANSFER_POST_DISPATCH_STATUSES = {
+    "DISPATCHED", "IN_TRANSIT", "PARTIALLY_RECEIVED", "FULLY_RECEIVED", "RECONCILED",
+}
+
+
+def _is_transfer_receiving_hq(user: User) -> bool:
+    return _role_name(user) in TRANSFER_RECEIVING_HQ_ROLES
+
+
+def _authorize_outlet_receiving(user: User, dest_branch_id: Optional[str], db: Session) -> None:
+    """Only destination-outlet users (or company-wide oversight roles) may receive."""
+    if _is_transfer_receiving_hq(user):
+        return
+    if not dest_branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transfer has no destination outlet configured; receiving cannot be authorized.",
+        )
+    assigned = db.query(UserBranch).filter(
+        UserBranch.user_id == user.id,
+        UserBranch.branch_id == dest_branch_id,
+    ).first()
+    if not assigned and dest_branch_id not in _user_branch_ids(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: you are not authorized to receive stock for this outlet.",
+        )
 
 
 
@@ -1453,46 +1573,7 @@ def get_stock_transfers(
         query = query.filter(StockTransfer.status == status_filter)
 
     transfers = query.order_by(StockTransfer.created_at.desc()).all()
-    results = []
-    for trf in transfers:
-        from_wh = db.query(Warehouse).filter(Warehouse.id == trf.from_warehouse_id).first()
-        to_wh = db.query(Warehouse).filter(Warehouse.id == trf.to_warehouse_id).first()
-        items_res = []
-        for itm in trf.items:
-            item_obj = db.query(Item).filter(Item.id == itm.item_id).first()
-            u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
-            items_res.append(
-                StockTransferItemResponse(
-                    id=itm.id,
-                    transfer_id=itm.transfer_id,
-                    item_id=itm.item_id,
-                    quantity=Decimal(str(itm.quantity)),
-                    unit_cost=Decimal(str(itm.unit_cost)) if itm.unit_cost is not None else None,
-                    notes=itm.notes,
-                    item_name=item_obj.name if item_obj else None,
-                    item_code=item_obj.code if item_obj else None,
-                    unit_symbol=u.symbol if u else None,
-                )
-            )
-        results.append(
-            StockTransferResponse(
-                id=trf.id,
-                company_id=trf.company_id,
-                from_warehouse_id=trf.from_warehouse_id,
-                to_warehouse_id=trf.to_warehouse_id,
-                transfer_number=trf.transfer_number,
-                status=trf.status.value if hasattr(trf.status, "value") else str(trf.status),
-                transfer_date=trf.transfer_date,
-                notes=trf.notes,
-                created_by_id=trf.created_by_id,
-                from_warehouse_name=from_wh.name if from_wh else None,
-                to_warehouse_name=to_wh.name if to_wh else None,
-                items=items_res,
-                created_at=trf.created_at,
-                updated_at=trf.updated_at,
-            )
-        )
-    return results
+    return [_build_transfer_response(trf, db) for trf in transfers]
 
 @router.post("/transfers", response_model=StockTransferResponse, status_code=status.HTTP_201_CREATED)
 def create_stock_transfer(
@@ -1533,7 +1614,6 @@ def create_stock_transfer(
     db.add(transfer)
     db.flush()
 
-    items_res = []
     for item_data in transfer_in.items:
         item_obj = db.query(Item).filter(
             Item.id == item_data.item_id,
@@ -1552,42 +1632,398 @@ def create_stock_transfer(
         db.add(trf_item)
         db.flush()
 
-        u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first()
-        items_res.append(
-            StockTransferItemResponse(
-                id=trf_item.id,
-                transfer_id=transfer.id,
-                item_id=item_obj.id,
-                quantity=Decimal(str(trf_item.quantity)),
-                unit_cost=Decimal(str(trf_item.unit_cost or 0)),
-                notes=trf_item.notes,
-                item_name=item_obj.name,
-                item_code=item_obj.code,
-                unit_symbol=u.symbol if u else None,
-            )
-        )
-
     db.commit()
     db.refresh(transfer)
 
-    return StockTransferResponse(
-        id=transfer.id,
-        company_id=transfer.company_id,
-        from_warehouse_id=transfer.from_warehouse_id,
-        to_warehouse_id=transfer.to_warehouse_id,
-        transfer_number=transfer.transfer_number,
-        status=transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status),
-        transfer_date=transfer.transfer_date,
-        notes=transfer.notes,
-        created_by_id=transfer.created_by_id,
-        from_warehouse_name=from_wh.name,
-        to_warehouse_name=to_wh.name,
-        items=items_res,
-        created_at=transfer.created_at,
-        updated_at=transfer.updated_at,
-    )
+    return _build_transfer_response(transfer, db)
+
+# ------------------------------------------------------------------
+# Central Store Fulfilment Queue
+# ------------------------------------------------------------------
+
+@router.get("/transfers/central-store-queue", response_model=List[Dict[str, Any]])
+def get_central_store_queue(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Central Store Fulfilment Queue.
+
+    Returns all REQUESTED and PURCHASE_REQUIRED StockTransfers that originate
+    from the Central Store warehouse for this company, enriched with per-item
+    stock availability data.
+
+    Central Store team uses this to:
+    - See every pending outlet transfer request.
+    - Know available stock vs requested quantity per item.
+    - Know which transfers are ready to dispatch (APPROVED) and which need
+      replenishment first (PURCHASE_REQUIRED).
+
+    Outlet teams can query this endpoint to see the fulfilment state of their
+    approved requests.
+
+    STOCK SAFETY: Read-only. No stock quantities are changed.
+    """
+    # Identify the Central Store warehouse for this company
+    central_wh = db.query(Warehouse).filter(
+        Warehouse.company_id == current_user.company_id,
+        Warehouse.is_central == True,  # noqa: E712
+        Warehouse.is_active == True,   # noqa: E712
+    ).first()
+
+    if not central_wh:
+        return []
+
+    # Fetch all REQUESTED and PURCHASE_REQUIRED transfers from this warehouse
+    pending_statuses = ["REQUESTED", "PURCHASE_REQUIRED"]
+    transfers = db.query(StockTransfer).filter(
+        StockTransfer.company_id == current_user.company_id,
+        StockTransfer.from_warehouse_id == central_wh.id,
+        StockTransfer.status.in_(pending_statuses),
+    ).order_by(StockTransfer.created_at.asc()).all()
+
+    results = []
+    for trf in transfers:
+        to_wh = db.query(Warehouse).filter(Warehouse.id == trf.to_warehouse_id).first()
+        dest_branch = db.query(Branch).filter(
+            Branch.id == trf.destination_branch_id
+        ).first() if trf.destination_branch_id else None
+
+        # Determine overall transfer fulfilment state
+        trf_status = trf.status.value if hasattr(trf.status, "value") else str(trf.status)
+
+        items_detail = []
+        transfer_fully_available = True  # becomes False if any item has insufficient stock
+
+        for trf_item in trf.items:
+            item_obj = db.query(Item).filter(Item.id == trf_item.item_id).first()
+            unit_obj = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
+
+            requested_qty = Decimal(str(trf_item.requested_qty or trf_item.quantity))
+
+            # Read Central Store stock balance — no lock, no modification
+            cs_balance = db.query(StockBalance).filter(
+                StockBalance.warehouse_id == central_wh.id,
+                StockBalance.item_id == trf_item.item_id,
+            ).first()
+
+            available_qty = Decimal(str(cs_balance.quantity)) if cs_balance else Decimal("0.0000")
+            shortage_qty = max(Decimal("0.0000"), requested_qty - available_qty)
+            item_sufficient = available_qty >= requested_qty
+
+            if not item_sufficient:
+                transfer_fully_available = False
+
+            # Per-item fulfilment state readable by both CS and outlet
+            if item_sufficient:
+                item_fulfilment_state = "STOCK_AVAILABLE"
+            else:
+                item_fulfilment_state = "STOCK_INSUFFICIENT"
+
+            items_detail.append({
+                "transfer_item_id": trf_item.id,
+                "item_id": trf_item.item_id,
+                "item_name": item_obj.name if item_obj else None,
+                "item_code": item_obj.code if item_obj else None,
+                "unit_symbol": unit_obj.symbol if unit_obj else None,
+                "requested_qty": float(requested_qty),
+                "available_cs_qty": float(available_qty),
+                "shortage_qty": float(shortage_qty),
+                "item_fulfilment_state": item_fulfilment_state,
+            })
+
+        # Overall transfer-level fulfilment state for outlet visibility
+        if trf_status == "APPROVED":
+            overall_state = "READY_FOR_DISPATCH"
+        elif trf_status == "PURCHASE_REQUIRED":
+            overall_state = "CENTRAL_STORE_PURCHASE_REQUIRED"
+        elif transfer_fully_available:
+            overall_state = "WAITING_FOR_CENTRAL_STORE"
+        else:
+            overall_state = "CENTRAL_STORE_PURCHASE_REQUIRED"
+
+        results.append({
+            "transfer_id": trf.id,
+            "transfer_number": trf.transfer_number,
+            "status": trf_status,
+            "outlet_branch_id": trf.destination_branch_id,
+            "outlet_branch_name": dest_branch.name if dest_branch else (
+                to_wh.name if to_wh else None
+            ),
+            "destination_warehouse_id": trf.to_warehouse_id,
+            "destination_warehouse_name": to_wh.name if to_wh else None,
+            "central_store_warehouse_id": central_wh.id,
+            "central_store_warehouse_name": central_wh.name,
+            "transfer_date": trf.transfer_date.isoformat() if trf.transfer_date else None,
+            "notes": trf.notes,
+            "overall_fulfilment_state": overall_state,
+            "all_items_available": transfer_fully_available,
+            "items": items_detail,
+            "created_at": trf.created_at.isoformat() if trf.created_at else None,
+        })
+
+    return results
+
+
+@router.post("/transfers/{transfer_id}/check-stock", response_model=Dict[str, Any])
+def check_transfer_stock(
+    transfer_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Central Store Stock Check for a single StockTransfer.
+
+    Reads the current StockBalance in the Central Store warehouse for every
+    item in the transfer, compares against the requested quantity, and
+    updates the transfer status accordingly:
+
+        available_stock >= requested_qty for ALL items
+            → transfer status set to APPROVED
+              (outlet-visible: READY_FOR_DISPATCH)
+
+        available_stock < requested_qty for ANY item
+            → transfer status set to PURCHASE_REQUIRED
+              (outlet-visible: CENTRAL_STORE_PURCHASE_REQUIRED)
+
+    STOCK SAFETY:
+    - No stock balance is modified.
+    - No StockLedger entries are written.
+    - No vendor PO is created.
+    - Stock only moves during actual CS dispatch (a later task).
+
+    Only accepts transfers in REQUESTED or PURCHASE_REQUIRED status.
+    """
+    transfer = db.query(StockTransfer).filter(
+        StockTransfer.id == transfer_id,
+        StockTransfer.company_id == current_user.company_id,
+    ).first()
+
+    if not transfer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock transfer not found")
+
+    current_status = transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status)
+
+    if current_status not in ("REQUESTED", "PURCHASE_REQUIRED"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stock check only applies to REQUESTED or PURCHASE_REQUIRED transfers. Current status: {current_status}",
+        )
+
+    # Run the stock check — read-only on StockBalance
+    all_sufficient = True
+    item_results = []
+
+    for trf_item in transfer.items:
+        requested_qty = Decimal(str(trf_item.requested_qty or trf_item.quantity))
+
+        cs_balance = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == transfer.from_warehouse_id,
+            StockBalance.item_id == trf_item.item_id,
+        ).first()
+
+        available_qty = Decimal(str(cs_balance.quantity)) if cs_balance else Decimal("0.0000")
+        shortage_qty = max(Decimal("0.0000"), requested_qty - available_qty)
+        sufficient = available_qty >= requested_qty
+
+        if not sufficient:
+            all_sufficient = False
+
+        item_obj = db.query(Item).filter(Item.id == trf_item.item_id).first()
+        item_results.append({
+            "item_id": trf_item.item_id,
+            "item_name": item_obj.name if item_obj else None,
+            "requested_qty": float(requested_qty),
+            "available_cs_qty": float(available_qty),
+            "shortage_qty": float(shortage_qty),
+            "sufficient": sufficient,
+        })
+
+    # Update transfer status based on check result — NO stock quantity changes
+    new_status = "APPROVED" if all_sufficient else "PURCHASE_REQUIRED"
+    transfer.status = new_status
+    transfer.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(transfer)
+
+    return {
+        "transfer_id": transfer.id,
+        "transfer_number": transfer.transfer_number,
+        "previous_status": current_status,
+        "new_status": new_status,
+        "all_items_sufficient": all_sufficient,
+        "outlet_visible_state": (
+            "READY_FOR_DISPATCH" if all_sufficient else "CENTRAL_STORE_PURCHASE_REQUIRED"
+        ),
+        "items": item_results,
+        "checked_at": datetime.utcnow().isoformat(),
+        "stock_changed": False,  # explicit safety confirmation
+    }
+
 
 @router.get("/transfers/{transfer_id}", response_model=StockTransferResponse)
+@router.post("/transfers/{transfer_id}/replenish", response_model=Dict[str, Any])
+def create_replenishment_po_for_transfer(
+    transfer_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Creates replenishment PO(s) for a CENTRAL_STORE_PURCHASE_REQUIRED transfer.
+    Calculates shortage = max(0, requested_qty - available_stock).
+    Groups shortages by auto-resolved vendor and creates PO(s).
+    """
+    transfer = db.query(StockTransfer).filter(
+        StockTransfer.id == transfer_id,
+        StockTransfer.company_id == current_user.company_id,
+    ).with_for_update().first()
+
+    if not transfer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock transfer not found")
+
+    current_status = transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status)
+    if current_status != "PURCHASE_REQUIRED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Replenishment PO can only be created for PURCHASE_REQUIRED transfers. Current status: {current_status}"
+        )
+
+    # Duplicate Protection
+    from app.models.procurement import PurchaseOrder, PurchaseOrderItem, POStatus, Supplier
+    existing_pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.company_id == current_user.company_id,
+        PurchaseOrder.notes.like(f"%[AUTO-REPLENISHMENT Transfer: {transfer.id}]%"),
+        PurchaseOrder.status.notin_([POStatus.CANCELLED, POStatus.REJECTED])
+    ).all()
+
+    if existing_pos:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Active replenishment PO(s) already exist for this transfer."
+        )
+
+    cs_warehouse = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
+    if not cs_warehouse:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Central Store warehouse not found.")
+    
+    cs_branch_id = cs_warehouse.branch_id
+
+    shortages_by_supplier = {}
+    missing_vendor_items = []
+
+    from app.api.v1.endpoints.procurement import (
+        get_configured_supplier_item_price,
+        resolve_default_item_vendor,
+    )
+
+    for trf_item in transfer.items:
+        requested_qty = Decimal(str(trf_item.requested_qty or trf_item.quantity))
+
+        cs_balance = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == transfer.from_warehouse_id,
+            StockBalance.item_id == trf_item.item_id,
+        ).first()
+
+        available_qty = Decimal(str(cs_balance.quantity)) if cs_balance else Decimal("0.0000")
+        shortage_qty = max(Decimal("0.0000"), requested_qty - available_qty)
+
+        if shortage_qty > 0:
+            item_obj = db.query(Item).filter(Item.id == trf_item.item_id).first()
+            if not item_obj:
+                continue
+            
+            supplier_id, vendor_source = resolve_default_item_vendor(db, item_obj)
+            if not supplier_id:
+                missing_vendor_items.append(item_obj.name)
+                continue
+            
+            if supplier_id not in shortages_by_supplier:
+                shortages_by_supplier[supplier_id] = []
+            
+            unit_price = get_configured_supplier_item_price(db, item_obj, supplier_id)
+            shortages_by_supplier[supplier_id].append({
+                "item_id": item_obj.id,
+                "ordered_qty": shortage_qty,
+                "unit_price": unit_price,
+                "total_price": shortage_qty * unit_price,
+                "notes": f"Shortage for transfer {transfer.transfer_number}"
+            })
+
+    if missing_vendor_items:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vendor mapping missing for items: " + ", ".join(missing_vendor_items)
+        )
+
+    if not shortages_by_supplier:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No shortage calculated. Stock is sufficient."
+        )
+
+    created_pos = []
+    from app.api.v1.endpoints.procurement import log_procurement_audit
+
+    for supplier_id, items in shortages_by_supplier.items():
+        supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+        po_number = f"PO-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(supplier_id) + str(datetime.utcnow()))) % 10000:04d}"
+        
+        total_amount = sum(i["total_price"] for i in items)
+
+        po = PurchaseOrder(
+            company_id=current_user.company_id,
+            branch_id=cs_branch_id,
+            supplier_id=supplier_id,
+            po_number=po_number,
+            status=POStatus.DRAFT,
+            order_date=datetime.utcnow(),
+            expected_delivery_date=datetime.utcnow(),
+            total_amount=total_amount,
+            tax_amount=Decimal("0.0000"),
+            discount_amount=Decimal("0.0000"),
+            net_amount=total_amount,
+            notes=f"[AUTO-REPLENISHMENT Transfer: {transfer.id}] Created for shortage.",
+            created_by_id=current_user.id,
+            whatsapp_number=getattr(supplier, "effective_whatsapp_number", supplier.whatsapp_number),
+        )
+        db.add(po)
+        db.flush()
+
+        for item_data in items:
+            po_item = PurchaseOrderItem(
+                po_id=po.id,
+                item_id=item_data["item_id"],
+                ordered_qty=item_data["ordered_qty"],
+                received_qty=Decimal("0.0000"),
+                unit_price=item_data["unit_price"],
+                total_price=item_data["total_price"],
+                notes=item_data["notes"],
+            )
+            db.add(po_item)
+        
+        created_pos.append(po.po_number)
+        
+        log_procurement_audit(
+            db=db,
+            user=current_user,
+            action="CREATE_CENTRAL_STORE_REPLENISHMENT_PO",
+            entity_type="PurchaseOrder",
+            entity_id=po.id,
+            new_values={
+                "po_number": po.po_number, 
+                "transfer_id": transfer.id, 
+                "supplier_name": supplier.name if supplier else None,
+                "shortage_items_count": len(items)
+            }
+        )
+
+    db.commit()
+
+    return {
+        "message": "Replenishment POs created successfully.",
+        "transfer_id": transfer.id,
+        "created_pos": created_pos
+    }
 def get_stock_transfer(
     transfer_id: str,
     db: Session = Depends(get_db),
@@ -1596,46 +2032,11 @@ def get_stock_transfer(
     transfer = db.query(StockTransfer).filter(
         StockTransfer.id == transfer_id,
         StockTransfer.company_id == current_user.company_id,
-    ).with_for_update().first()
+    ).first()
     if not transfer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock transfer not found")
 
-    from_wh = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
-    to_wh = db.query(Warehouse).filter(Warehouse.id == transfer.to_warehouse_id).first()
-    items_res = []
-    for itm in transfer.items:
-        item_obj = db.query(Item).filter(Item.id == itm.item_id).first()
-        u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
-        items_res.append(
-            StockTransferItemResponse(
-                id=itm.id,
-                transfer_id=itm.transfer_id,
-                item_id=itm.item_id,
-                quantity=Decimal(str(itm.quantity)),
-                unit_cost=Decimal(str(itm.unit_cost)) if itm.unit_cost is not None else None,
-                notes=itm.notes,
-                item_name=item_obj.name if item_obj else None,
-                item_code=item_obj.code if item_obj else None,
-                unit_symbol=u.symbol if u else None,
-            )
-        )
-
-    return StockTransferResponse(
-        id=transfer.id,
-        company_id=transfer.company_id,
-        from_warehouse_id=transfer.from_warehouse_id,
-        to_warehouse_id=transfer.to_warehouse_id,
-        transfer_number=transfer.transfer_number,
-        status=transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status),
-        transfer_date=transfer.transfer_date,
-        notes=transfer.notes,
-        created_by_id=transfer.created_by_id,
-        from_warehouse_name=from_wh.name if from_wh else None,
-        to_warehouse_name=to_wh.name if to_wh else None,
-        items=items_res,
-        created_at=transfer.created_at,
-        updated_at=transfer.updated_at,
-    )
+    return _build_transfer_response(transfer, db)
 
 @router.put("/transfers/{transfer_id}/status", response_model=StockTransferResponse)
 def update_stock_transfer_status(
@@ -1660,6 +2061,21 @@ def update_stock_transfer_status(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot change status of CANCELLED transfer")
 
     if target_status == "COMPLETED":
+        # Legacy single-step completion moves BOTH source out and destination in.
+        # Once the transfer has been dispatched (or any outlet receiving has been
+        # booked), the source warehouse has already been debited, so re-running this
+        # path would debit Central Store a second time and credit the outlet twice.
+        # Outlet receiving is now the authoritative destination-posting action.
+        if current_status in TRANSFER_POST_DISPATCH_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Transfer has already been dispatched and its source stock deducted. "
+                    f"Use POST /inventory/transfers/{{transfer_id}}/receive to book outlet receiving. "
+                    f"Current status: {current_status}"
+                ),
+            )
+
         # Execute stock deduction and credit with atomic row-level locking
         for trf_item in transfer.items:
             qty = Decimal(str(trf_item.quantity))
@@ -1740,11 +2156,151 @@ def update_stock_transfer_status(
             )
             db.add(ledger_in)
 
+            # Keep the receiving lifecycle columns consistent with the single-step
+            # completion (source out + destination in happen together here).
+            if trf_item.requested_qty is None:
+                trf_item.requested_qty = qty
+            trf_item.dispatched_qty = qty
+            trf_item.accepted_qty = qty
+            trf_item.damaged_qty = Decimal("0.0000")
+            trf_item.short_qty = Decimal("0.0000")
+
         transfer.status = "COMPLETED"
+        transfer.dispatched_by_id = current_user.id
+        transfer.dispatched_at = datetime.utcnow()
+        transfer.received_by_id = current_user.id
+        transfer.received_at = datetime.utcnow()
+
+    elif target_status == "DISPATCHED":
+        if current_status in (TRANSFER_POST_DISPATCH_STATUSES | {"COMPLETED"}):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Transfer has already been dispatched. Current status: {current_status}")
+        
+        if current_status in ["CANCELLED", "REJECTED"]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot dispatch a cancelled or rejected transfer")
+
+        from_wh = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
+        if not from_wh:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source warehouse not found")
+        
+        from_branch = db.query(Branch).filter(Branch.id == from_wh.branch_id).first()
+        if not from_branch or (from_branch.type or "").upper() != "CENTRAL_STORE":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dispatch is only allowed from Central Store")
+
+        to_wh = db.query(Warehouse).filter(Warehouse.id == transfer.to_warehouse_id).first()
+        if not to_wh:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Destination warehouse not found")
+            
+        for trf_item in transfer.items:
+            qty = Decimal(str(trf_item.quantity))
+            
+            if qty <= Decimal("0"):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transfer quantity must be greater than zero")
+
+            from_bal = db.query(StockBalance).filter(
+                StockBalance.warehouse_id == transfer.from_warehouse_id,
+                StockBalance.item_id == trf_item.item_id,
+            ).with_for_update().first()
+
+            available_from = Decimal(str(from_bal.quantity)) if from_bal else Decimal("0.0000")
+            
+            if available_from < qty:
+                item_obj = db.query(Item).filter(Item.id == trf_item.item_id).first()
+                item_name = item_obj.name if item_obj else "Unknown item"
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Insufficient stock for dispatch of {item_name}: Available {available_from}, Requested {qty}",
+                )
+            
+            new_from_qty = available_from - qty
+            from_bal.quantity = new_from_qty
+
+            ledger_out = StockLedger(
+                warehouse_id=transfer.from_warehouse_id,
+                item_id=trf_item.item_id,
+                movement_type="TRANSFER_OUT",
+                change_qty=-qty,
+                balance_qty=new_from_qty,
+                unit_cost=trf_item.unit_cost or Decimal("0.0000"),
+                total_cost=(qty * Decimal(str(trf_item.unit_cost or 0))),
+                reference_type="STOCK_TRANSFER",
+                reference_id=transfer.id,
+                notes=f"Stock Transfer Out #{transfer.transfer_number}",
+                created_by_id=current_user.id,
+            )
+            db.add(ledger_out)
+
+            if trf_item.requested_qty is None:
+                trf_item.requested_qty = qty
+            trf_item.dispatched_qty = qty
+
+        transfer.status = "DISPATCHED"
+        transfer.dispatched_by_id = current_user.id
+        transfer.dispatched_at = datetime.utcnow()
 
     elif target_status == "CANCELLED":
         transfer.status = "CANCELLED"
     else:
+        # RECONCILED is the existing closing step for outlet-received Central Store
+        # transfers that carry short / damaged quantities. Receiving itself remains
+        # the only action that moves outlet stock; reconciliation only acknowledges
+        # the final state and stamps the existing reconciliation audit columns.
+        if target_status == "RECONCILED":
+            if current_status not in {"PARTIALLY_RECEIVED", "FULLY_RECEIVED", "IN_TRANSIT"}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Only a received (or partially received) transfer can be reconciled. "
+                        f"Current status: {current_status}"
+                    ),
+                )
+            reconciliation_wh = db.query(Warehouse).filter(
+                Warehouse.id == transfer.to_warehouse_id
+            ).first()
+            if not reconciliation_wh or not reconciliation_wh.branch_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Destination warehouse is not assigned to an outlet branch",
+                )
+            if (
+                transfer.destination_branch_id
+                and transfer.destination_branch_id != reconciliation_wh.branch_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Transfer destination branch does not match its destination warehouse",
+                )
+            _authorize_outlet_receiving(current_user, reconciliation_wh.branch_id, db)
+            transfer.reconciled_by_id = current_user.id
+            transfer.reconciled_at = datetime.utcnow()
+
+            db.add(
+                AuditLog(
+                    user_id=current_user.id,
+                    action="STOCK_TRANSFER_RECONCILED",
+                    entity_type="StockTransfer",
+                    entity_id=transfer.id,
+                    details=json.dumps(
+                        {
+                            "actor_id": current_user.id,
+                            "transfer_id": transfer.id,
+                            "transfer_number": transfer.transfer_number,
+                            "previous_status": current_status,
+                            "new_status": target_status,
+                            "dispatched_qty": float(sum((Decimal(str(i.dispatched_qty or 0)) for i in transfer.items), Decimal("0.0000"))),
+                            "accepted_qty": float(sum((Decimal(str(i.accepted_qty or 0)) for i in transfer.items), Decimal("0.0000"))),
+                            "damaged_qty": float(sum((Decimal(str(i.damaged_qty or 0)) for i in transfer.items), Decimal("0.0000"))),
+                            "short_qty": float(sum((Decimal(str(i.short_qty or 0)) for i in transfer.items), Decimal("0.0000"))),
+                            "received_by_id": transfer.received_by_id,
+                            "received_at": transfer.received_at.isoformat() if transfer.received_at else None,
+                            "reconciled_by_id": current_user.id,
+                            "reconciled_at": datetime.utcnow().isoformat(),
+                            "notes": status_in.notes,
+                        },
+                        default=str,
+                    ),
+                )
+            )
+
         transfer.status = target_status
 
     if status_in.notes:
@@ -1753,42 +2309,346 @@ def update_stock_transfer_status(
     db.commit()
     db.refresh(transfer)
 
-    from_wh = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
-    to_wh = db.query(Warehouse).filter(Warehouse.id == transfer.to_warehouse_id).first()
-    items_res = []
-    for itm in transfer.items:
-        item_obj = db.query(Item).filter(Item.id == itm.item_id).first()
-        u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
-        items_res.append(
-            StockTransferItemResponse(
-                id=itm.id,
-                transfer_id=itm.transfer_id,
-                item_id=itm.item_id,
-                quantity=Decimal(str(itm.quantity)),
-                unit_cost=Decimal(str(itm.unit_cost)) if itm.unit_cost is not None else None,
-                notes=itm.notes,
-                item_name=item_obj.name if item_obj else None,
-                item_code=item_obj.code if item_obj else None,
-                unit_symbol=u.symbol if u else None,
-            )
+    return _build_transfer_response(transfer, db)
+
+
+# ------------------------------------------------------------------
+# Central Store -> Outlet Receiving
+# ------------------------------------------------------------------
+
+@router.post("/transfers/{transfer_id}/receive", response_model=StockTransferResponse)
+def receive_stock_transfer(
+    transfer_id: str,
+    payload: StockTransferReceiveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Outlet receiving of a DISPATCHED Central Store transfer.
+
+    Stock rules:
+      * The source (Central Store) stock movement already happened at DISPATCH.
+        Receiving MUST NOT deduct the source warehouse again.
+      * Only accepted_qty increases the destination (outlet) warehouse balance.
+      * damaged_qty / short_qty are recorded for reconciliation and are NOT posted
+        as stock (no fake loss movements are invented here).
+
+    Idempotency:
+      The transfer row is locked (SELECT ... FOR UPDATE) and the quantities already
+      booked on each line are subtracted from the dispatched quantity. A repeated
+      (or over-) receive therefore books only the outstanding delta, and a fully
+      received transfer is rejected outright.
+    """
+    transfer = db.query(StockTransfer).filter(
+        StockTransfer.id == transfer_id,
+        StockTransfer.company_id == current_user.company_id,
+    ).with_for_update().first()
+    if not transfer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock transfer not found")
+
+    previous_status = transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status)
+
+    # --- 1. Status eligibility -------------------------------------------------
+    if previous_status in ("COMPLETED", "CANCELLED", "REJECTED", "FULLY_RECEIVED"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot receive a transfer in '{previous_status}' status",
+        )
+    if previous_status not in TRANSFER_RECEIVABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Transfer must be dispatched before receiving. "
+                f"Current status: {previous_status}. Allowed: {sorted(TRANSFER_RECEIVABLE_STATUSES)}"
+            ),
         )
 
-    return StockTransferResponse(
-        id=transfer.id,
-        company_id=transfer.company_id,
-        from_warehouse_id=transfer.from_warehouse_id,
-        to_warehouse_id=transfer.to_warehouse_id,
-        transfer_number=transfer.transfer_number,
-        status=transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status),
-        transfer_date=transfer.transfer_date,
-        notes=transfer.notes,
-        created_by_id=transfer.created_by_id,
-        from_warehouse_name=from_wh.name if from_wh else None,
-        to_warehouse_name=to_wh.name if to_wh else None,
-        items=items_res,
-        created_at=transfer.created_at,
-        updated_at=transfer.updated_at,
+    if not payload.items:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Receive payload must contain at least one item",
+        )
+
+    # --- 2. Destination warehouse / outlet resolution --------------------------
+    to_wh = db.query(Warehouse).filter(Warehouse.id == transfer.to_warehouse_id).first()
+    if not to_wh:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Destination warehouse not found")
+
+    # A transfer's routing fields must agree with the warehouse that will receive
+    # the stock.  Do not trust destination_branch_id by itself: otherwise a user
+    # assigned to one outlet could post stock into another outlet's warehouse.
+    if not to_wh.branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Destination warehouse is not assigned to an outlet branch",
+        )
+    if transfer.destination_branch_id and transfer.destination_branch_id != to_wh.branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transfer destination branch does not match its destination warehouse",
+        )
+
+    from_wh = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
+    from_branch = db.query(Branch).filter(Branch.id == from_wh.branch_id).first() if from_wh and from_wh.branch_id else None
+    if not from_branch or (from_branch.type or "").upper() != "CENTRAL_STORE":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only Central Store transfers can be received through this endpoint",
+        )
+
+    dest_branch_id = to_wh.branch_id
+    dest_branch = db.query(Branch).filter(Branch.id == dest_branch_id).first() if dest_branch_id else None
+
+    if (transfer.source_branch_id and transfer.source_branch_id == dest_branch_id) or from_wh.branch_id == dest_branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source and destination branch are the same; this is not a Central Store -> Outlet transfer",
+        )
+
+    # --- 3. Authorization ------------------------------------------------------
+    _authorize_outlet_receiving(current_user, dest_branch_id, db)
+
+    # --- 4. Line-by-line receive ----------------------------------------------
+    dispatched_total = Decimal("0.0000")
+    accepted_total = Decimal("0.0000")
+    damaged_total = Decimal("0.0000")
+    short_total = Decimal("0.0000")
+    processed_lines = 0
+    ledger_entry_ids: List[str] = []
+    line_audit: List[Dict[str, Any]] = []
+    received_line_ids: set = set()
+
+    for line in payload.items:
+        trf_item = None
+        if line.transfer_item_id:
+            trf_item = next((i for i in transfer.items if i.id == line.transfer_item_id), None)
+            if not trf_item:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Transfer line {line.transfer_item_id} does not belong to this transfer",
+                )
+        elif line.item_id:
+            trf_item = next((i for i in transfer.items if i.item_id == line.item_id), None)
+            if not trf_item:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Item {line.item_id} is not part of this transfer",
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Each receive line requires either transfer_item_id or item_id",
+            )
+
+        if trf_item.id in received_line_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Each transfer item may appear only once in a receive request",
+            )
+        received_line_ids.add(trf_item.id)
+
+        accepted_qty = Decimal(str(line.accepted_qty or 0))
+        damaged_qty = Decimal(str(line.damaged_qty or 0))
+
+        if accepted_qty < 0 or damaged_qty < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="accepted_qty and damaged_qty cannot be negative",
+            )
+        if line.short_qty is not None and Decimal(str(line.short_qty)) < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="short_qty cannot be negative",
+            )
+
+        dispatched_qty = Decimal(str(trf_item.dispatched_qty or 0))
+        if dispatched_qty <= 0:
+            # Dispatch stamps dispatched_qty; fall back to the approved quantity.
+            dispatched_qty = Decimal(str(trf_item.quantity or 0))
+
+        already_accepted = Decimal(str(trf_item.accepted_qty or 0))
+        already_damaged = Decimal(str(trf_item.damaged_qty or 0))
+
+        remaining = dispatched_qty - already_accepted - already_damaged
+        if remaining < 0:
+            remaining = Decimal("0.0000")
+
+        # Idempotency guard: never book more than what is still outstanding.
+        if accepted_qty > remaining:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Received quantity exceeds outstanding dispatched quantity. "
+                    f"Outstanding: {remaining}, submitted accepted: {accepted_qty}"
+                ),
+            )
+        if (accepted_qty + damaged_qty) > remaining:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Accepted + damaged exceeds outstanding dispatched quantity. "
+                    f"Outstanding: {remaining}, accepted: {accepted_qty}, damaged: {damaged_qty}"
+                ),
+            )
+        if line.short_qty is not None and (accepted_qty + damaged_qty + Decimal(str(line.short_qty))) > remaining:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Accepted + damaged + short exceeds outstanding dispatched quantity. "
+                    f"Outstanding: {remaining}"
+                ),
+            )
+        if accepted_qty == 0 and damaged_qty == 0 and line.short_qty is None:
+            # Nothing to book for this line; treat as a no-op rather than a failure.
+            continue
+
+        new_accepted = already_accepted + accepted_qty
+        new_damaged = already_damaged + damaged_qty
+
+        # short_qty: caller may state it explicitly, otherwise derive it.
+        if line.short_qty is not None:
+            new_short = Decimal(str(line.short_qty))
+        else:
+            new_short = dispatched_qty - new_accepted - new_damaged
+        if new_short < 0:
+            new_short = Decimal("0.0000")
+
+        # ----- Outlet stock increase: ONLY by accepted_qty -----
+        if accepted_qty > 0:
+            to_bal = db.query(StockBalance).filter(
+                StockBalance.warehouse_id == transfer.to_warehouse_id,
+                StockBalance.item_id == trf_item.item_id,
+            ).with_for_update().first()
+
+            if not to_bal:
+                to_bal = StockBalance(
+                    warehouse_id=transfer.to_warehouse_id,
+                    item_id=trf_item.item_id,
+                    quantity=Decimal("0.0000"),
+                )
+                db.add(to_bal)
+                db.flush()
+
+            new_to_qty = Decimal(str(to_bal.quantity)) + accepted_qty
+            to_bal.quantity = new_to_qty
+
+            unit_cost = Decimal(str(trf_item.unit_cost or 0))
+
+            # ----- StockLedger TRANSFER_IN for accepted_qty -----
+            ledger_in = StockLedger(
+                company_id=transfer.company_id,
+                branch_id=dest_branch_id,
+                warehouse_id=transfer.to_warehouse_id,
+                item_id=trf_item.item_id,
+                movement_type="TRANSFER_IN",
+                change_qty=accepted_qty,
+                balance_qty=new_to_qty,
+                unit_cost=unit_cost,
+                total_cost=(accepted_qty * unit_cost),
+                reference_type="STOCK_TRANSFER",
+                reference_id=transfer.id,
+                idempotency_key=f"transfer_in_{transfer.id}_{trf_item.id}_{new_accepted}",
+                notes=f"Stock Transfer In #{transfer.transfer_number}",
+                created_by_id=current_user.id,
+            )
+            db.add(ledger_in)
+            db.flush()
+            ledger_entry_ids.append(ledger_in.id)
+
+        # ----- Record receiving quantities (no stock movement for damage/short) -----
+        trf_item.accepted_qty = new_accepted
+        trf_item.damaged_qty = new_damaged
+        trf_item.short_qty = new_short
+        if line.shortage_reason_code:
+            trf_item.shortage_reason_code = line.shortage_reason_code
+        if line.notes:
+            trf_item.notes = ((trf_item.notes or "") + f" | Receive: {line.notes}").strip(" |")
+
+        dispatched_total += dispatched_qty
+        accepted_total += accepted_qty
+        damaged_total += damaged_qty
+        short_total += new_short
+        processed_lines += 1
+
+        line_audit.append({
+            "transfer_item_id": trf_item.id,
+            "item_id": trf_item.item_id,
+            "dispatched_qty": float(dispatched_qty),
+            "previously_accepted_qty": float(already_accepted),
+            "accepted_qty": float(accepted_qty),
+            "cumulative_accepted_qty": float(new_accepted),
+            "damaged_qty": float(damaged_qty),
+            "short_qty": float(new_short),
+        })
+
+    db.flush()
+
+    if processed_lines == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nothing to receive: no line carried an accepted or damaged quantity",
+        )
+
+    # --- 5. Status lifecycle ---------------------------------------------------
+    # FULLY_RECEIVED only when the complete dispatched quantity became usable outlet
+    # stock. Any outstanding / damaged / short quantity keeps the transfer in
+    # PARTIALLY_RECEIVED so the existing reconciliation lifecycle (RECONCILED) is
+    # preserved for a later authorized step. Central Store stock is NOT touched here.
+    all_fully_received = True
+    for trf_item in transfer.items:
+        line_dispatched = Decimal(str(trf_item.dispatched_qty or 0))
+        if line_dispatched <= 0:
+            line_dispatched = Decimal(str(trf_item.quantity or 0))
+        line_accepted = Decimal(str(trf_item.accepted_qty or 0))
+        if line_dispatched <= 0 or line_accepted < line_dispatched:
+            all_fully_received = False
+            break
+
+    new_status = "FULLY_RECEIVED" if all_fully_received else "PARTIALLY_RECEIVED"
+    received_at = datetime.utcnow()
+    transfer.status = new_status
+    transfer.received_by_id = current_user.id
+    transfer.received_at = received_at
+    if payload.notes:
+        transfer.notes = ((transfer.notes or "") + f" | Receive: {payload.notes}").strip(" |")
+
+    # --- 6. Audit --------------------------------------------------------------
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            action="STOCK_TRANSFER_RECEIVED",
+            entity_type="StockTransfer",
+            entity_id=transfer.id,
+            details=json.dumps(
+                {
+                    "actor_id": current_user.id,
+                    "transfer_id": transfer.id,
+                    "transfer_number": transfer.transfer_number,
+                    "previous_status": previous_status,
+                    "new_status": new_status,
+                    "source_warehouse_id": transfer.from_warehouse_id,
+                    "destination_warehouse_id": transfer.to_warehouse_id,
+                    "destination_branch_id": dest_branch_id,
+                    "destination_branch_name": dest_branch.name if dest_branch else None,
+                    "dispatched_qty": float(dispatched_total),
+                    "accepted_qty": float(accepted_total),
+                    "damaged_qty": float(damaged_total),
+                    "short_qty": float(short_total),
+                    "ledger_entry_ids": ledger_entry_ids,
+                    "lines": line_audit,
+                    "received_by_id": current_user.id,
+                    "received_at": received_at.isoformat(),
+                    "notes": payload.notes,
+                },
+                default=str,
+            ),
+        )
     )
+
+    db.commit()
+    db.refresh(transfer)
+
+    return _build_transfer_response(transfer, db)
 
 
 # =============================================================
@@ -3291,4 +4151,7 @@ def get_inventory_valuation(
         categories=cat_list,
         items=item_list,
     )
+
+
+
 
