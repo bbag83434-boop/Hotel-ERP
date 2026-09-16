@@ -685,169 +685,194 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       {/* TAB 2: VENDOR RECEIVING (Approved PO Deliveries & GRNs) */}
       {/* ========================================================================= */}
       {activeTab === 'receiving' && (
-        <div className="space-y-6">
-          {/* Incoming Approved Deliveries section */}
-          {incomingDeliveries.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#707070]">
-                Incoming Approved Supplier Deliveries
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {incomingDeliveries.map((po) => (
-                  <div
-                    key={po.id}
-                    className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs flex flex-col justify-between gap-3"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-xs font-mono text-[#1C1C1C]">
-                          {po.po_number}
-                        </span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
-                          {po.status?.replace('_', ' ')}
-                        </span>
-                      </div>
-                      <p className="text-xs font-semibold text-[#1C1C1C] mt-1">
-                        Vendor: {po.supplier_name || po.supplier?.name || 'Mapped Vendor'}
-                      </p>
-                      <p className="text-[11px] font-semibold text-green-700 mt-0.5">
-                        Phone/WhatsApp: {po.supplier?.whatsapp_number || po.supplier?.phone || 'N/A'}
-                      </p>
-                      <p className="text-[11px] text-[#707070] mt-0.5">
-                        Items: {po.items?.map((it: any) => `${it.item_name} (${it.ordered_qty})`).join(', ')}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center justify-between border-t border-gray-100 pt-2">
-                      <span className="text-xs font-bold text-[#1C1C1C]">
-                        ₹{Number(po.net_amount || po.total_amount || 0).toFixed(2)}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {(!po.status || po.status === 'APPROVED' || po.status === 'WHATSAPP_OPENED') && (
-                          <button
-                            onClick={async () => {
-                              try {
-                                const res = await procurementApi.getWhatsAppLink(po.id);
-                                if (res?.whatsapp_url) {
-                                  window.open(res.whatsapp_url, '_blank');
-                                }
-                              } catch (e: any) {
-                                alert(e?.response?.data?.detail || e?.response?.data?.message || 'Error opening WhatsApp.');
-                              }
-                            }}
-                            className="px-3 py-1.5 rounded-xl border border-green-200 text-green-700 bg-green-50 text-xs font-bold hover:bg-green-100 shadow-xs flex items-center gap-1"
-                          >
-                            [ SEND WHATSAPP ]
-                          </button>
-                        )}
-                      <button
-                        onClick={() => {
-                          setNewGRNPOId(po.id);
-                          setNewGRNSupplierId(po.supplier_id || '');
-                          setNewGRNInvoiceAmt(Number(po.net_amount || po.total_amount || 0));
-                          setNewGRNInvoiceNum('');
-                          setNewGRNNotes('');
-                          setNewGRNInvoiceFile(null);
-                          setNewGRNLines((po.items || [])
-                            .map((line: any) => {
-                              const ordered = Number(line.ordered_qty || line.quantity || 0);
-                              const alreadyReceived = Number(line.received_qty || 0);
-                              const outstanding = Math.max(0, ordered - alreadyReceived);
-                              return {
-                                po_item_id: line.id,
-                                item_name: line.item_name || line.item?.name || 'Item',
-                                unit: line.unit_symbol || line.item?.unit?.symbol || '',
-                                ordered_qty: ordered,
-                                already_received_qty: alreadyReceived,
-                                outstanding_qty: outstanding,
-                                received_qty: outstanding,
-                                accepted_qty: outstanding,
-                              };
-                            })
-                            .filter((line: any) => line.outstanding_qty > 0));
-                          setCreateGRNModalOpen(true);
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs flex items-center gap-1"
-                      >
-                        <PackageCheck className="w-3.5 h-3.5" /> Receive Delivery
-                      </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Receiving History Log */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#707070]">
-              Vendor Receiving Log (GRN)
+        <div className="space-y-5">
+          {/* Incoming Approved Supplier Deliveries */}
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#707070] mb-2">
+              Incoming Approved Supplier Deliveries
             </h3>
             <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
-              {supplierGRNs.length === 0 ? (
-                <div className="p-12 text-center">
+              {incomingDeliveries.length === 0 ? (
+                <div className="p-10 text-center">
                   <PackageCheck className="w-8 h-8 text-[#2E8B57] mx-auto mb-2 opacity-60" />
-                  <h3 className="text-sm font-bold text-[#1C1C1C]">No delivery receipts yet</h3>
+                  <h3 className="text-sm font-bold text-[#1C1C1C]">No approved vendor deliveries waiting</h3>
                   <p className="text-xs text-[#707070] mt-1">
-                    Approved vendor deliveries submitted here will appear in the receiving log.
+                    Approved purchase orders waiting for receiving will appear here.
                   </p>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {supplierGRNs.map((g) => (
-                    <div
-                      key={g.id}
-                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#FAF8F5]/50 transition-colors"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-xs font-mono text-[#1C1C1C]">
-                            {g.grn_number}
-                          </span>
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              g.status === 'APPROVED' || g.status === 'RECEIVED'
-                                ? 'bg-green-100 text-green-800'
-                                : g.status === 'REJECTED'
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-amber-100 text-amber-800'
-                            }`}
-                          >
-                            {g.status?.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <div className="text-xs text-[#707070]">
-                          Invoice: <span className="font-medium text-[#1C1C1C]">{g.supplier_invoice_number || g.invoice_number || '—'}</span> · Total: ₹{Number(g.total_amount || 0).toFixed(2)}
-                        </div>
-                      </div>
+                  {incomingDeliveries.map((po) => {
+                    const poAmount = Number(po.net_amount || po.total_amount || 0);
+                    const remainingItems = (po.items || [])
+                      .map((line: any) => {
+                        const ordered = Number(line.ordered_qty ?? line.quantity ?? 0);
+                        const received = Number(line.received_qty ?? 0);
+                        return {
+                          ...line,
+                          remaining: Math.max(0, ordered - received),
+                        };
+                      })
+                      .filter((line: any) => line.remaining > 0);
 
-                      <div className="flex items-center gap-2 self-end sm:self-center">
-                        {g.status === 'PENDING_APPROVAL' && isHeadOffice && (
-                          <>
-                            <button
-                              onClick={() => handleApproveGRN(g.id)}
-                              className="px-3 py-1.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs"
-                            >
-                              Approve & Post Stock
-                            </button>
-                            <button
-                              onClick={() => setRejectGRNModal({ open: true, grnId: g.id, grnNumber: g.grn_number })}
-                              className="px-2.5 py-1.5 rounded-xl border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50"
-                            >
-                              Reject
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={() => setViewGRNModal(g)}
-                          className="px-3 py-1.5 rounded-xl border border-[rgba(45,45,45,0.12)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5]"
-                        >
-                          View
-                        </button>
+                    return (
+                      <div
+                        key={po.id}
+                        className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-[#FAF8F5]/50 transition-colors"
+                      >
+                        <div className="min-w-0 space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold font-mono text-xs text-[#1C1C1C]">
+                              {po.po_number || po.id}
+                            </span>
+                            <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-blue-50 text-blue-700">
+                              {po.status?.replace('_', ' ') || 'APPROVED'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-[#555]">
+                            Vendor: <span className="font-semibold text-[#1C1C1C]">{po.supplier_name || po.supplier?.name || 'Vendor from PO'}</span>
+                          </div>
+                          <div className="text-[11px] text-[#707070] truncate max-w-2xl">
+                            Items:{' '}
+                            <span className="text-[#1C1C1C] font-medium">
+                              {remainingItems.length
+                                ? remainingItems
+                                    .slice(0, 4)
+                                    .map((it: any) => `${it.item_name || it.item?.name || 'Item'} (${it.remaining})`)
+                                    .join(', ')
+                                : 'No outstanding quantity'}
+                              {remainingItems.length > 4 ? ' …' : ''}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-4 lg:gap-5 shrink-0">
+                          <div className="text-right">
+                            <div className="text-[10px] uppercase tracking-wider text-[#777]">PO Amount</div>
+                            <div className="font-bold font-mono text-sm text-[#1C1C1C]">
+                              ₹{poAmount.toFixed(2)}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewGRNPOId(po.id);
+                              setNewGRNSupplierId(po.supplier_id || '');
+                              setNewGRNInvoiceAmt(poAmount);
+                              setNewGRNInvoiceNum('');
+                              setNewGRNNotes('');
+                              setNewGRNInvoiceFile(null);
+                              setNewGRNLines((po.items || [])
+                                .map((line: any) => {
+                                  const ordered = Number(line.ordered_qty || line.quantity || 0);
+                                  const alreadyReceived = Number(line.received_qty || 0);
+                                  const outstanding = Math.max(0, ordered - alreadyReceived);
+                                  return {
+                                    po_item_id: line.id,
+                                    item_name: line.item_name || line.item?.name || 'Item',
+                                    unit: line.unit_symbol || line.item?.unit?.symbol || '',
+                                    ordered_qty: ordered,
+                                    already_received_qty: alreadyReceived,
+                                    outstanding_qty: outstanding,
+                                    received_qty: outstanding,
+                                    accepted_qty: outstanding,
+                                  };
+                                })
+                                .filter((line: any) => line.outstanding_qty > 0));
+                              setCreateGRNModalOpen(true);
+                            }}
+                            disabled={!remainingItems.length}
+                            className="px-4 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <PackageCheck className="w-3.5 h-3.5" />
+                            Receive
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Vendor Receiving History */}
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#707070] mb-2">
+              Vendor Receiving History (GRN)
+            </h3>
+            <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
+              {supplierGRNs.length === 0 ? (
+                <div className="p-10 text-center">
+                  <PackageCheck className="w-8 h-8 text-[#2E8B57] mx-auto mb-2 opacity-60" />
+                  <h3 className="text-sm font-bold text-[#1C1C1C]">No receiving history yet</h3>
+                  <p className="text-xs text-[#707070] mt-1">
+                    Submitted vendor receipts will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {supplierGRNs.map((g) => {
+                    const isApproved = g.status === 'APPROVED' || g.status === 'RECEIVED';
+                    return (
+                      <div
+                        key={g.id}
+                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#FAF8F5]/50 transition-colors"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-xs font-mono text-[#1C1C1C]">
+                              {g.grn_number}
+                            </span>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                isApproved
+                                  ? 'bg-green-100 text-green-800'
+                                  : g.status === 'REJECTED'
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {g.status?.replace('_', ' ')}
+                            </span>
+                          </div>
+                          <div className="text-xs text-[#707070]">
+                            Invoice: <span className="font-medium text-[#1C1C1C]">{g.supplier_invoice_number || g.invoice_number || '—'}</span>
+                            {' · '}
+                            Total: <span className="font-bold text-[#1C1C1C]">₹{Number(g.total_amount || 0).toFixed(2)}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-center">
+                          {g.status === 'PENDING_APPROVAL' && isHeadOffice && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleApproveGRN(g.id)}
+                                className="px-3 py-1.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs"
+                              >
+                                Approve & Post Stock
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRejectGRNModal({ open: true, grnId: g.id, grnNumber: g.grn_number })}
+                                className="px-2.5 py-1.5 rounded-xl border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setViewGRNModal(g)}
+                            className="px-3 py-1.5 rounded-xl border border-[rgba(45,45,45,0.12)] text-xs font-bold text-[#1C1C1C] hover:bg-[#FAF8F5]"
+                          >
+                            View
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
