@@ -50,6 +50,11 @@ import AIWastageSalesIntelligenceWorkspace from '@/components/workspaces/AIWasta
 import WhatsAppBusinessWorkspace from '@/components/workspaces/WhatsAppBusinessWorkspace';
 import MainKitchenWorkspace from '@/components/workspaces/MainKitchenWorkspace';
 import CentralStoreRequirement from '@/components/workspaces/CentralStoreRequirement';
+import CentralStoreWorkspace from '@/components/workspaces/CentralStoreWorkspace';
+import CentralStoreStockWorkspace from '@/components/workspaces/CentralStoreStockWorkspace';
+import CentralStoreTransferWorkspace from '@/components/workspaces/CentralStoreTransferWorkspace';
+import CentralStoreTransferReceivingWorkspace from '@/components/workspaces/CentralStoreTransferReceivingWorkspace';
+import CentralStorePurchaseReceivingWorkspace from '@/components/workspaces/CentralStorePurchaseReceivingWorkspace';
 import OutletSalesWorkspace from '@/components/workspaces/OutletSalesWorkspace';
 import FoodCostModule from '@/components/workspaces/FoodCostModule';
 
@@ -249,6 +254,36 @@ export const AppContent = () => {
             </div>
           )}
 
+          {activeWorkspace === 'centralStore' && (
+            <div className="w-full min-w-0">
+              <CentralStoreWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'centralStoreStock' && (
+            <div className="w-full min-w-0">
+              <CentralStoreStockWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'centralStoreTransfer' && (
+            <div className="w-full min-w-0">
+              <CentralStoreTransferWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'centralStoreReceiving' && (
+            <div className="w-full min-w-0">
+              <CentralStoreTransferReceivingWorkspace />
+            </div>
+          )}
+
+          {activeWorkspace === 'centralStorePurchaseReceiving' && (
+            <div className="w-full min-w-0">
+              <CentralStorePurchaseReceivingWorkspace />
+            </div>
+          )}
+
           {activeWorkspace === 'wastage' && (
             <div className="w-full min-w-0">
               <WastageWorkspace />
@@ -361,7 +396,12 @@ export const AppContent = () => {
             activeWorkspace !== 'purchase' &&
             activeWorkspace !== 'kitchenOrders' &&
             activeWorkspace !== 'centralKitchenProduction' &&
-            activeWorkspace !== 'centralStoreRequirement' && (
+            activeWorkspace !== 'centralStoreRequirement' &&
+            activeWorkspace !== 'centralStore' &&
+            activeWorkspace !== 'centralStoreTransfer' &&
+            activeWorkspace !== 'centralStoreStock' &&
+             activeWorkspace !== 'centralStoreReceiving' &&
+            activeWorkspace !== 'centralStorePurchaseReceiving' && (
               <div className="w-full min-w-0">
                 <div className="p-12 text-center rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
                   <ShieldCheck className="w-10 h-10 text-red-500 mx-auto mb-3 opacity-70" />

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Clock3, Eye, FileText, RefreshCw, Send, ShieldCheck, XCircle, Package } from 'lucide-react';
+import { apiClient } from '@/api/client';
 import { procurementApi } from '@/api/procurement';
 import { Button, Badge, EmptyState, StatCard } from '@/components/ui';
 import { useOutlet } from '@/context/OutletContext';
@@ -62,6 +63,7 @@ interface ApprovalItem {
   status?: string;
   createdAt?: string;
   payload: any;
+  type?: 'PURCHASE_REQUEST' | 'CENTRAL_TRANSFER';
 }
 
 export default function ApprovalCenterWorkspace() {
@@ -86,13 +88,17 @@ export default function ApprovalCenterWorkspace() {
     setLoading(true);
     setMessage('');
     try {
-      const [pendingPRs, allPRs] = await Promise.all([
+      const [pendingPRs, allPRs, pendingTransfers] = await Promise.all([
         procurementApi.getPurchaseRequests({ branch_id: branchId, status_filter: 'PENDING_APPROVAL' }),
         procurementApi.getPurchaseRequests({ branch_id: branchId }),
+        apiClient.get('/procurement/central-store/queue', {
+          params: { status_filter: 'PENDING', ...(branchId ? { branch_id: branchId } : {}) },
+        }).then((res: any) => res?.data?.data ?? res?.data ?? []).catch(() => []),
       ]);
 
-      setPending((pendingPRs || []).map((x: any) => ({
+      const purchasePending = (pendingPRs || []).map((x: any) => ({
         id: String(x.id),
+        type: 'PURCHASE_REQUEST' as const,
         reference: x.request_number,
         title: x.requisition_type === 'CENTRAL_STORE' ? 'CENTRAL STORE REQUEST' : 'PURCHASE REQUEST',
         amount: requestAmount(x),
@@ -100,7 +106,21 @@ export default function ApprovalCenterWorkspace() {
         status: x.status,
         createdAt: x.created_at,
         payload: x,
-      })));
+      }));
+
+      const transferPending = (pendingTransfers || []).map((x: any) => ({
+        id: String(x.id),
+        type: 'CENTRAL_TRANSFER' as const,
+        reference: x.transfer_number || x.id,
+        title: 'CENTRAL STORE DISPATCH',
+        amount: Number(x.total_amount ?? x.totalAmount ?? 0),
+        branch: x.destination_branch_name || x.destination_branch?.name,
+        status: x.status,
+        createdAt: x.created_at,
+        payload: x,
+      }));
+
+      setPending([...purchasePending, ...transferPending]);
 
       const historyStatuses = new Set(['APPROVED', 'ORDERED', 'REJECTED', 'CANCELLED']);
       setHistory((allPRs || [])
@@ -142,13 +162,8 @@ export default function ApprovalCenterWorkspace() {
   }, [branchId]);
 
   const loadAll = useCallback(async () => {
-    // Do not load the entire approved-PO list on page startup. That query can be
-    // large and is only needed when the user opens Send PO.
-    await loadPRData();
-    if (tab === 'SEND_PO') {
-      await loadPOs();
-    }
-  }, [loadPRData, loadPOs, tab]);
+    await Promise.all([loadPRData(), loadPOs()]);
+  }, [loadPRData, loadPOs]);
 
   useEffect(() => {
     loadAll();
@@ -158,10 +173,14 @@ export default function ApprovalCenterWorkspace() {
     setActingId(item.id);
     setMessage('');
     try {
-      await procurementApi.approvePurchaseRequest(item.id);
-      setMessage(`${item.reference} approved.`);
-      await loadPRData();
-      if (tab === 'SEND_PO') await loadPOs();
+      if (item.type === 'CENTRAL_TRANSFER') {
+        await apiClient.post(`/procurement/central-store/transfers/${item.id}/approve-dispatch`, {});
+        setMessage(`${item.reference} dispatch approved. Outlet can now receive the transfer.`);
+      } else {
+        await procurementApi.approvePurchaseRequest(item.id);
+        setMessage(`${item.reference} approved.`);
+      }
+      await loadAll();
     } catch (error: any) {
       const data = error?.response?.data;
       setMessage(data?.error?.message || data?.detail || data?.message || error?.message || 'Approval failed.');
@@ -174,9 +193,14 @@ export default function ApprovalCenterWorkspace() {
     setActingId(item.id);
     setMessage('');
     try {
-      await procurementApi.rejectPurchaseRequest(item.id, { reason: 'Rejected from Approval Center' });
-      setMessage(`${item.reference} rejected.`);
-      await loadPRData();
+      if (item.type === 'CENTRAL_TRANSFER') {
+        await apiClient.post(`/procurement/central-store/transfers/${item.id}/reject-dispatch`, { reason: 'Rejected from Approval Center' });
+        setMessage(`${item.reference} dispatch rejected.`);
+      } else {
+        await procurementApi.rejectPurchaseRequest(item.id, { reason: 'Rejected from Approval Center' });
+        setMessage(`${item.reference} rejected.`);
+      }
+      await loadAll();
     } catch (error: any) {
       const data = error?.response?.data;
       setMessage(data?.detail || data?.message || error?.message || 'Reject failed.');
@@ -194,8 +218,8 @@ export default function ApprovalCenterWorkspace() {
         return;
       }
       window.open(response.whatsapp_url, '_blank', 'noopener,noreferrer');
+      await loadPOs();
       await loadPRData();
-      if (tab === 'SEND_PO') await loadPOs();
     } catch (error: any) {
       const data = error?.response?.data;
       setMessage(data?.detail || data?.message || error?.message || 'WhatsApp send failed.');
@@ -231,7 +255,7 @@ export default function ApprovalCenterWorkspace() {
             <ShieldCheck className="w-5 h-5 text-[#B8862D]" />
             <h1 className="text-xl font-bold">Approval Center</h1>
           </div>
-          <p className="text-xs text-[#707070] mt-1">Approve requirements, review history, then send vendor POs.</p>
+          <p className="text-xs text-[#707070] mt-1">Approve requirements and Central Store dispatches, review history, then send vendor POs.</p>
         </div>
         <Button size="sm" variant="secondary" onClick={loadAll} disabled={loading || poLoading}>
           <RefreshCw className={`w-4 h-4 ${(loading || poLoading) ? 'animate-spin' : ''}`} /> Refresh
@@ -247,7 +271,7 @@ export default function ApprovalCenterWorkspace() {
       <div className="flex gap-2 overflow-x-auto pb-1">
         <button onClick={() => setTab('APPROVE')} className={`px-4 py-2 rounded-xl text-xs font-bold border ${tab === 'APPROVE' ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/30' : 'bg-white text-[#707070] border-gray-200'}`}>Approve</button>
         <button onClick={() => setTab('HISTORY')} className={`px-4 py-2 rounded-xl text-xs font-bold border ${tab === 'HISTORY' ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/30' : 'bg-white text-[#707070] border-gray-200'}`}>Approved History</button>
-        <button onClick={() => setTab('SEND_PO')} className={`px-4 py-2 rounded-xl text-xs font-bold border ${tab === 'SEND_PO' ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/30' : 'bg-white text-[#707070] border-gray-200'}`}>Send PO</button>
+        <button onClick={() => { setTab('SEND_PO'); loadPOs(); }} className={`px-4 py-2 rounded-xl text-xs font-bold border ${tab === 'SEND_PO' ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/30' : 'bg-white text-[#707070] border-gray-200'}`}>Send PO</button>
       </div>
 
       {message && <div className="p-3 rounded-xl bg-white border border-gray-200 text-xs font-medium">{message}</div>}
@@ -277,7 +301,7 @@ export default function ApprovalCenterWorkspace() {
                     <Button size="sm" variant="primary" disabled={!canApprove || actingId === item.id} onClick={() => approvePR(item)}>
                       <CheckCircle2 className="w-4 h-4" /> Approve
                     </Button>
-                    <Button size="sm" variant="danger" disabled={!canApprove || actingId === item.id} onClick={() => rejectPR(item)}>
+                    <Button size="sm" variant="danger" disabled={!canApprove || actingId === item.id || item.type === 'CENTRAL_TRANSFER'} onClick={() => rejectPR(item)}>
                       <XCircle className="w-4 h-4" /> Reject
                     </Button>
                   </div>

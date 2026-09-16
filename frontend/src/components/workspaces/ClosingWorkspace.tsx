@@ -1,503 +1,254 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { CalendarDays, CheckCircle2, RefreshCw, Save, Lock, Clock3 } from 'lucide-react';
+import { apiClient } from '@/api/client';
 import { useOutlet } from '@/context/OutletContext';
-import { procurementApi } from '@/api/procurement';
-import {
-  OutletClosingRecord,
-  ActiveClosingDraft,
-  ClosingStockItem,
-} from '@/types/purchase.types';
-import {
-  CalendarDays,
-  CalendarCheck,
-  CheckCircle2,
-  AlertCircle,
-  Calculator,
-  ShieldCheck,
-  Percent,
-  RefreshCw,
-  Lock,
-  Unlock,
-  TrendingUp,
-  DollarSign,
-  FileSpreadsheet,
-  AlertTriangle,
-  X,
-} from 'lucide-react';
-import { Badge, Button, StatCard, AlertBanner, Modal } from '@/components/ui';
+import { useAuth } from '@/context/AuthContext';
+import { Badge, EmptyState } from '@/components/ui';
 
-export const ClosingWorkspace: React.FC = () => {
-  const { activeOutlet, closingInfo, isHeadOffice } = useOutlet();
+const monthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
 
-  const [loading, setLoading] = useState<boolean>(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+const money = (v: any) => `₹${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const qty = (v: any) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 
-  const [closingDraft, setClosingDraft] = useState<ActiveClosingDraft | null>(null);
-  const [closingHistory, setClosingHistory] = useState<OutletClosingRecord[]>([]);
-  const [physicalCounts, setPhysicalCounts] = useState<{ [itemId: string]: number }>({});
-  const [closingNotes, setClosingNotes] = useState<string>('');
-  const [submitting, setSubmitting] = useState<boolean>(false);
+export default function ClosingWorkspace() {
+  const { activeOutlet, isHeadOffice } = useOutlet();
+  const { user } = useAuth();
 
-  // Reopen modal state
-  const [reopenModalId, setReopenModalId] = useState<string | null>(null);
-  const [reopenReason, setReopenReason] = useState<string>('');
+  const branchId = activeOutlet?.id;
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [periodType, setPeriodType] = useState<'FIRST_HALF' | 'SECOND_HALF'>(today.getDate() <= 15 ? 'FIRST_HALF' : 'SECOND_HALF');
 
-  const fetchClosingData = async () => {
+  const [draft, setDraft] = useState<any | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const [physical, setPhysical] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const periodLabel = periodType === 'FIRST_HALF' ? '1 – 15' : `16 – ${new Date(year, month, 0).getDate()}`;
+
+  const load = useCallback(async () => {
+    if (!branchId) return;
     setLoading(true);
-    setFeedback(null);
+    setMessage(null);
     try {
-      if (activeOutlet.id) {
-        // 1. Fetch active draft
-        try {
-          const draft = await procurementApi.getActiveClosingDraft(activeOutlet.id);
-          setClosingDraft(draft);
-          const initialCounts: { [id: string]: number } = {};
-          (draft.items || []).forEach((ci) => {
-            initialCounts[ci.item_id] = Number(ci.physical_closing_qty || ci.theoretical_closing_qty || 0);
-          });
-          setPhysicalCounts(initialCounts);
-        } catch (e) {
-          // ignore draft error if not initiated
-        }
+      const [draftRes, historyRes] = await Promise.all([
+        apiClient.get(`/procurement/closings/active/${branchId}`, {
+          params: { year, month, period_type: periodType },
+        }),
+        apiClient.get('/procurement/closings', {
+          params: { branch_id: branchId, year, month },
+        }),
+      ]);
 
-        // 2. Fetch closing history
-        const history = await procurementApi.getOutletClosings({
-          branch_id: isHeadOffice ? undefined : activeOutlet.id,
-        });
-        setClosingHistory(history || []);
+      const nextDraft = draftRes.data?.data ?? draftRes.data;
+      const nextHistory = historyRes.data?.data ?? historyRes.data ?? [];
+      setDraft(nextDraft);
+      setHistory(Array.isArray(nextHistory) ? nextHistory : []);
+
+      const initial: Record<string, string> = {};
+      for (const item of nextDraft?.items || []) {
+        initial[String(item.item_id)] = String(item.physical_closing_qty ?? '');
       }
+      setPhysical(initial);
     } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        message: err?.response?.data?.message || err?.message || 'Failed to load closing records.',
-      });
+      setMessage({ type: 'error', text: err?.response?.data?.detail || err?.response?.data?.message || err?.message || 'Closing data load failed.' });
     } finally {
       setLoading(false);
     }
-  };
+  }, [branchId, year, month, periodType]);
 
-  useEffect(() => {
-    fetchClosingData();
-  }, [activeOutlet.id]);
+  useEffect(() => { load(); }, [load]);
 
-  // Compute live totals
-  const totalPhysicalValuation = (closingDraft?.items || []).reduce((acc, ci) => {
-    const qty = physicalCounts[ci.item_id] ?? ci.physical_closing_qty ?? 0;
-    return acc + qty * Number(ci.unit_cost || 0);
-  }, 0);
+  const canSubmit = Boolean(branchId && draft?.items?.length && Object.values(physical).some((v) => Number(v) >= 0));
 
-  const totalOpening = Number(closingDraft?.opening_valuation || 0);
-  const totalPurchases = Number(closingDraft?.total_purchases || 0);
-  const calculatedFoodCost = Math.max(0, totalOpening + totalPurchases - totalPhysicalValuation);
-
-  const handleSubmitReconciliation = async () => {
-    if (!closingDraft) return;
-    setSubmitting(true);
+  const submit = async () => {
+    if (!branchId || !draft?.items?.length) return;
+    setSaving(true);
+    setMessage(null);
     try {
-      const itemsToSubmit = (closingDraft.items || []).map((ci) => ({
-        item_id: ci.item_id,
-        physical_closing_qty: Number(physicalCounts[ci.item_id] ?? ci.physical_closing_qty ?? 0),
+      const items = (draft.items || []).map((item: any) => ({
+        item_id: item.item_id,
+        physical_closing_qty: Number(physical[String(item.item_id)] || 0),
+        notes: undefined,
       }));
 
-      const res = await procurementApi.submitOutletClosing({
-        branch_id: activeOutlet.id,
-        period_type: closingDraft.period_type,
-        year: closingDraft.year,
-        month: closingDraft.month,
-        items: itemsToSubmit,
-        notes: closingNotes || undefined,
+      await apiClient.post('/procurement/closings/submit', {
+        branch_id: branchId,
+        year,
+        month,
+        period_type: periodType,
+        notes: notes.trim() || undefined,
+        items,
       });
 
-      setFeedback({
-        type: 'success',
-        message: `Closing reconciliation submitted successfully! Valuation: $${Number(res.closing_physical_valuation).toFixed(2)}, Actual Food Cost: $${Number(res.actual_food_cost).toFixed(2)}.`,
-      });
-      fetchClosingData();
+      setMessage({ type: 'success', text: 'Closing submitted successfully. It is now recorded for this period.' });
+      await load();
     } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        message: err?.response?.data?.message || 'Failed to submit physical counts.',
-      });
+      setMessage({ type: 'error', text: err?.response?.data?.detail || err?.response?.data?.message || err?.message || 'Closing submission failed.' });
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  const handleLockClosing = async (closingId: string) => {
-    setLoading(true);
-    try {
-      await procurementApi.lockOutletClosing(closingId);
-      setFeedback({ type: 'success', message: 'Closing period locked and finalized.' });
-      fetchClosingData();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to lock closing.' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const summary = useMemo(() => ({
+    opening: draft?.opening_valuation || 0,
+    purchases: draft?.total_purchases || 0,
+    items: draft?.items?.length || 0,
+  }), [draft]);
 
-  const handleReopenClosing = async () => {
-    if (!reopenModalId || !reopenReason.trim()) return;
-    setLoading(true);
-    try {
-      await procurementApi.reopenOutletClosing(reopenModalId, { reason: reopenReason });
-      setFeedback({ type: 'success', message: 'Closing period reopened for correction.' });
-      setReopenModalId(null);
-      setReopenReason('');
-      fetchClosingData();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.message || 'Failed to reopen closing.' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (!branchId && !isHeadOffice) {
+    return <EmptyState title="Select your outlet" description="Closing can only be submitted inside an authorized outlet scope." />;
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm">
+    <div className="w-full min-w-0 space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
-              <CalendarDays className="w-5 h-5 text-[#C79A3B]" />
-              Bi-Monthly Closing Engine (1st–15th & 16th–MonthEnd)
-            </h2>
-            <Badge variant="outlet">[{activeOutlet.code}]</Badge>
-          </div>
-          <p className="text-xs text-[#707070] mt-0.5">
-            Strict physical stock reconciliation calculating actual vs. theoretical consumption and food cost variances.
-          </p>
+          <h2 className="text-base font-bold text-[#1C1C1C]">OUTLET CLOSING</h2>
+          <p className="text-xs text-[#707070] mt-1">Two closing periods are maintained separately and remain available in history.</p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={fetchClosingData}
-            loading={loading}
-            icon={<RefreshCw className="w-3.5 h-3.5 text-[#C79A3B]" />}
-          >
-            Sync Data
-          </Button>
-          <Badge variant="warning">
-            Active Cycle: {closingInfo.periodType === 'FIRST_HALF' ? '1st–15th' : '16th–End'}
-          </Badge>
-        </div>
+        <button onClick={load} disabled={loading} className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold flex items-center gap-2 disabled:opacity-50">
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
       </div>
 
-      {/* Feedback Banner */}
-      <AlertBanner feedback={feedback} onClose={() => setFeedback(null)} />
-
-      {/* Cycle Period Info Banner */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-white via-[#FAF8F5] to-white border border-[rgba(45,45,45,0.08)] shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="space-y-1">
-          <span className="text-xs text-[#707070] font-semibold uppercase tracking-wider">Accounting Period Range</span>
-          <p className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">
-            {closingInfo.label} ({closingInfo.startDate.slice(0, 10)} to {closingInfo.endDate.slice(0, 10)})
-          </p>
+      {message && (
+        <div className={`rounded-xl px-4 py-3 text-xs font-semibold ${message.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+          {message.text}
         </div>
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] text-center">
-            <span className="text-[10px] text-[#707070] block">Days Remaining</span>
-            <span className="text-xl font-bold text-[#B8862D] font-['Outfit']">{closingInfo.daysRemaining}</span>
+      )}
+
+      <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold text-[#707070] mb-1">Month</label>
+            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-gray-200 bg-[#FAF8F5] text-sm">
+              {monthNames.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
+            </select>
           </div>
-          <div className="p-3 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] text-center">
-            <span className="text-[10px] text-[#707070] block">Audit Status</span>
-            <span className="text-xs font-bold text-[#2E8B57] flex items-center gap-1 mt-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> OPEN
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Real-time Math Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
-        <StatCard
-          title="1. Opening Stock"
-          value={`$${totalOpening.toFixed(2)}`}
-          subtitle="Valuation at start of cycle"
-          icon={<DollarSign className="w-4 h-4 text-[#1C1C1C]" />}
-          iconBgColor="bg-[#FAF8F5] text-[#1C1C1C]"
-        />
-
-        <StatCard
-          title="2. Period Purchases"
-          value={`+$${totalPurchases.toFixed(2)}`}
-          subtitle="Total GRN stock received"
-          icon={<DollarSign className="w-4 h-4 text-[#2E8B57]" />}
-          iconBgColor="bg-[#2E8B57]/10 text-[#2E8B57]"
-        />
-
-        <StatCard
-          title="3. Closing Count"
-          value={`-$${totalPhysicalValuation.toFixed(2)}`}
-          subtitle="Physical count valuation"
-          icon={<DollarSign className="w-4 h-4 text-[#B8862D]" />}
-          iconBgColor="bg-[#F1E4C5]/40 text-[#B8862D]"
-        />
-
-        <StatCard
-          title="4. Actual Food Cost"
-          value={`=$${calculatedFoodCost.toFixed(2)}`}
-          subtitle="Formula: 1 + 2 - 3"
-          icon={<Calculator className="w-4 h-4 text-[#1C1C1C]" />}
-          iconBgColor="bg-gray-100 text-[#1C1C1C]"
-        />
-      </div>
-
-      {/* Live Physical Stock Reconciliation Entry */}
-      {closingDraft && (
-        <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider font-['Outfit']">
-                Physical Stock Count & Automated Valuation Ledger ({activeOutlet.name})
-              </h3>
-              <p className="text-[11px] text-[#707070]">Formula: Opening + Purchases - Closing = Actual Consumption</p>
+          <div>
+            <label className="block text-[11px] font-semibold text-[#707070] mb-1">Year</label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setYear((y) => y - 1)}
+                className="h-10 w-10 shrink-0 rounded-xl border border-gray-200 bg-white text-lg font-bold text-[#555] hover:bg-[#FAF8F5]"
+                aria-label="Previous year"
+              >
+                −
+              </button>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={year}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  if (Number.isInteger(next) && next >= 1 && next <= 9999) setYear(next);
+                }}
+                className="w-full min-w-0 p-2.5 rounded-xl border border-gray-200 bg-[#FAF8F5] text-sm text-center font-bold"
+                aria-label="Closing year"
+              />
+              <button
+                type="button"
+                onClick={() => setYear((y) => y + 1)}
+                className="h-10 w-10 shrink-0 rounded-xl border border-gray-200 bg-white text-lg font-bold text-[#555] hover:bg-[#FAF8F5]"
+                aria-label="Next year"
+              >
+                +
+              </button>
             </div>
-            <Badge variant="purple">Active Cycle Reconciliation</Badge>
+            <p className="mt-1 text-[10px] text-[#999]">Year changes dynamically — no fixed year list.</p>
           </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-[#707070] mb-1">Closing Type</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setPeriodType('FIRST_HALF')} className={`p-2.5 rounded-xl border text-xs font-bold ${periodType === 'FIRST_HALF' ? 'bg-[#F1E4C5] border-[#B8862D]/40 text-[#7A5B17]' : 'bg-white border-gray-200 text-gray-600'}`}>
+                Mid Month<br /><span className="font-medium">1 – 15</span>
+              </button>
+              <button onClick={() => setPeriodType('SECOND_HALF')} className={`p-2.5 rounded-xl border text-xs font-bold ${periodType === 'SECOND_HALF' ? 'bg-[#F1E4C5] border-[#B8862D]/40 text-[#7A5B17]' : 'bg-white border-gray-200 text-gray-600'}`}>
+                Month End<br /><span className="font-medium">16 – {new Date(year, month, 0).getDate()}</span>
+              </button>
+            </div>
+          </div>
+        </div>
 
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Badge variant="warning" icon={<CalendarDays className="w-3 h-3" />}>{monthNames[month - 1]} {year}</Badge>
+          <Badge variant="outlet" icon={<Clock3 className="w-3 h-3" />}>{periodLabel}</Badge>
+          <span className="text-[#777]">Status: <b className="text-[#1C1C1C]">{draft?.status || 'DRAFT'}</b></span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="rounded-xl bg-[#FAF8F5] p-3"><div className="text-[10px] uppercase tracking-wider text-[#777]">Opening</div><div className="mt-1 font-bold">{money(summary.opening)}</div></div>
+          <div className="rounded-xl bg-[#FAF8F5] p-3"><div className="text-[10px] uppercase tracking-wider text-[#777]">Received Purchase</div><div className="mt-1 font-bold">{money(summary.purchases)}</div></div>
+          <div className="rounded-xl bg-[#FAF8F5] p-3"><div className="text-[10px] uppercase tracking-wider text-[#777]">Items</div><div className="mt-1 font-bold">{summary.items}</div></div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <div><div className="font-bold text-sm">Physical Stock Count</div><div className="text-[11px] text-[#777]">Enter the actual closing quantity for each item.</div></div>
+          <Lock className="w-4 h-4 text-[#B8862D]" />
+        </div>
+        {loading ? (
+          <div className="p-10 text-center text-sm text-[#777]">Loading closing draft…</div>
+        ) : !draft?.items?.length ? (
+          <div className="p-10 text-center text-sm text-[#777]">No items found for this closing period.</div>
+        ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="bg-white border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                  <th className="p-3.5">Item Name</th>
-                  <th className="p-3.5 text-right">Unit Cost</th>
-                  <th className="p-3.5 text-right">Opening Qty</th>
-                  <th className="p-3.5 text-right">Received Qty</th>
-                  <th className="p-3.5 text-right">Theoretical Closing</th>
-                  <th className="p-3.5 text-right">Physical Count</th>
-                  <th className="p-3.5 text-right">Calculated Valuation</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(45,45,45,0.05)] font-mono">
-                {closingDraft.items.map((ci) => {
-                  const countVal = physicalCounts[ci.item_id] ?? ci.physical_closing_qty ?? 0;
-                  const lineVal = countVal * ci.unit_cost;
-
+            <table className="w-full text-xs">
+              <thead className="bg-[#FAF8F5] text-[#777]"><tr><th className="px-4 py-3 text-left">Item</th><th className="px-4 py-3 text-right">System Qty</th><th className="px-4 py-3">Unit</th><th className="px-4 py-3 text-right">Physical Closing</th><th className="px-4 py-3 text-right">Value</th></tr></thead>
+              <tbody>
+                {draft.items.map((item: any) => {
+                  const value = Number(physical[String(item.item_id)] || 0) * Number(item.unit_cost || 0);
                   return (
-                    <tr key={ci.item_id} className="hover:bg-[#FAF8F5]/60 transition-all font-sans">
-                      <td className="p-3.5 font-bold text-[#1C1C1C]">
-                        {ci.item_name}
-                        <span className="block text-[10px] font-mono text-gray-400">{ci.item_code}</span>
-                      </td>
-                      <td className="p-3.5 text-right font-mono">${Number(ci.unit_cost).toFixed(2)}</td>
-                      <td className="p-3.5 text-right font-mono text-gray-600">{ci.opening_qty} {ci.unit_symbol}</td>
-                      <td className="p-3.5 text-right font-mono text-[#2E8B57] font-bold">+{ci.received_qty} {ci.unit_symbol}</td>
-                      <td className="p-3.5 text-right font-mono text-gray-600">{ci.theoretical_closing_qty} {ci.unit_symbol}</td>
-                      <td className="p-3.5 text-right">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={countVal}
-                          onChange={(e) =>
-                            setPhysicalCounts({
-                              ...physicalCounts,
-                              [ci.item_id]: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                          className="w-24 p-1.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl text-xs font-mono font-bold text-[#1C1C1C] text-right focus:outline-none focus:border-[#C79A3B]"
-                        />
-                      </td>
-                      <td className="p-3.5 text-right font-mono font-bold text-[#B8862D]">${lineVal.toFixed(2)}</td>
+                    <tr key={item.item_id} className="border-t border-gray-100">
+                      <td className="px-4 py-3"><div className="font-semibold text-[#1C1C1C]">{item.item_name}</div><div className="text-[10px] text-[#888]">{item.item_code}</div></td>
+                      <td className="px-4 py-3 text-right font-mono">{qty(item.physical_closing_qty)}</td>
+                      <td className="px-4 py-3">{item.unit_symbol || 'UNIT'}</td>
+                      <td className="px-4 py-3 text-right"><input type="number" min="0" step="0.001" value={physical[String(item.item_id)] ?? ''} onChange={(e) => setPhysical((prev) => ({ ...prev, [String(item.item_id)]: e.target.value }))} className="w-28 ml-auto p-2 rounded-lg border border-gray-200 bg-[#FAF8F5] text-right font-mono" /></td>
+                      <td className="px-4 py-3 text-right font-mono font-semibold">{money(value)}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-
-          <div className="p-4 border-t border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <input
-              type="text"
-              placeholder="Closing Remarks / Auditor Notes..."
-              value={closingNotes}
-              onChange={(e) => setClosingNotes(e.target.value)}
-              className="flex-1 px-3.5 py-2.5 bg-white border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:outline-none focus:border-[#C79A3B]"
-            />
-            <Button
-              variant="primary"
-              size="md"
-              onClick={handleSubmitReconciliation}
-              disabled={submitting}
-              loading={submitting}
-              icon={<CheckCircle2 className="w-4 h-4 text-[#C79A3B]" />}
-            >
-              {submitting ? 'Reconciling...' : 'Submit Physical Closing Count'}
-            </Button>
-          </div>
+        )}
+        <div className="p-4 border-t border-gray-100">
+          <label className="block text-[11px] font-semibold text-[#707070] mb-1">Notes</label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Optional closing remarks…" className="w-full p-2.5 rounded-xl border border-gray-200 bg-[#FAF8F5] text-xs" />
         </div>
-      )}
-
-      {/* Historical Closing Periods */}
-      <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden space-y-2">
-        <div className="p-4 border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] flex items-center justify-between">
-          <h3 className="font-bold text-xs text-[#1C1C1C] uppercase tracking-wider font-['Outfit']">
-            Bi-Monthly Closing History & Food Cost Ledger
-          </h3>
-          <span className="text-xs text-[#707070]">{closingHistory.length} Period Records</span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="bg-white border-b border-[rgba(45,45,45,0.08)] text-[#707070] font-bold">
-                <th className="p-3.5">Period</th>
-                <th className="p-3.5">Branch</th>
-                <th className="p-3.5 text-right">Opening Value</th>
-                <th className="p-3.5 text-right">Purchases (GRN)</th>
-                <th className="p-3.5 text-right">Closing Value</th>
-                <th className="p-3.5 text-right">Actual Food Cost</th>
-                <th className="p-3.5 text-right">Variance %</th>
-                <th className="p-3.5">Status</th>
-                <th className="p-3.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[rgba(45,45,45,0.05)] font-mono">
-              {closingHistory.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="p-8 text-center text-gray-400 font-sans">
-                    No historical closing records recorded yet. Submit your first period count above.
-                  </td>
-                </tr>
-              ) : (
-                closingHistory.map((h) => (
-                  <tr key={h.id} className="hover:bg-[#FAF8F5]/60 transition-all font-sans">
-                    <td className="p-3.5 font-mono font-bold text-[#1C1C1C]">
-                      {h.period_type === 'FIRST_HALF' ? '1st–15th' : '16th–End'} {h.year}-{h.month}
-                    </td>
-                    <td className="p-3.5 font-semibold text-[#1C1C1C]">{h.branch_name}</td>
-                    <td className="p-3.5 text-right font-mono">${Number(h.opening_valuation).toFixed(2)}</td>
-                    <td className="p-3.5 text-right font-mono text-[#2E8B57] font-bold">+${Number(h.total_purchases).toFixed(2)}</td>
-                    <td className="p-3.5 text-right font-mono">${Number(h.closing_physical_valuation).toFixed(2)}</td>
-                    <td className="p-3.5 text-right font-mono font-bold text-[#1C1C1C]">${Number(h.actual_food_cost).toFixed(2)}</td>
-                    <td className={`p-3.5 text-right font-mono font-bold ${Math.abs(Number(h.variance_percentage || 0)) > 5 ? 'text-red-600' : 'text-[#2E8B57]'}`}>
-                      {Number(h.variance_percentage || 0).toFixed(1)}%
-                    </td>
-                    <td className="p-3.5">
-                      <Badge
-                        variant={
-                          h.status === 'LOCKED'
-                            ? 'purple'
-                            : h.status === 'SUBMITTED'
-                            ? 'success'
-                            : 'neutral'
-                        }
-                      >
-                        {h.status}
-                      </Badge>
-                    </td>
-                    <td className="p-3.5 text-right space-x-1">
-                      {h.status !== 'LOCKED' && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleLockClosing(h.id)}
-                          icon={<Lock className="w-3 h-3 text-gray-500" />}
-                        >
-                          Lock
-                        </Button>
-                      )}
-                      {h.status === 'LOCKED' && isHeadOffice && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setReopenModalId(h.id)}
-                          icon={<Unlock className="w-3 h-3 text-amber-600" />}
-                        >
-                          Reopen
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="p-4 flex justify-end">
+          <button onClick={submit} disabled={saving || !canSubmit} className="px-4 py-2.5 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold flex items-center gap-2 disabled:opacity-50">
+            {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Submit Closing
+          </button>
         </div>
       </div>
 
-      {/* Core Mathematical Formulas */}
-      <div className="p-6 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] space-y-4 font-mono text-xs shadow-inner">
-        <div className="flex items-center gap-2 font-sans font-bold text-sm text-[#1C1C1C]">
-          <Calculator className="w-4 h-4 text-[#C79A3B]" />
-          <span>Core Food Cost & Consumption Formulas (Section 6.15.17):</span>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 text-[#2E8B57] font-semibold">
-          <div className="text-[10px] text-[#707070] font-sans">Formula 1: Actual Consumption Valuation</div>
-          <div>Actual Consumption = Opening Physical Stock + Purchases in Period - Closing Physical Count</div>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 text-[#B8862D] font-semibold">
-          <div className="text-[10px] text-[#707070] font-sans">Formula 2: Variance Valuation ($)</div>
-          <div>Variance Amount = Actual Consumption - Theoretical Consumption (POS Sales & Recipes)</div>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] space-y-1 text-[#3978B8] font-semibold">
-          <div className="text-[10px] text-[#707070] font-sans">Formula 3: Food Cost Percentage (%)</div>
-          <div>Food Cost % = (Actual Consumption Cost / Total Food Sales Revenue) × 100%</div>
-        </div>
-      </div>
-
-      {/* Security & Audit Note */}
-      <div className="p-5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] space-y-2 shadow-sm text-xs text-[#707070]">
-        <h3 className="text-sm font-bold text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-[#2E8B57]" />
-          Immutable Closing Snapshots
-        </h3>
-        <p>
-          Once a bi-monthly period is closed and signed off by the General Manager and Finance Auditor, closing stock valuations and variance records become immutable.
-        </p>
-      </div>
-
-      {/* Reopen Modal */}
-      <Modal
-        isOpen={!!reopenModalId}
-        onClose={() => setReopenModalId(null)}
-        title="Reopen Locked Closing Cycle"
-        icon={<Unlock className="w-5 h-5 text-amber-600" />}
-      >
-        <div className="space-y-4">
-          <p className="text-xs text-[#707070]">
-            Reopening an approved period allows stock reconciliation corrections but will generate a permanent compliance audit flag in the system log.
-          </p>
-          <div>
-            <label className="text-[11px] font-semibold text-[#707070] uppercase tracking-wider mb-1 block">
-              Justification / Reason *
-            </label>
-            <textarea
-              placeholder="Enter mandatory GM/Finance justification..."
-              value={reopenReason}
-              onChange={(e) => setReopenReason(e.target.value)}
-              rows={3}
-              className="w-full p-2.5 bg-[#FAF8F5] border border-[rgba(45,45,45,0.15)] rounded-xl text-xs focus:outline-none focus:border-[#C79A3B]"
-            />
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between"><div className="font-bold text-sm">Closing History</div><CheckCircle2 className="w-4 h-4 text-green-600" /></div>
+        {history.length === 0 ? <div className="p-8 text-center text-xs text-[#777]">No closing record for this month.</div> : (
+          <div className="divide-y divide-gray-100">
+            {history.map((r: any) => (
+              <div key={r.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                <div><div className="font-semibold text-xs">{String(r.period_type).replace('_', ' ')}</div><div className="text-[10px] text-[#777]">{r.start_date?.slice(0,10)} → {r.end_date?.slice(0,10)}</div></div>
+                <div className="text-right"><div className="font-mono font-semibold">{money(r.closing_physical_valuation)}</div><div className="text-[10px] text-[#777]">{r.status}</div></div>
+              </div>
+            ))}
           </div>
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(45,45,45,0.06)]">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setReopenModalId(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleReopenClosing}
-              disabled={!reopenReason.trim() || loading}
-            >
-              Reopen Period
-            </Button>
-          </div>
-        </div>
-      </Modal>
+        )}
+      </div>
     </div>
   );
-};
-
-export default ClosingWorkspace;
+}

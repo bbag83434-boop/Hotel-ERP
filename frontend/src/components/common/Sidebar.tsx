@@ -36,6 +36,7 @@ import {
   LogOut,
   Calculator,
   Warehouse,
+  PackageCheck,
 } from 'lucide-react';
 
 export type WorkspaceId =
@@ -78,7 +79,12 @@ export type WorkspaceId =
   | 'whatsappBusiness'
   | 'outletSales'
   | 'foodCost'
-  | 'centralStoreRequirement';
+  | 'centralStoreRequirement'
+  | 'centralStore'
+  | 'centralStoreStock'
+  | 'centralStoreTransfer'
+  | 'centralStoreReceiving'
+  | 'centralStorePurchaseReceiving';
 
 // Outlet-scope sidebar flow ids that map onto PurchaseWorkspace tabs or the
 // KitchenOrders module (kept internal to the Sidebar for scoped navigation).
@@ -120,10 +126,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         'CENTRAL_PURCHASE_MANAGER', 'CENTRAL_STORE_MANAGER', 'DESSERT_KITCHEN_HEAD',
         'GENERAL_MANAGER', 'DIRECTOR', 'KITCHEN_CHEF', 'PRODUCTION_MANAGER'].includes(userRole.toUpperCase()));
         
-  const isOutletScope = Boolean(activeOutlet?.id);
-const showFullSuite = isOutletScope
-  ? false
-  : (hasManagementRole || !!isHeadOffice);
+  const isCentralStoreScope = Boolean(
+    activeOutlet?.id && String(activeOutlet.type || '').toUpperCase() === 'CENTRAL_STORE'
+  );
+  const isOutletScope = Boolean(activeOutlet?.id && !isHeadOffice && !isCentralStoreScope);
+  const showCentralStoreSuite = isCentralStoreScope;
+  const showFullSuite = !showCentralStoreSuite && (isOutletScope ? false : (hasManagementRole || !!isHeadOffice));
 
   const navGroups = [
     {
@@ -158,7 +166,9 @@ const showFullSuite = isOutletScope
       label: 'Central Store',
       defaultOpen: true,
       items: [
+        { id: 'centralStore' as WorkspaceId, label: 'Request Queue', icon: Truck, badge: 'Queue' },
         { id: 'centralStoreRequirement' as WorkspaceId, label: 'Own Requirement', icon: Warehouse, badge: 'CS' },
+        { id: 'centralStoreTransfer' as WorkspaceId, label: 'Transfer / Dispatch', icon: Truck, badge: 'TRF' },
       ],
     },
     {
@@ -222,6 +232,13 @@ const showFullSuite = isOutletScope
       ],
     },
     {
+      label: 'Central Store Transfer',
+      defaultOpen: true,
+      items: [
+        { id: 'centralStoreReceiving', label: 'Central Store Receiving', icon: PackageCheck, initialTab: undefined, badge: 'Receive' },
+      ],
+    },
+    {
       label: 'Kitchen Orders',
       defaultOpen: true,
       items: [{ id: 'kitchenOrders', label: 'Kitchen Orders', icon: ChefHat, initialTab: undefined, badge: null }],
@@ -231,13 +248,6 @@ const showFullSuite = isOutletScope
       defaultOpen: true,
       items: [
         { id: 'centralKitchenProduction', label: 'Kitchen Operations', icon: ChefHat, initialTab: undefined, badge: 'MK' },
-      ],
-    }] : []),
-    ...(activeOutlet && String(activeOutlet.type).toUpperCase() === 'CENTRAL_STORE' ? [{
-      label: 'Central Store',
-      defaultOpen: true,
-      items: [
-        { id: 'centralStoreRequirement', label: 'Own Requirement', icon: Warehouse, initialTab: undefined, badge: 'CS' },
       ],
     }] : []),
     {
@@ -252,7 +262,22 @@ const showFullSuite = isOutletScope
     },
   ];
   // Navigation groups actually rendered: full suite for management, outlet-only for regular outlet users.
-  const renderedGroups = showFullSuite ? navGroups : outletNavGroups;
+  const centralStoreNavGroups = [
+    {
+      label: 'Central Store',
+      defaultOpen: true,
+      items: [
+        { id: 'centralStoreStock', label: 'Stock', icon: Boxes, initialTab: undefined, badge: 'Stock' },
+        { id: 'centralStore', label: 'Request Queue', icon: Truck, initialTab: undefined, badge: 'Queue' },
+        { id: 'centralStoreRequirement', label: 'Own Requirement', icon: Warehouse, initialTab: undefined, badge: 'CS' },
+        { id: 'centralStoreTransfer', label: 'Transfer / Dispatch', icon: Truck, initialTab: undefined, badge: 'TRF' },
+        { id: 'centralStorePurchaseReceiving', label: 'Purchase Receiving', icon: FileText, initialTab: undefined, badge: 'GRN' },
+        { id: 'closing', label: 'Bi-Monthly Closing', icon: CalendarDays, initialTab: undefined, badge: '1st–15th / Month End' },
+      ],
+    },
+  ];
+
+  const renderedGroups = showCentralStoreSuite ? centralStoreNavGroups : (showFullSuite ? navGroups : outletNavGroups);
   const workspaceGroup = (id: WorkspaceId) => renderedGroups.find((group) => group.items.some((item) => item.id === id));
   const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};

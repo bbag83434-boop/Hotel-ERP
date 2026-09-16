@@ -8,6 +8,28 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import List, Optional, Dict, Any, Tuple
 
+# Local invoice OCR dependencies are imported defensively so the ERP can boot
+# even before the OCR packages are installed. The OCR endpoints return a clear
+# installation message until the packages are present.
+try:
+    import pytesseract
+    from PIL import Image, ImageOps
+    from io import BytesIO
+except Exception:
+    pytesseract = None
+    Image = None
+    ImageOps = None
+
+try:
+    from pypdf import PdfReader
+except Exception:
+    PdfReader = None
+
+try:
+    from pdf2image import convert_from_bytes
+except Exception:
+    convert_from_bytes = None
+
 from fastapi import APIRouter, Depends, Query, Path, Body, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, desc, func
@@ -240,41 +262,6 @@ def resolve_default_item_vendor(db: Session, item: Item) -> Tuple[Optional[str],
         return item.supplier_id, "ITEM_MASTER_DEFAULT"
 
     return None, "NOT_CONFIGURED"
-
-
-def resolve_outlet_item_supply_source(db: Session, item: Item) -> Tuple[str, Optional[str], str]:
-    """Resolve effective routing for a normal outlet Purchase Requirement.
-
-    An ACTIVE SupplierItem mapping is the strongest outlet-routing signal.
-    Therefore an item with a configured Vendor-Item mapping is DIRECT_VENDOR
-    even if an older Item Master row still says CENTRAL_STORE. If no active
-    mapping exists, the explicit Item Master supply_source is respected.
-    """
-    if item is None:
-        return "CENTRAL_STORE", None, "NOT_CONFIGURED"
-
-    mapped = None
-    try:
-        mapped = db.query(SupplierItem).filter(
-            SupplierItem.company_id == item.company_id,
-            SupplierItem.item_id == item.id,
-            SupplierItem.is_active == True,  # noqa: E712
-        ).order_by(
-            SupplierItem.is_preferred.desc(),
-            SupplierItem.updated_at.desc(),
-        ).first()
-    except Exception:
-        mapped = None
-
-    if mapped and mapped.supplier_id:
-        return "DIRECT_VENDOR", mapped.supplier_id, "VENDOR_ITEM_MASTER"
-
-    item_source = (item.supply_source or "CENTRAL_STORE").upper()
-    if item_source == "DIRECT_VENDOR":
-        supplier_id, vendor_source = resolve_default_item_vendor(db, item)
-        return "DIRECT_VENDOR", supplier_id, vendor_source
-
-    return "CENTRAL_STORE", None, "ITEM_MASTER_SUPPLY_SOURCE"
 
 
 def get_configured_supplier_item_price(db: Session, item: Item, supplier_id: str) -> Decimal:
@@ -910,14 +897,7 @@ def format_pr_response(req: PurchaseRequest, db: Session) -> PurchaseRequestResp
     for item in req.items:
         db_item = item.item or db.query(Item).filter(Item.id == item.item_id).first()
         unit_sym = db_item.unit.symbol if db_item and db_item.unit else "UNIT"
-        if req.requisition_type == "CENTRAL_STORE":
-            effective_source = "DIRECT_VENDOR"
-            resolved_supplier_id, _ = resolve_default_item_vendor(db, db_item)
-        else:
-            effective_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
-        effective_supplier_id = resolved_supplier_id or item.supplier_id
-        effective_supplier = db.query(Supplier).filter(Supplier.id == effective_supplier_id).first() if effective_supplier_id else None
-        sup_name = effective_supplier.name if effective_supplier else (item.supplier.name if item.supplier else None)
+        sup_name = item.supplier.name if item.supplier else (db_item.supplier.name if db_item and db_item.supplier else None)
         items_res.append(
             PurchaseRequestItemResponse(
                 id=item.id,
@@ -927,9 +907,8 @@ def format_pr_response(req: PurchaseRequest, db: Session) -> PurchaseRequestResp
                 item_code=db_item.code if db_item else "",
                 unit_symbol=unit_sym,
                 unit=item.unit or unit_sym,
-                supply_source=effective_source,
-                supplier_id=effective_supplier_id,
-
+                supply_source=(item.supply_source or (db_item.supply_source if db_item else None)) or "CENTRAL_STORE",
+                supplier_id=item.supplier_id,
                 supplier_name=sup_name,
                 requested_qty=item.requested_qty,
                 estimated_price=item.estimated_price,
@@ -1093,9 +1072,10 @@ def create_purchase_request(
         db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
         if not db_item:
             raise NotFoundException(f"Inventory Item '{item_in.item_id}' not found.")
-        effective_source, supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
-        if effective_source == "DIRECT_VENDOR" and not supplier_id:
-            missing_direct_vendor.append(db_item.name)
+        if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
+            supplier_id, _ = resolve_default_item_vendor(db, db_item)
+            if not supplier_id:
+                missing_direct_vendor.append(db_item.name)
     if missing_direct_vendor:
         raise BadRequestException(
             "Vendor is not configured for Direct Vendor item(s): "
@@ -1129,14 +1109,19 @@ def create_purchase_request(
         # PART 3: Central Store own requirement NEVER carries a manually chosen
         # vendor — it is always auto-resolved from the Item/Vendor Master.
         if requisition_type == "CENTRAL_STORE":
-            # Central Store own requirement remains vendor-purchase based.
             supplier_id, _ = resolve_default_item_vendor(db, db_item)
-            item_supply_source = "DIRECT_VENDOR"
+        elif (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
+            # Ignore any supplier_id supplied by the outlet. Direct Vendor
+            # routing is determined solely by Item/Vendor Master configuration.
+            supplier_id, _ = resolve_default_item_vendor(db, db_item)
         else:
-            item_supply_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
-            supplier_id = resolved_supplier_id or item_in.supplier_id or db_item.supplier_id
+            supplier_id = item_in.supplier_id or db_item.supplier_id
+
+        # Resolve unit & supply source automatically from the Item Master supply routing —
+        # the Outlet Requirement NEVER carries a manually chosen source.
 
         item_unit = db_item.unit.symbol if db_item.unit else None
+        item_supply_source = db_item.supply_source or "CENTRAL_STORE"
 
         pr_item = PurchaseRequestItem(
             request_id=req.id,
@@ -1147,7 +1132,7 @@ def create_purchase_request(
             requested_qty=item_in.requested_qty,
             estimated_price=(
                 get_configured_supplier_item_price(db, db_item, supplier_id)
-                if item_supply_source == "DIRECT_VENDOR" and supplier_id
+                if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR" and supplier_id
                 else item_in.estimated_price or db_item.cost_price or Decimal("0.0000")
             ),
             notes=item_in.notes,
@@ -1219,113 +1204,6 @@ def get_purchase_request(
     return format_pr_response(req, db)
 
 
-@router.get("/requests/{request_id}/vendor-pos", response_model=List[PurchaseOrderResponse])
-def list_generated_vendor_pos_for_request(
-    request_id: str = Path(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    """Return ONLY the vendor POs created from this exact Purchase Request.
-
-    Matching is intentionally strict: participating_request_ids OR the exact
-    auto-generated note containing this request number, plus at least one
-    Direct Vendor line from the request. This prevents old/unrelated POs from
-    leaking into the request history.
-    """
-    req = db.query(PurchaseRequest).filter(PurchaseRequest.id == request_id).first()
-    if not req:
-        raise NotFoundException(f"Purchase Request '{request_id}' not found.")
-    check_user_outlet_access(current_user, req.branch_id, db)
-
-    direct_request_items = [
-        item for item in req.items
-        if str((item.supply_source or "CENTRAL_STORE")).upper() == "DIRECT_VENDOR"
-    ]
-    if not direct_request_items:
-        return []
-
-    direct_item_ids = {str(item.item_id) for item in direct_request_items}
-    request_number = str(req.request_number)
-    matched: List[PurchaseOrder] = []
-
-    pos = db.query(PurchaseOrder).order_by(desc(PurchaseOrder.created_at)).all()
-    for po in pos:
-        # Generated vendor POs are shown here even if an older lifecycle left
-        # them DRAFT/PENDING_APPROVAL/ORDERED. They will be normalized to
-        # APPROVED below once we prove they belong to this exact PR.
-        if po.status not in [
-            POStatus.DRAFT, POStatus.PENDING_APPROVAL,
-            POStatus.APPROVED, POStatus.WHATSAPP_OPENED, POStatus.SENT_MANUALLY,
-            POStatus.ISSUED, POStatus.PARTIALLY_RECEIVED, POStatus.RECEIVED,
-        ]:
-            continue
-
-        try:
-            allocation = json.loads(po.allocations) if po.allocations else {}
-            if not isinstance(allocation, dict):
-                allocation = {}
-        except Exception:
-            allocation = {}
-
-        # Support both the current allocation key and legacy variants used by
-        # older generated POs. The exact request number in notes is also a
-        # strong linkage signal.
-        participating = set()
-        for key in ("participating_request_ids", "participating_requests", "request_ids"):
-            values = allocation.get(key) or []
-            if isinstance(values, (list, tuple, set)):
-                participating.update(str(x) for x in values)
-        exact_participation = str(req.id) in participating
-        exact_request_note = request_number.lower() in str(po.notes or "").lower()
-
-        # Verify the PO actually contains at least one Direct Vendor item from
-        # this PR. Prefer exact allocation/note linkage; for legacy POs whose
-        # allocation metadata was not persisted, use a conservative fallback:
-        # same branch + same supplier + same direct item + created after the PR.
-        po_item_ids = {str(line.item_id) for line in (po.items or [])}
-        summary_items = allocation.get("items_summary") or []
-        summary_item_ids = {
-            str(x.get("item_id"))
-            for x in summary_items
-            if isinstance(x, dict) and x.get("item_id") is not None
-        }
-        item_match = bool((po_item_ids | summary_item_ids) & direct_item_ids)
-
-        linked = exact_participation or exact_request_note
-        if not linked:
-            direct_supplier_ids = {str(item.supplier_id) for item in direct_request_items if item.supplier_id}
-            same_supplier = str(po.supplier_id) in direct_supplier_ids
-            same_branch = (po.branch_id is None or str(po.branch_id) == str(req.branch_id))
-            created_after_pr = bool(po.created_at and req.created_at and po.created_at >= req.created_at)
-            linked = same_supplier and same_branch and created_after_pr and item_match
-
-        if not linked or not item_match:
-            continue
-
-        # A generated PO found through the exact PR linkage is downstream of
-        # the already-approved Purchase Request. Normalize any legacy status so
-        # the PR history can immediately send it through WhatsApp. Manual POs
-        # cannot reach this branch because exact PR linkage is mandatory.
-        if po.status in [POStatus.DRAFT, POStatus.PENDING_APPROVAL]:
-            po.status = POStatus.APPROVED
-            po.approved_by_id = current_user.id
-            po.approved_at = po.approved_at or datetime.utcnow()
-            po.updated_at = datetime.utcnow()
-            db.add(po)
-
-        matched.append(po)
-
-    if matched:
-        db.commit()
-        for po in matched:
-            db.refresh(po)
-
-    # De-duplicate defensively and keep newest first.
-    unique = {po.id: po for po in matched}
-    ordered = sorted(unique.values(), key=lambda po: po.created_at or datetime.min, reverse=True)
-    return [format_po_response(po, db) for po in ordered]
-
-
 @router.put("/requests/{request_id}", response_model=PurchaseRequestResponse)
 def update_purchase_request(
     request_id: str = Path(...),
@@ -1376,9 +1254,10 @@ def update_purchase_request(
             db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
             if not db_item:
                 raise NotFoundException(f"Item '{item_in.item_id}' not found.")
-            effective_source, supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
-            if effective_source == "DIRECT_VENDOR" and not supplier_id:
-                missing_direct_vendor.append(db_item.name)
+            if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
+                supplier_id, _ = resolve_default_item_vendor(db, db_item)
+                if not supplier_id:
+                    missing_direct_vendor.append(db_item.name)
         if missing_direct_vendor:
             raise BadRequestException(
                 "Vendor is not configured for Direct Vendor item(s): "
@@ -1396,12 +1275,16 @@ def update_purchase_request(
             # automatically from the Item/Vendor Master — no manual override.
             if req.requisition_type == "CENTRAL_STORE":
                 supplier_id, _ = resolve_default_item_vendor(db, db_item)
-                item_supply_source = "DIRECT_VENDOR"
+            elif (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
+                supplier_id, _ = resolve_default_item_vendor(db, db_item)
             else:
-                item_supply_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
-                supplier_id = resolved_supplier_id or item_in.supplier_id or db_item.supplier_id
+                supplier_id = item_in.supplier_id or db_item.supplier_id
+            # Resolve unit & supply source automatically from the Item Master supply routing —
+            # the Outlet Requirement NEVER carries a manually chosen source.
+
 
             item_unit = db_item.unit.symbol if db_item.unit else None
+            item_supply_source = db_item.supply_source or "CENTRAL_STORE"
 
             pr_item = PurchaseRequestItem(
                 request_id=req.id,
@@ -1412,7 +1295,7 @@ def update_purchase_request(
                 requested_qty=item_in.requested_qty,
                 estimated_price=(
                     get_configured_supplier_item_price(db, db_item, supplier_id)
-                    if item_supply_source == "DIRECT_VENDOR" and supplier_id
+                    if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR" and supplier_id
                     else item_in.estimated_price or db_item.cost_price or Decimal("0.0000")
                 ),
                 notes=item_in.notes,
@@ -1561,356 +1444,6 @@ def create_central_store_requirement(
     return format_pr_response(req, db)
 
 
-def _parse_po_allocations(po: PurchaseOrder) -> Dict[str, Any]:
-    try:
-        data = json.loads(po.allocations) if po.allocations else {}
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _save_po_allocations(po: PurchaseOrder, allocation: Dict[str, Any]) -> None:
-    po.allocations = json.dumps(allocation, default=str)
-    po.updated_at = datetime.utcnow()
-
-
-def _append_outlet_allocation(
-    allocation: Dict[str, Any],
-    branch_name: str,
-    item_name: str,
-    item_id: str,
-    quantity: Decimal,
-    unit_symbol: str,
-) -> None:
-    outlets = allocation.setdefault("outlets", {})
-    outlet_lines = outlets.setdefault(branch_name, [])
-    existing = next((x for x in outlet_lines if str(x.get("item_id")) == str(item_id)), None)
-    if existing:
-        existing["qty"] = float(Decimal(str(existing.get("qty", 0))) + quantity)
-        existing["quantity"] = existing["qty"]
-    else:
-        outlet_lines.append({
-            "item_id": item_id,
-            "item_name": item_name,
-            "qty": float(quantity),
-            "quantity": float(quantity),
-            "unit_symbol": unit_symbol,
-        })
-
-
-def _append_item_summary_allocation(
-    allocation: Dict[str, Any],
-    item_id: str,
-    item_name: str,
-    unit_symbol: str,
-    quantity: Decimal,
-    unit_price: Decimal,
-    branch_name: str,
-    request_id: str,
-    request_number: str,
-) -> None:
-    summaries = allocation.setdefault("items_summary", [])
-    row = next((x for x in summaries if str(x.get("item_id")) == str(item_id)), None)
-    alloc = {
-        "branch_name": branch_name,
-        "quantity": float(quantity),
-        "qty": float(quantity),
-        "request_id": request_id,
-        "request_number": request_number,
-    }
-    if row:
-        row["total_qty"] = float(Decimal(str(row.get("total_qty", 0))) + quantity)
-        row.setdefault("allocations", []).append(alloc)
-    else:
-        summaries.append({
-            "item_id": item_id,
-            "item_name": item_name,
-            "total_qty": float(quantity),
-            "unit_symbol": unit_symbol,
-            "unit_price": float(unit_price),
-            "allocations": [alloc],
-        })
-
-
-def _find_open_vendor_po(
-    db: Session,
-    company_id: str,
-    supplier_id: str,
-) -> Optional[PurchaseOrder]:
-    """Find the single still-open vendor PO for consolidation.
-
-    An open PO is APPROVED and carries consolidation_open=true in allocations.
-    WHATSAPP_OPENED/SENT/RECEIVED POs are therefore never reused.
-    """
-    candidates = (
-        db.query(PurchaseOrder)
-        .filter(
-            PurchaseOrder.company_id == company_id,
-            PurchaseOrder.supplier_id == supplier_id,
-            PurchaseOrder.status == POStatus.APPROVED,
-        )
-        .order_by(desc(PurchaseOrder.created_at))
-        .all()
-    )
-    for po in candidates:
-        alloc = _parse_po_allocations(po)
-        if alloc.get("consolidation_open") is True:
-            return po
-    return None
-
-
-def _create_or_extend_open_vendor_pos(
-    db: Session,
-    req: PurchaseRequest,
-    direct_items: List[PurchaseRequestItem],
-    current_user: User,
-) -> List[PurchaseOrder]:
-    """Create one open PO per vendor or append this request to an existing open PO.
-
-    This implements the intended rolling consolidation workflow:
-      * same vendor + open PO => append outlet/item allocation to that PO
-      * same vendor + PO already sent/closed => create a new PO
-      * different vendors => separate POs
-    """
-    if not direct_items:
-        return []
-
-    # Resolve supplier for every direct line first.
-    supplier_lines: Dict[str, List[Tuple[PurchaseRequestItem, Item, Supplier]]] = {}
-    for pri in direct_items:
-        item = pri.item or db.query(Item).filter(Item.id == pri.item_id).first()
-        if not item:
-            raise NotFoundException(f"Item '{pri.item_id}' not found.")
-        supply, supplier_id, _ = resolve_outlet_item_supply_source(db, item)
-        if supply != "DIRECT_VENDOR" or not supplier_id:
-            continue
-        supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
-        if not supplier:
-            raise NotFoundException(f"Supplier '{supplier_id}' not found for item '{item.name}'.")
-        pri.supplier_id = supplier_id
-        pri.supply_source = "DIRECT_VENDOR"
-        supplier_lines.setdefault(str(supplier_id), []).append((pri, item, supplier))
-
-    created_or_updated: List[PurchaseOrder] = []
-    branch_name = req.branch.name if req.branch else f"Outlet-{str(req.branch_id)[:8]}"
-
-    for supplier_id, lines in supplier_lines.items():
-        po = _find_open_vendor_po(db, req.company_id, supplier_id)
-
-        if po:
-            allocation = _parse_po_allocations(po)
-            allocation.setdefault("supplier_id", supplier_id)
-            allocation.setdefault("supplier_name", lines[0][2].name)
-            allocation["consolidation_open"] = True
-            request_ids = set(str(x) for x in (allocation.get("participating_request_ids") or []))
-            request_ids.add(str(req.id))
-            allocation["participating_request_ids"] = sorted(request_ids)
-            request_numbers = set(str(x) for x in (allocation.get("participating_request_numbers") or []))
-            request_numbers.add(str(req.request_number))
-            allocation["participating_request_numbers"] = sorted(request_numbers)
-            allocation["last_consolidated_at"] = datetime.utcnow().isoformat()
-
-            for pri, item, supplier in lines:
-                qty = Decimal(str(pri.requested_qty or 0))
-                unit_price = get_configured_supplier_item_price(db, item, supplier_id)
-                unit_symbol = item.unit.symbol if item.unit else (pri.unit or "UNIT")
-
-                po_item = next((x for x in po.items if str(x.item_id) == str(item.id)), None)
-                if po_item:
-                    po_item.ordered_qty = Decimal(str(po_item.ordered_qty or 0)) + qty
-                    po_item.unit_price = unit_price
-                    po_item.total_price = Decimal(str(po_item.total_price or 0)) + (qty * unit_price)
-                    try:
-                        line_allocs = json.loads(po_item.allocations) if po_item.allocations else []
-                        if not isinstance(line_allocs, list):
-                            line_allocs = []
-                    except Exception:
-                        line_allocs = []
-                    line_allocs.append({
-                        "branch_name": branch_name,
-                        "branch_id": req.branch_id,
-                        "quantity": float(qty),
-                        "qty": float(qty),
-                        "request_id": req.id,
-                        "request_number": req.request_number,
-                    })
-                    po_item.allocations = json.dumps(line_allocs, default=str)
-                else:
-                    po_item = PurchaseOrderItem(
-                        po_id=po.id,
-                        item_id=item.id,
-                        ordered_qty=qty,
-                        received_qty=Decimal("0.0000"),
-                        unit_price=unit_price,
-                        total_price=qty * unit_price,
-                        notes=f"Rolling consolidated PO for {req.request_number}",
-                        allocations=json.dumps([{
-                            "branch_name": branch_name,
-                            "branch_id": req.branch_id,
-                            "quantity": float(qty),
-                            "qty": float(qty),
-                            "request_id": req.id,
-                            "request_number": req.request_number,
-                        }]),
-                    )
-                    db.add(po_item)
-
-                _append_item_summary_allocation(
-                    allocation=allocation,
-                    item_id=item.id,
-                    item_name=item.name,
-                    unit_symbol=unit_symbol,
-                    quantity=qty,
-                    unit_price=unit_price,
-                    branch_name=branch_name,
-                    request_id=req.id,
-                    request_number=req.request_number,
-                )
-                _append_outlet_allocation(
-                    allocation=allocation,
-                    branch_name=branch_name,
-                    item_name=item.name,
-                    item_id=item.id,
-                    quantity=qty,
-                    unit_symbol=unit_symbol,
-                )
-
-                po.total_amount = Decimal(str(po.total_amount or 0)) + (qty * unit_price)
-                po.net_amount = Decimal(str(po.net_amount or 0)) + (qty * unit_price)
-
-            _save_po_allocations(po, allocation)
-            created_or_updated.append(po)
-            log_procurement_audit(
-                db=db,
-                user=current_user,
-                action="EXTEND_OPEN_VENDOR_PO",
-                entity_type="PurchaseOrder",
-                entity_id=po.id,
-                company_id=req.company_id,
-                branch_id=req.branch_id,
-                new_values={
-                    "po_number": po.po_number,
-                    "supplier_id": supplier_id,
-                    "purchase_request_id": req.id,
-                    "status": po.status.value,
-                    "consolidation_open": True,
-                },
-            )
-            continue
-
-        # No open PO exists for this vendor -> create a brand-new open PO.
-        supplier = lines[0][2]
-        timestamp_str = datetime.utcnow().strftime('%Y%m%d%H%M')
-        po_num = f"PO-{timestamp_str}-{uuid.uuid4().hex[:4].upper()}"
-        total_amt = Decimal("0.0000")
-        items_summary: List[Dict[str, Any]] = []
-        outlet_breakdown: Dict[str, List[Dict[str, Any]]] = {}
-        po_lines: List[Tuple[Item, Decimal, Decimal]] = []
-
-        for pri, item, _supplier in lines:
-            qty = Decimal(str(pri.requested_qty or 0))
-            unit_price = get_configured_supplier_item_price(db, item, supplier_id)
-            unit_symbol = item.unit.symbol if item.unit else (pri.unit or "UNIT")
-            total_amt += qty * unit_price
-            po_lines.append((item, qty, unit_price))
-            _append_item_summary_allocation(
-                {"items_summary": items_summary},
-                item_id=item.id,
-                item_name=item.name,
-                unit_symbol=unit_symbol,
-                quantity=qty,
-                unit_price=unit_price,
-                branch_name=branch_name,
-                request_id=req.id,
-                request_number=req.request_number,
-            )
-            outlet_breakdown.setdefault(branch_name, []).append({
-                "item_id": item.id,
-                "item_name": item.name,
-                "item_code": item.code,
-                "qty": float(qty),
-                "quantity": float(qty),
-                "unit_symbol": unit_symbol,
-                "request_id": req.id,
-                "request_number": req.request_number,
-            })
-
-        allocation = {
-            "supplier_id": supplier.id,
-            "supplier_name": supplier.name,
-            "consolidation_open": True,
-            "consolidated_at": datetime.utcnow().isoformat(),
-            "participating_request_ids": [req.id],
-            "participating_request_numbers": [req.request_number],
-            "outlets": outlet_breakdown,
-            "items_summary": items_summary,
-        }
-
-        po = PurchaseOrder(
-            company_id=req.company_id,
-            branch_id=None,
-            supplier_id=supplier.id,
-            po_number=po_num,
-            status=POStatus.APPROVED,
-            order_date=datetime.utcnow(),
-            total_amount=total_amt,
-            tax_amount=Decimal("0.0000"),
-            discount_amount=Decimal("0.0000"),
-            net_amount=total_amt,
-            notes=f"Auto-generated rolling vendor PO from {req.request_number}",
-            created_by_id=current_user.id,
-            approved_by_id=current_user.id,
-            approved_at=datetime.utcnow(),
-            allocations=json.dumps(allocation, default=str),
-            whatsapp_number=supplier.effective_whatsapp_number,
-        )
-        db.add(po)
-        db.flush()
-
-        for item, qty, unit_price in po_lines:
-            po_item = PurchaseOrderItem(
-                po_id=po.id,
-                item_id=item.id,
-                ordered_qty=qty,
-                received_qty=Decimal("0.0000"),
-                unit_price=unit_price,
-                total_price=qty * unit_price,
-                notes=f"Rolling consolidated PO for {req.request_number}",
-                allocations=json.dumps([{
-                    "branch_name": branch_name,
-                    "branch_id": req.branch_id,
-                    "quantity": float(qty),
-                    "qty": float(qty),
-                    "request_id": req.id,
-                    "request_number": req.request_number,
-                }]),
-            )
-            db.add(po_item)
-
-        created_or_updated.append(po)
-        log_procurement_audit(
-            db=db,
-            user=current_user,
-            action="CREATE_OPEN_VENDOR_PO",
-            entity_type="PurchaseOrder",
-            entity_id=po.id,
-            company_id=req.company_id,
-            branch_id=req.branch_id,
-            new_values={
-                "po_number": po.po_number,
-                "supplier_id": supplier.id,
-                "purchase_request_id": req.id,
-                "status": "APPROVED",
-                "consolidation_open": True,
-            },
-        )
-
-    db.commit()
-    for po in created_or_updated:
-        db.refresh(po)
-    return created_or_updated
-
-
 @router.post("/requests/{request_id}/approve", response_model=PurchaseRequestResponse)
 def approve_purchase_request(
     request_id: str = Path(...),
@@ -1974,9 +1507,12 @@ def approve_purchase_request(
 
     # Phase 6 & 7: Auto split downstream workflow
     if req.requisition_type == "CENTRAL_STORE":
-        # Central Store own requirement -> auto-generate PO for all items
+        # Central Store own requirement -> auto-generate PO and treat the
+        # already-approved requirement as the approval event for that PO.
+        # This makes the approved PO immediately available in Central Store
+        # Purchase Receiving, where the vendor bill/OCR flow starts.
         try:
-            consolidate_outlet_orders(
+            generated_orders = consolidate_outlet_orders(
                 payload=ConsolidateOrdersRequest(
                     request_ids=[req.id],
                     auto_submit=False,
@@ -1985,8 +1521,52 @@ def approve_purchase_request(
                 db=db,
                 current_user=current_user
             )
-        except Exception:
-            pass
+
+            # The requirement approval is the PO approval for Central Store.
+            # Prefer the returned PO objects, but also re-check the database
+            # using the exact participating request id so legacy/consolidation
+            # responses cannot leave the PO in DRAFT.
+            now = datetime.utcnow()
+            generated_ids = [getattr(po, "id", None) for po in (getattr(generated_orders, "orders", []) or [])]
+            generated_ids = [x for x in generated_ids if x]
+
+            candidate_pos = []
+            if generated_ids:
+                candidate_pos = db.query(PurchaseOrder).filter(PurchaseOrder.id.in_(generated_ids)).all()
+
+            # Fallback: locate the exact PO using the structured participating_request_ids payload.
+            fallback_pos = db.query(PurchaseOrder).filter(
+                PurchaseOrder.company_id == req.company_id,
+                PurchaseOrder.status.in_([
+                    POStatus.DRAFT, POStatus.PENDING_APPROVAL, POStatus.ORDERED, POStatus.ISSUED
+                ])
+            ).all()
+            for po in fallback_pos:
+                allocation_text = getattr(po, "allocations", None) or ""
+                if req.id in allocation_text and po not in candidate_pos:
+                    candidate_pos.append(po)
+
+            for generated_po in candidate_pos:
+                generated_po.status = POStatus.APPROVED
+                generated_po.approved_by_id = current_user.id
+                generated_po.approved_at = generated_po.approved_at or now
+                generated_po.updated_at = now
+                db.add(generated_po)
+
+            db.commit()
+        except Exception as exc:
+            # Keep the approved requirement, but do not silently turn a failed
+            # PO-generation step into a fake receiving-ready order.
+            db.rollback()
+            log_procurement_audit(
+                db=db,
+                user=current_user,
+                action="CENTRAL_STORE_PO_GENERATION_WARNING",
+                entity_type="PurchaseRequest",
+                entity_id=req.id,
+                new_values={"error": str(exc)}
+            )
+            db.commit()
     else:
         # Outlet requirement -> Split based on Item Master supply routing
         has_direct_vendor = False
@@ -1994,34 +1574,33 @@ def approve_purchase_request(
         central_store_items = []
         for itm in req.items:
             db_item = db.query(Item).filter(Item.id == itm.item_id).first()
-            supply, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
-            # Persist the corrected effective routing too, so the approved PR
-            # history shows the same route that the downstream workflow uses.
-            if itm.supply_source != supply:
-                itm.supply_source = supply
-            if resolved_supplier_id and itm.supplier_id != resolved_supplier_id:
-                itm.supplier_id = resolved_supplier_id
-            if supply == "DIRECT_VENDOR":
+            supply = (itm.supply_source or (db_item.supply_source if db_item else "CENTRAL_STORE"))
+            if str(supply).upper() == "DIRECT_VENDOR":
                 has_direct_vendor = True
             else:
                 has_central_store = True
                 central_store_items.append(itm)
 
         if has_direct_vendor:
-            _create_or_extend_open_vendor_pos(
+            direct_vendor_orders = consolidate_outlet_orders(
+                payload=ConsolidateOrdersRequest(
+                    request_ids=[req.id],
+                    auto_submit=False,
+                    supply_source_filter=["DIRECT_VENDOR"],
+                    notes=f"Auto-generated PO from Outlet Requirement {req.request_number}"
+                ),
                 db=db,
-                req=req,
-                direct_items=[itm for itm in req.items if itm.supply_source == "DIRECT_VENDOR"],
-                current_user=current_user,
+                current_user=current_user
             )
-
-            # All-direct requests are fulfilled downstream by their vendor PO(s).
-            # Mixed requests remain APPROVED because their Central Store lines still
-            # have an outstanding Stock Transfer workflow.
-            if not has_central_store:
-                req.status = PRStatus.ORDERED
-                req.updated_at = datetime.utcnow()
-                db.commit()
+            # Reuse the established submit lifecycle so every generated Direct
+            # Vendor PO is PENDING_APPROVAL (never vendor-sendable on creation).
+            for direct_vendor_po in direct_vendor_orders.orders:
+                submit_order_for_approval(
+                    order_id=direct_vendor_po.id,
+                    db=db,
+                    current_user=current_user,
+                )
+                
         if has_central_store and central_store_items:
             # Create a StockTransfer (REQUESTED state) for Central Store queue
             central_wh = db.query(Warehouse).filter(
@@ -2069,70 +1648,6 @@ def approve_purchase_request(
     db.refresh(req)
 
     return format_pr_response(req, db)
-
-
-@router.get("/central-store/queue")
-def list_central_store_queue(
-    status_filter: Optional[str] = Query("REQUESTED"),
-    branch_id: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    """Central Store fulfilment queue generated from approved outlet requirements."""
-    query = db.query(StockTransfer).filter(
-        StockTransfer.company_id == current_user.company_id,
-        StockTransfer.from_warehouse_id.in_(
-            db.query(Warehouse.id).filter(
-                Warehouse.company_id == current_user.company_id,
-                Warehouse.is_central == True,
-                Warehouse.is_active == True,
-            )
-        ),
-    )
-    if branch_id:
-        check_user_outlet_access(current_user, branch_id, db)
-        query = query.filter(StockTransfer.destination_branch_id == branch_id)
-    if status_filter:
-        query = query.filter(StockTransfer.status == status_filter)
-
-    transfers = query.order_by(desc(StockTransfer.created_at)).all()
-    result = []
-    for transfer in transfers:
-        destination = db.query(Branch).filter(Branch.id == transfer.destination_branch_id).first()
-        source = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
-        items = []
-        for ti in getattr(transfer, "items", []) or []:
-            item = db.query(Item).filter(Item.id == ti.item_id).first()
-            unit_symbol = None
-            if item and getattr(item, "unit", None):
-                unit_symbol = getattr(item.unit, "symbol", None)
-            items.append({
-                "id": ti.id,
-                "item_id": ti.item_id,
-                "item_name": item.name if item else "Unknown Item",
-                "item_code": item.code if item else None,
-                "requested_qty": float(ti.requested_qty or ti.quantity or 0),
-                "quantity": float(ti.quantity or ti.requested_qty or 0),
-                "unit": unit_symbol,
-                "unit_cost": float(ti.unit_cost or 0),
-                "amount": float((ti.unit_cost or 0) * (ti.quantity or ti.requested_qty or 0)),
-            })
-        result.append({
-            "id": transfer.id,
-            "transfer_number": transfer.transfer_number,
-            "status": transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status),
-            "source_warehouse_id": transfer.from_warehouse_id,
-            "source_warehouse_name": source.name if source else "Central Store",
-            "destination_branch_id": transfer.destination_branch_id,
-            "destination_branch_name": destination.name if destination else None,
-            "source_branch_id": transfer.source_branch_id,
-            "notes": transfer.notes,
-            "created_at": transfer.created_at,
-            "transfer_date": transfer.transfer_date,
-            "items": items,
-            "total_amount": sum(x["amount"] for x in items),
-        })
-    return result
 
 
 @router.post("/requests/{request_id}/reject", response_model=PurchaseRequestResponse)
@@ -2284,8 +1799,7 @@ def consolidate_outlet_orders(
                     raise NotFoundException(f"Item '{pr_item.item_id}' not found in catalog.")
 
             # Identify Supply Source & apply filter
-            effective_supply_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
-            effective_supply_source = effective_supply_source.upper()
+            effective_supply_source = (pr_item.supply_source or db_item.supply_source or "CENTRAL_STORE").upper()
             supply_source_filter = {str(source).upper() for source in (payload.supply_source_filter or [])}
             if supply_source_filter and effective_supply_source not in supply_source_filter:
                 continue
@@ -2913,20 +2427,12 @@ def open_supplier_whatsapp(
     encoded_text = urllib.parse.quote(prefilled_message)
     whatsapp_url = f"https://wa.me/{clean_whatsapp}?text={encoded_text}"
 
-    # IMPORTANT: opening WhatsApp locks this PO. New later requirements for the
-    # same vendor must create a new PO instead of being appended to a PO that
-    # has already been sent to the supplier.
+    # IMPORTANT: System sets status to WHATSAPP_OPENED (NOT SENT_MANUALLY)
     opened_timestamp = datetime.utcnow()
     po.status = POStatus.WHATSAPP_OPENED
     po.whatsapp_opened_at = opened_timestamp
     po.whatsapp_number = clean_whatsapp
     po.updated_at = opened_timestamp
-    alloc_lock = _parse_po_allocations(po)
-    if alloc_lock:
-        alloc_lock["consolidation_open"] = False
-        alloc_lock["consolidation_closed_at"] = opened_timestamp.isoformat()
-        alloc_lock["consolidation_closed_reason"] = "WHATSAPP_OPENED"
-        _save_po_allocations(po, alloc_lock)
 
     db.commit()
     db.refresh(po)
@@ -3019,6 +2525,93 @@ def confirm_order_sent_manually(
         message="Order successfully confirmed and marked as SENT_MANUALLY."
     )
 
+
+
+# ==============================================================================
+# Central Store Fulfilment Queue
+# ==============================================================================
+
+@router.get("/central-store/queue")
+def list_central_store_queue(
+    status_filter: Optional[str] = Query("REQUESTED"),
+    branch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Central Store fulfilment queue generated from approved outlet requirements."""
+    query = db.query(StockTransfer).filter(
+        StockTransfer.company_id == current_user.company_id,
+        StockTransfer.from_warehouse_id.in_(
+            db.query(Warehouse.id).filter(
+                Warehouse.company_id == current_user.company_id,
+                Warehouse.is_central == True,  # noqa: E712
+                Warehouse.is_active == True,   # noqa: E712
+            )
+        ),
+    )
+
+    if branch_id:
+        check_user_outlet_access(current_user, branch_id, db)
+        query = query.filter(StockTransfer.destination_branch_id == branch_id)
+
+    if status_filter:
+        query = query.filter(StockTransfer.status == status_filter)
+
+    transfers = query.order_by(desc(StockTransfer.created_at)).all()
+    result = []
+
+    for transfer in transfers:
+        destination = db.query(Branch).filter(
+            Branch.id == transfer.destination_branch_id
+        ).first()
+        source = db.query(Warehouse).filter(
+            Warehouse.id == transfer.from_warehouse_id
+        ).first()
+
+        items = []
+        for ti in getattr(transfer, "items", []) or []:
+            item = db.query(Item).filter(Item.id == ti.item_id).first()
+            unit_symbol = None
+            if item and getattr(item, "unit", None):
+                unit_symbol = getattr(item.unit, "symbol", None)
+
+            qty = ti.quantity or ti.requested_qty or 0
+            unit_cost = ti.unit_cost or 0
+            amount = unit_cost * qty
+
+            items.append({
+                "id": ti.id,
+                "item_id": ti.item_id,
+                "item_name": item.name if item else "Unknown Item",
+                "item_code": item.code if item else None,
+                "requested_qty": float(ti.requested_qty or 0),
+                "quantity": float(qty),
+                "unit": unit_symbol,
+                "unit_cost": float(unit_cost),
+                "amount": float(amount),
+            })
+
+        result.append({
+            "id": transfer.id,
+            "transfer_number": transfer.transfer_number,
+            "status": (
+                transfer.status.value
+                if hasattr(transfer.status, "value")
+                else str(transfer.status)
+            ),
+            "source_warehouse_id": transfer.from_warehouse_id,
+            "source_warehouse_name": source.name if source else "Central Store",
+            "destination_branch_id": transfer.destination_branch_id,
+            "destination_branch_name": destination.name if destination else None,
+            "source_branch_id": transfer.source_branch_id,
+            "notes": transfer.notes,
+            "created_at": transfer.created_at,
+            "transfer_date": transfer.transfer_date,
+            "items": items,
+            "total_amount": sum(x["amount"] for x in items),
+        })
+
+    return result
 
 # ==============================================================================
 # Goods Receive Note (GRN) & 3-Way Match Endpoints
@@ -3907,6 +3500,256 @@ def get_order_3way_match(
     )
 
 
+
+# ==============================================================================
+# ADVANCED CENTRAL STORE RECEIVING — BILL OCR + PO AUTO MATCH
+# ==============================================================================
+
+_OCR_NUMBER_RE = re.compile(r"(?<![\w.])\d+(?:[.,]\d+)?(?![\w.])")
+
+
+def _normalise_ocr_text(value: str) -> str:
+    value = value.replace("₹", " ").replace("—", "-").replace("–", "-")
+    value = re.sub(r"[\t ]+", " ", value)
+    return value.strip()
+
+
+def _ocr_image_bytes(raw_bytes: bytes) -> str:
+    if pytesseract is None or Image is None:
+        raise BadRequestException("Invoice OCR packages are not installed. Install pytesseract, Pillow, pypdf and pdf2image.")
+    try:
+        image = Image.open(BytesIO(raw_bytes))
+        image = ImageOps.exif_transpose(image) if ImageOps else image
+        if image.mode not in ("L", "RGB"):
+            image = image.convert("RGB")
+        width, height = image.size
+        if width < 1600:
+            scale = 1600 / max(width, 1)
+            image = image.resize((int(width * scale), int(height * scale)))
+        gray = ImageOps.grayscale(image) if ImageOps else image
+        return pytesseract.image_to_string(gray, config="--oem 3 --psm 6")
+    except Exception as exc:
+        raise BadRequestException(f"Could not read invoice image: {exc}")
+
+
+def _ocr_pdf_bytes(raw_bytes: bytes) -> str:
+    text_parts: List[str] = []
+    if PdfReader is not None:
+        try:
+            reader = PdfReader(BytesIO(raw_bytes))
+            for page in reader.pages:
+                text_parts.append(page.extract_text() or "")
+        except Exception:
+            pass
+    text = "\n".join(text_parts).strip()
+    if text:
+        return text
+    if pytesseract is None or convert_from_bytes is None:
+        raise BadRequestException("This scanned PDF needs OCR. Install pytesseract, Pillow, pypdf and pdf2image.")
+    try:
+        pages = convert_from_bytes(raw_bytes, dpi=180, fmt="jpeg", first_page=1, last_page=5)
+        results = []
+        for page in pages:
+            gray = ImageOps.grayscale(page) if ImageOps else page
+            results.append(pytesseract.image_to_string(gray, config="--oem 3 --psm 6"))
+        return "\n".join(results).strip()
+    except Exception as exc:
+        raise BadRequestException(f"Could not OCR PDF invoice: {exc}")
+
+
+def _parse_invoice_header(text: str) -> Dict[str, Any]:
+    compact = _normalise_ocr_text(text)
+    invoice_number = None
+    date_value = None
+    amount = None
+
+    m = re.search(r"(?:invoice|bill|tax\s*invoice|inv)\s*(?:no|number|#)?\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9./_-]{2,})", compact, re.I)
+    if m:
+        invoice_number = m.group(1).strip(".-")
+    dm = re.search(r"(?:invoice|bill)?\s*(?:date)?\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})", compact, re.I)
+    if dm:
+        date_value = dm.group(1)
+    am = re.search(r"(?:grand\s*total|net\s*payable|total\s*amount|amount\s*payable|invoice\s*total)\D{0,12}(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)", compact, re.I)
+    if am:
+        amount = float(am.group(1).replace(",", ""))
+    return {"invoice_number": invoice_number, "invoice_date": date_value, "invoice_amount": amount}
+
+
+def _token_set(text: str) -> set[str]:
+    return {x for x in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(x) >= 2}
+
+
+def _extract_line_numbers(line_text: str) -> List[float]:
+    values = []
+    for raw in _OCR_NUMBER_RE.findall(line_text):
+        try:
+            values.append(float(raw.replace(",", "")))
+        except Exception:
+            pass
+    return values
+
+
+def _match_po_lines_to_ocr(po: PurchaseOrder, text: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    lines = [_normalise_ocr_text(x) for x in text.splitlines() if _normalise_ocr_text(x)]
+    parsed_lines: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    for po_item in (po.items or []):
+        item = po_item.item
+        code = str(getattr(item, "code", "") or "").strip().lower()
+        name = str(getattr(item, "name", "") or "").strip()
+        wanted_tokens = _token_set(name)
+        best = None
+        best_score = 0.0
+        for raw in lines:
+            low = raw.lower()
+            if any(word in low for word in ("grand total", "net payable", "invoice total", "tax total", "discount total")):
+                continue
+            numbers = _extract_line_numbers(raw)
+            if not numbers:
+                continue
+            score = 0.0
+            if code and code in low:
+                score += 1.0
+            tokens = _token_set(raw)
+            if wanted_tokens:
+                overlap = len(wanted_tokens & tokens) / max(len(wanted_tokens), 1)
+                score += min(overlap, 1.0) * 0.9
+            if score > best_score:
+                best_score = score
+                best = (raw, numbers)
+        if not best or best_score < 0.45:
+            continue
+        raw, nums = best
+        ordered = Decimal(str(getattr(po_item, "quantity", 0) or 0))
+        if len(nums) >= 3:
+            qty = Decimal(str(nums[-3])); rate = Decimal(str(nums[-2])); line_total = Decimal(str(nums[-1]))
+        elif len(nums) == 2:
+            qty = Decimal(str(nums[-2])); rate = Decimal(str(nums[-1])); line_total = qty * rate
+        else:
+            qty = Decimal(str(nums[-1])); rate = Decimal(str(getattr(po_item, "unit_price", 0) or 0)); line_total = qty * rate
+        if qty <= 0:
+            continue
+        parsed_lines.append({
+            "po_item_id": str(po_item.id),
+            "item_id": str(po_item.item_id),
+            "item_name": name,
+            "item_code": code or None,
+            "ordered_qty": float(ordered),
+            "received_qty": float(qty),
+            "accepted_qty": float(qty),
+            "rejected_qty": 0.0,
+            "invoice_rate": float(rate),
+            "invoice_line_total": float(line_total),
+            "match_confidence": round(min(1.0, best_score), 3),
+            "ocr_line": raw,
+        })
+    if not parsed_lines:
+        warnings.append("No PO item row could be confidently matched from the invoice. Scan a clear, full bill image/PDF.")
+    seen = set(); unique = []
+    for row in parsed_lines:
+        if row["po_item_id"] not in seen:
+            seen.add(row["po_item_id"]); unique.append(row)
+    return unique, warnings
+
+
+def _scan_invoice_file(storage_ref: str) -> Dict[str, Any]:
+    safe_rel = str(storage_ref or "").replace("\\", "/").lstrip("/")
+    if not safe_rel.startswith("uploads/invoices/") or ".." in safe_rel:
+        raise BadRequestException("Invalid invoice storage reference.")
+    file_path = os.path.join(os.getcwd(), safe_rel)
+    if not os.path.isfile(file_path):
+        raise NotFoundException("Invoice file was not found on the server.")
+    with open(file_path, "rb") as f:
+        raw = f.read()
+    if file_path.lower().endswith(".pdf"):
+        text = _ocr_pdf_bytes(raw)
+    else:
+        text = _ocr_image_bytes(raw)
+    return {"text": text}
+
+
+def _build_ocr_match_summary(po: PurchaseOrder, ocr: Dict[str, Any]) -> Dict[str, Any]:
+    header = _parse_invoice_header(ocr["text"])
+    matched_items, warnings = _match_po_lines_to_ocr(po, ocr["text"])
+    outstanding_map = {
+        str(x.id): max(Decimal("0"), Decimal(str(getattr(x, "quantity", 0) or 0)) - Decimal(str(getattr(x, "received_qty", 0) or 0)))
+        for x in (po.items or [])
+    }
+    mismatches = []; lines_total = Decimal("0")
+    for row in matched_items:
+        received = Decimal(str(row["received_qty"])); outstanding = outstanding_map.get(row["po_item_id"], Decimal("0"))
+        lines_total += Decimal(str(row["invoice_line_total"]))
+        if received > outstanding + Decimal("0.0001"):
+            mismatches.append({"type":"QUANTITY_OVER_PO","item_name":row["item_name"],"remaining_qty":float(outstanding),"invoice_qty":float(received)})
+        po_item = next((x for x in (po.items or []) if str(x.id) == row["po_item_id"]), None)
+        po_rate = Decimal(str(getattr(po_item, "unit_price", 0) or 0)) if po_item else Decimal("0")
+        inv_rate = Decimal(str(row["invoice_rate"]))
+        if po_rate > 0 and abs(po_rate - inv_rate) > max(Decimal("0.01"), po_rate * Decimal("0.05")):
+            mismatches.append({"type":"RATE_VARIANCE","item_name":row["item_name"],"po_rate":float(po_rate),"invoice_rate":float(inv_rate)})
+    if header.get("invoice_amount") is not None and lines_total > 0 and abs(Decimal(str(header["invoice_amount"])) - lines_total) > Decimal("2"):
+        mismatches.append({"type":"INVOICE_TOTAL_VARIANCE","invoice_total":header["invoice_amount"],"ocr_lines_total":float(lines_total)})
+    if not header.get("invoice_number"):
+        warnings.append("Invoice/Bill number could not be read automatically.")
+    return {**header,"items":matched_items,"mismatches":mismatches,"warnings":warnings,"ocr_text_preview":ocr["text"][:4000],"has_mismatch":bool(mismatches),"matched_line_count":len(matched_items),"po_line_count":len(po.items or [])}
+
+
+@router.post("/receiving/scan-invoice")
+def scan_central_store_invoice(payload: Dict[str, Any] = Body(...), db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    branch_id = payload.get("branch_id"); po_id = payload.get("po_id"); file_name = str(payload.get("file_name") or "invoice"); file_type = str(payload.get("file_type") or ""); file_base64 = str(payload.get("file_base64") or "")
+    if not branch_id or not po_id or not file_base64: raise BadRequestException("branch_id, po_id and bill file are required.")
+    check_user_outlet_access(current_user, branch_id, db)
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+    if not po: raise NotFoundException(f"Purchase Order '{po_id}' not found.")
+    allowed = {"application/pdf","image/jpeg","image/jpg","image/png","image/webp"}
+    if file_type not in allowed: raise BadRequestException("Supported bill formats: PDF, JPG, PNG, WEBP.")
+    try: raw_bytes = base64.b64decode(file_base64)
+    except Exception: raise BadRequestException("Invalid bill file data.")
+    if len(raw_bytes) < 16: raise BadRequestException("Bill file is empty or corrupted.")
+    upload_dir = os.path.join(os.getcwd(),"uploads","invoices"); os.makedirs(upload_dir,exist_ok=True)
+    ext = ".pdf" if file_type == "application/pdf" else ".webp" if "webp" in file_type else ".png" if "png" in file_type else ".jpg"
+    safe_name = f"ocr_{uuid.uuid4().hex[:12]}_{re.sub(r'[^A-Za-z0-9_.-]','_',file_name)}"
+    if not safe_name.lower().endswith(ext): safe_name += ext
+    with open(os.path.join(upload_dir,safe_name),"wb") as f: f.write(raw_bytes)
+    storage_ref = f"uploads/invoices/{safe_name}"
+    summary = _build_ocr_match_summary(po,_scan_invoice_file(storage_ref))
+    summary.update({"storage_ref":storage_ref,"file_name":file_name,"file_type":file_type,"po_id":str(po.id),"po_number":getattr(po,"po_number",None),"supplier_id":str(po.supplier_id) if getattr(po,"supplier_id",None) else None,"supplier_name":getattr(po.supplier,"name",None) if getattr(po,"supplier",None) else None})
+    log_procurement_audit(db=db,user=current_user,action="SCAN_SUPPLIER_INVOICE_OCR",entity_type="PurchaseOrder",entity_id=po.id,company_id=po.company_id,branch_id=branch_id,new_values={"po_number":po.po_number,"file_name":file_name,"storage_ref":storage_ref,"invoice_number":summary.get("invoice_number"),"matched_line_count":summary.get("matched_line_count"),"mismatch_count":len(summary.get("mismatches") or [])})
+    db.commit(); return summary
+
+
+@router.post("/receiving/submit-ocr")
+def submit_central_store_ocr_receiving(payload: Dict[str, Any] = Body(...), db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    branch_id = payload.get("branch_id"); po_id = payload.get("po_id"); storage_ref = payload.get("storage_ref"); notes = str(payload.get("notes") or "").strip()
+    if not branch_id or not po_id or not storage_ref: raise BadRequestException("branch_id, po_id and storage_ref are required.")
+    check_user_outlet_access(current_user, branch_id, db)
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+    if not po: raise NotFoundException(f"Purchase Order '{po_id}' not found.")
+    summary = _build_ocr_match_summary(po,_scan_invoice_file(storage_ref))
+    invoice_number = summary.get("invoice_number")
+    if not invoice_number: raise BadRequestException("Bill number could not be read. Please scan a clearer bill; manual quantity entry is not required.")
+    if not summary.get("items"): raise BadRequestException("No PO item quantity could be read from the bill. Please scan a clearer full bill.")
+    duplicate = db.query(GoodsReceiveNote).filter(GoodsReceiveNote.po_id == po.id, GoodsReceiveNote.invoice_number == invoice_number, GoodsReceiveNote.status != "REJECTED").first()
+    if duplicate: raise ConflictException(f"Invoice '{invoice_number}' has already been used for this PO.")
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch: raise NotFoundException(f"Branch '{branch_id}' not found.")
+    company_id = branch.company_id or current_user.company_id
+    warehouse = db.query(Warehouse).filter(Warehouse.branch_id == branch_id, Warehouse.is_active == True).first()
+    warehouse_id = warehouse.id if warehouse else None
+    if not warehouse_id: raise BadRequestException("No active warehouse is configured for this Central Store scope.")
+    grn = GoodsReceiveNote(company_id=company_id,branch_id=branch_id,warehouse_id=warehouse_id,supplier_id=po.supplier_id,po_id=po.id,grn_number=f"GRN-OCR-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}",receive_date=datetime.utcnow(),invoice_number=invoice_number,total_amount=Decimal(str(summary.get("invoice_amount") or 0)),status="PENDING_APPROVAL",notes=f"{notes} [OCR_MISMATCHES={json.dumps(summary.get('mismatches') or [],ensure_ascii=False)}] [OCR_WARNINGS={json.dumps(summary.get('warnings') or [],ensure_ascii=False)}] [INVOICE_STORAGE={storage_ref}]".strip(),received_by_id=current_user.id)
+    db.add(grn); db.flush()
+    po_map={str(x.id):x for x in po.items or []}
+    for row in summary.get("items") or []:
+        po_item=po_map.get(str(row["po_item_id"])); qty=Decimal(str(row["received_qty"]))
+        if not po_item or qty <= 0: continue
+        rate=Decimal(str(row.get("invoice_rate") or getattr(po_item,"unit_price",0) or 0))
+        db.add(GoodsReceiveItem(grn_id=grn.id,po_item_id=po_item.id,item_id=po_item.item_id,received_qty=qty,accepted_qty=qty,rejected_qty=Decimal("0"),unit_price=rate,total_price=qty*rate,batch_number=None,expiry_date=None,qc_status="PENDING",qc_notes=None))
+    db.flush()
+    log_procurement_audit(db=db,user=current_user,action="SUBMIT_OCR_PO_RECEIVING",entity_type="GoodsReceiveNote",entity_id=grn.id,company_id=company_id,branch_id=branch_id,new_values={"po_number":po.po_number,"grn_number":grn.grn_number,"invoice_number":invoice_number,"invoice_amount":summary.get("invoice_amount"),"status":"PENDING_APPROVAL","mismatches":summary.get("mismatches") or []})
+    db.commit(); db.refresh(grn)
+    return {"id":str(grn.id),"grn_number":grn.grn_number,"status":grn.status,"invoice_number":invoice_number,"invoice_amount":summary.get("invoice_amount"),"has_mismatch":summary.get("has_mismatch"),"mismatches":summary.get("mismatches") or [],"message":"OCR receiving submitted for Admin approval. Stock has not been posted yet."}
+
+
 # ==============================================================================
 # Twice-Monthly Closing & Stock Valuation Endpoints
 # ==============================================================================
@@ -4011,6 +3854,9 @@ def list_outlet_closings(
 @router.get("/closings/active/{branch_id}", response_model=ActiveClosingDraftResponse)
 def get_active_closing_draft(
     branch_id: str = Path(...),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
+    period_type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -4024,25 +3870,34 @@ def get_active_closing_draft(
         raise NotFoundException(f"Branch '{branch_id}' not found.")
 
     today = date.today()
-    year = today.year
-    month = today.month
+    selected_year = int(year or today.year)
+    selected_month = int(month or today.month)
+    selected_period = str(period_type or ("FIRST_HALF" if today.day <= 15 else "SECOND_HALF")).upper()
 
-    if today.day <= 15:
-        period_type = "FIRST_HALF"
+    if selected_year < 2000 or selected_year > 2100:
+        raise BadRequestException("year must be between 2000 and 2100.")
+    if selected_month < 1 or selected_month > 12:
+        raise BadRequestException("month must be between 1 and 12.")
+    if selected_period not in {"FIRST_HALF", "SECOND_HALF"}:
+        raise BadRequestException("period_type must be FIRST_HALF or SECOND_HALF.")
+
+    year = selected_year
+    month = selected_month
+    period_type = selected_period
+
+    if period_type == "FIRST_HALF":
         start_date = datetime(year, month, 1, 0, 0, 0)
         end_date = datetime(year, month, 15, 23, 59, 59)
-        days_remaining = 15 - today.day
+        days_remaining = max(0, 15 - today.day) if (year == today.year and month == today.month) else 0
     else:
-        period_type = "SECOND_HALF"
         start_date = datetime(year, month, 16, 0, 0, 0)
-        # End of month
         if month == 12:
             next_m = datetime(year + 1, 1, 1)
         else:
             next_m = datetime(year, month + 1, 1)
         last_day = (next_m - timedelta(days=1)).day
         end_date = datetime(year, month, last_day, 23, 59, 59)
-        days_remaining = last_day - today.day
+        days_remaining = max(0, last_day - today.day) if (year == today.year and month == today.month) else 0
 
     # Check if there is an existing closing record for this period
     existing = db.query(OutletClosingRecord).filter(
@@ -5492,6 +5347,585 @@ def supplier_performance(
     rows.sort(key=lambda x: (-x['rating'], -x['purchase_spend'], x['supplier_name']))
     return {'days': days, 'supplier_count': len(rows), 'suppliers': rows}
 
+# ==============================================================================
+# RESTORED CENTRAL STORE TRANSFER / QUEUE ROUTES
+# ==============================================================================
 
+def resolve_outlet_item_supply_source(db: Session, item: Item) -> Tuple[str, Optional[str], str]:
+    """Resolve effective routing for a normal outlet Purchase Requirement.
 
+    An ACTIVE SupplierItem mapping is the strongest outlet-routing signal.
+    Therefore an item with a configured Vendor-Item mapping is DIRECT_VENDOR
+    even if an older Item Master row still says CENTRAL_STORE. If no active
+    mapping exists, the explicit Item Master supply_source is respected.
+    """
+    if item is None:
+        return "CENTRAL_STORE", None, "NOT_CONFIGURED"
 
+    mapped = None
+    try:
+        mapped = db.query(SupplierItem).filter(
+            SupplierItem.company_id == item.company_id,
+            SupplierItem.item_id == item.id,
+            SupplierItem.is_active == True,  # noqa: E712
+        ).order_by(
+            SupplierItem.is_preferred.desc(),
+            SupplierItem.updated_at.desc(),
+        ).first()
+    except Exception:
+        mapped = None
+
+    if mapped and mapped.supplier_id:
+        return "DIRECT_VENDOR", mapped.supplier_id, "VENDOR_ITEM_MASTER"
+
+    item_source = (item.supply_source or "CENTRAL_STORE").upper()
+    if item_source == "DIRECT_VENDOR":
+        supplier_id, vendor_source = resolve_default_item_vendor(db, item)
+        return "DIRECT_VENDOR", supplier_id, vendor_source
+
+    return "CENTRAL_STORE", None, "ITEM_MASTER_SUPPLY_SOURCE"
+
+def list_generated_vendor_pos_for_request(
+    request_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return ONLY the vendor POs created from this exact Purchase Request.
+
+    Matching is intentionally strict: participating_request_ids OR the exact
+    auto-generated note containing this request number, plus at least one
+    Direct Vendor line from the request. This prevents old/unrelated POs from
+    leaking into the request history.
+    """
+    req = db.query(PurchaseRequest).filter(PurchaseRequest.id == request_id).first()
+    if not req:
+        raise NotFoundException(f"Purchase Request '{request_id}' not found.")
+    check_user_outlet_access(current_user, req.branch_id, db)
+
+    direct_request_items = [
+        item for item in req.items
+        if str((item.supply_source or "CENTRAL_STORE")).upper() == "DIRECT_VENDOR"
+    ]
+    if not direct_request_items:
+        return []
+
+    direct_item_ids = {str(item.item_id) for item in direct_request_items}
+    request_number = str(req.request_number)
+    matched: List[PurchaseOrder] = []
+
+    pos = db.query(PurchaseOrder).order_by(desc(PurchaseOrder.created_at)).all()
+    for po in pos:
+        # Generated vendor POs are shown here even if an older lifecycle left
+        # them DRAFT/PENDING_APPROVAL/ORDERED. They will be normalized to
+        # APPROVED below once we prove they belong to this exact PR.
+        if po.status not in [
+            POStatus.DRAFT, POStatus.PENDING_APPROVAL,
+            POStatus.APPROVED, POStatus.WHATSAPP_OPENED, POStatus.SENT_MANUALLY,
+            POStatus.ISSUED, POStatus.PARTIALLY_RECEIVED, POStatus.RECEIVED,
+        ]:
+            continue
+
+        try:
+            allocation = json.loads(po.allocations) if po.allocations else {}
+            if not isinstance(allocation, dict):
+                allocation = {}
+        except Exception:
+            allocation = {}
+
+        # Support both the current allocation key and legacy variants used by
+        # older generated POs. The exact request number in notes is also a
+        # strong linkage signal.
+        participating = set()
+        for key in ("participating_request_ids", "participating_requests", "request_ids"):
+            values = allocation.get(key) or []
+            if isinstance(values, (list, tuple, set)):
+                participating.update(str(x) for x in values)
+        exact_participation = str(req.id) in participating
+        exact_request_note = request_number.lower() in str(po.notes or "").lower()
+
+        # Verify the PO actually contains at least one Direct Vendor item from
+        # this PR. Prefer exact allocation/note linkage; for legacy POs whose
+        # allocation metadata was not persisted, use a conservative fallback:
+        # same branch + same supplier + same direct item + created after the PR.
+        po_item_ids = {str(line.item_id) for line in (po.items or [])}
+        summary_items = allocation.get("items_summary") or []
+        summary_item_ids = {
+            str(x.get("item_id"))
+            for x in summary_items
+            if isinstance(x, dict) and x.get("item_id") is not None
+        }
+        item_match = bool((po_item_ids | summary_item_ids) & direct_item_ids)
+
+        linked = exact_participation or exact_request_note
+        if not linked:
+            direct_supplier_ids = {str(item.supplier_id) for item in direct_request_items if item.supplier_id}
+            same_supplier = str(po.supplier_id) in direct_supplier_ids
+            same_branch = (po.branch_id is None or str(po.branch_id) == str(req.branch_id))
+            created_after_pr = bool(po.created_at and req.created_at and po.created_at >= req.created_at)
+            linked = same_supplier and same_branch and created_after_pr and item_match
+
+        if not linked or not item_match:
+            continue
+
+        # A generated PO found through the exact PR linkage is downstream of
+        # the already-approved Purchase Request. Normalize any legacy status so
+        # the PR history can immediately send it through WhatsApp. Manual POs
+        # cannot reach this branch because exact PR linkage is mandatory.
+        if po.status in [POStatus.DRAFT, POStatus.PENDING_APPROVAL]:
+            po.status = POStatus.APPROVED
+            po.approved_by_id = current_user.id
+            po.approved_at = po.approved_at or datetime.utcnow()
+            po.updated_at = datetime.utcnow()
+            db.add(po)
+
+        matched.append(po)
+
+    if matched:
+        db.commit()
+        for po in matched:
+            db.refresh(po)
+
+    # De-duplicate defensively and keep newest first.
+    unique = {po.id: po for po in matched}
+    ordered = sorted(unique.values(), key=lambda po: po.created_at or datetime.min, reverse=True)
+    return [format_po_response(po, db) for po in ordered]
+
+def list_central_store_queue(
+    status_filter: Optional[str] = Query("REQUESTED"),
+    branch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Central Store fulfilment queue generated from approved outlet requirements."""
+    query = db.query(StockTransfer).filter(
+        StockTransfer.company_id == current_user.company_id,
+        StockTransfer.from_warehouse_id.in_(
+            db.query(Warehouse.id).filter(
+                Warehouse.company_id == current_user.company_id,
+                Warehouse.is_central == True,
+                Warehouse.is_active == True,
+            )
+        ),
+    )
+    if branch_id:
+        check_user_outlet_access(current_user, branch_id, db)
+        query = query.filter(StockTransfer.destination_branch_id == branch_id)
+    if status_filter:
+        query = query.filter(StockTransfer.status == status_filter)
+
+    transfers = query.order_by(desc(StockTransfer.created_at)).all()
+    result = []
+    for transfer in transfers:
+        destination = db.query(Branch).filter(Branch.id == transfer.destination_branch_id).first()
+        source = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
+        items = []
+        for ti in getattr(transfer, "items", []) or []:
+            item = db.query(Item).filter(Item.id == ti.item_id).first()
+            unit_symbol = None
+            if item and getattr(item, "unit", None):
+                unit_symbol = getattr(item.unit, "symbol", None)
+            items.append({
+                "id": ti.id,
+                "item_id": ti.item_id,
+                "item_name": item.name if item else "Unknown Item",
+                "item_code": item.code if item else None,
+                "requested_qty": float(ti.requested_qty or ti.quantity or 0),
+                "quantity": float(ti.quantity or ti.requested_qty or 0),
+                "dispatched_qty": float(getattr(ti, "dispatched_qty", 0) or 0),
+                "accepted_qty": float(getattr(ti, "accepted_qty", 0) or 0),
+                "unit": unit_symbol,
+                "unit_cost": float(ti.unit_cost or 0),
+                "amount": float((ti.unit_cost or 0) * (ti.quantity or ti.requested_qty or 0)),
+            })
+        result.append({
+            "id": transfer.id,
+            "transfer_number": transfer.transfer_number,
+            "status": transfer.status.value if hasattr(transfer.status, "value") else str(transfer.status),
+            "source_warehouse_id": transfer.from_warehouse_id,
+            "source_warehouse_name": source.name if source else "Central Store",
+            "destination_branch_id": transfer.destination_branch_id,
+            "destination_branch_name": destination.name if destination else None,
+            "source_branch_id": transfer.source_branch_id,
+            "notes": transfer.notes,
+            "created_at": transfer.created_at,
+            "transfer_date": transfer.transfer_date,
+            "items": items,
+            "total_amount": sum(x["amount"] for x in items),
+        })
+    return result
+
+def _central_store_user_allowed(current_user: User, db: Session) -> bool:
+    raw_role = getattr(current_user, "role", None)
+    role_name = getattr(raw_role, "name", raw_role) or ""
+    role_name = str(role_name).strip().upper().replace("-", "_").replace(" ", "_")
+    allowed_roles = {
+        "SUPER_ADMIN", "SUPERADMIN", "OWNER", "ADMIN", "HQ_ADMIN",
+        "HEAD_OFFICE_ADMIN", "CENTRAL_STORE_MANAGER",
+    }
+    return role_name in allowed_roles
+
+def _resolve_transfer_for_company(db: Session, transfer_id: str, company_id: str) -> StockTransfer:
+    transfer = (
+        db.query(StockTransfer)
+        .filter(StockTransfer.id == transfer_id, StockTransfer.company_id == company_id)
+        .first()
+    )
+    if not transfer:
+        raise NotFoundException(f"Stock Transfer '{transfer_id}' not found.")
+    return transfer
+
+def _apply_transfer_out_stock(
+    db: Session,
+    transfer: StockTransfer,
+    current_user: User,
+) -> None:
+    """Atomically deduct the Central Store stock for the dispatched quantities."""
+    for ti in getattr(transfer, "items", []) or []:
+        qty = Decimal(str(getattr(ti, "dispatched_qty", 0) or 0))
+        if qty <= 0:
+            continue
+
+        sb = (
+            db.query(StockBalance)
+            .filter(
+                StockBalance.warehouse_id == transfer.from_warehouse_id,
+                StockBalance.item_id == ti.item_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        available = Decimal(str(sb.quantity if sb else 0))
+        if available < qty:
+            item = db.query(Item).filter(Item.id == ti.item_id).first()
+            name = item.name if item else ti.item_id
+            raise BadRequestException(
+                f"Insufficient Central Store stock for {name}. Available: {available}, Dispatch: {qty}."
+            )
+
+        sb.quantity = available - qty
+        sb.updated_at = datetime.utcnow()
+
+        unit_cost = Decimal(str(ti.unit_cost or (getattr(item, "cost_price", 0) if 'item' in locals() else 0) or 0))
+        ledger = StockLedger(
+            company_id=transfer.company_id,
+            branch_id=transfer.source_branch_id,
+            warehouse_id=transfer.from_warehouse_id,
+            item_id=ti.item_id,
+            unit_id=getattr(item, "unit_id", None) if 'item' in locals() else None,
+            movement_type="TRANSFER_OUT",
+            change_qty=-qty,
+            balance_qty=sb.quantity,
+            unit_cost=unit_cost,
+            total_cost=qty * unit_cost,
+            reference_type="STOCK_TRANSFER_DISPATCH",
+            reference_id=transfer.id,
+            idempotency_key=f"{transfer.id}:{ti.id}:TRANSFER_OUT",
+            notes=f"Central Store dispatch for {transfer.transfer_number}",
+            created_by_id=current_user.id,
+            created_at=datetime.utcnow(),
+        )
+        db.add(ledger)
+
+@router.post("/central-store/transfers/{transfer_id}/dispatch")
+def submit_central_store_dispatch(
+    transfer_id: str = Path(...),
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Central Store submits the actual dispatch quantities for Admin approval.
+    Stock is NOT reduced yet. The transfer becomes PENDING_APPROVAL.
+
+    Payload:
+    {"items": [{"transfer_item_id": "...", "dispatch_qty": 10}], "notes": "..."}
+    """
+    if not _central_store_user_allowed(current_user, db):
+        raise ForbiddenException("Only Central Store or authorized Admin users can submit dispatches.")
+
+    transfer = _resolve_transfer_for_company(db, transfer_id, current_user.company_id)
+    if transfer.status not in {"REQUESTED", "APPROVED"}:
+        raise BadRequestException(f"Transfer '{transfer.transfer_number}' cannot be dispatched from status '{transfer.status}'.")
+
+    raw_items = payload.get("items") or []
+    if not raw_items:
+        raise BadRequestException("At least one dispatch item is required.")
+
+    requested_map = {ti.id: ti for ti in (getattr(transfer, "items", []) or [])}
+    seen = set()
+    for row in raw_items:
+        item_id = str(row.get("transfer_item_id") or row.get("id") or "").strip()
+        if not item_id or item_id in seen:
+            if not item_id:
+                raise BadRequestException("transfer_item_id is required for every dispatch line.")
+            raise BadRequestException(f"Duplicate dispatch line '{item_id}'.")
+        seen.add(item_id)
+        ti = requested_map.get(item_id)
+        if not ti:
+            raise BadRequestException(f"Transfer item '{item_id}' does not belong to this transfer.")
+
+        dispatch_qty = Decimal(str(row.get("dispatch_qty") if row.get("dispatch_qty") is not None else 0))
+        max_allowed = Decimal(str(ti.requested_qty or ti.quantity or 0))
+        if dispatch_qty <= 0:
+            raise BadRequestException(f"Dispatch quantity must be greater than zero for item '{item_id}'.")
+        if dispatch_qty > max_allowed:
+            raise BadRequestException(
+                f"Dispatch quantity {dispatch_qty} exceeds requested quantity {max_allowed} for item '{item_id}'."
+            )
+        ti.dispatched_qty = dispatch_qty
+
+    # Any transfer line omitted from the payload is not dispatched.
+    for ti in requested_map.values():
+        if ti.id not in seen:
+            ti.dispatched_qty = Decimal("0.0000")
+
+    transfer.dispatch_notes = payload.get("notes") or transfer.dispatch_notes
+    # StockTransfer uses PENDING for the dispatch-awaiting-admin-approval state.
+    transfer.status = "PENDING"
+    transfer.updated_at = datetime.utcnow()
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="SUBMIT_CENTRAL_STORE_DISPATCH_FOR_APPROVAL",
+        entity_type="StockTransfer",
+        entity_id=transfer.id,
+        company_id=transfer.company_id,
+        branch_id=transfer.destination_branch_id,
+        new_values={
+            "status": "PENDING_APPROVAL",
+            "transfer_number": transfer.transfer_number,
+            "dispatch_items": [
+                {"transfer_item_id": ti.id, "dispatch_qty": float(ti.dispatched_qty or 0)}
+                for ti in transfer.items
+                if Decimal(str(ti.dispatched_qty or 0)) > 0
+            ],
+        },
+    )
+    db.commit()
+    db.refresh(transfer)
+    return {
+        "success": True,
+        "message": "Dispatch submitted to Admin for approval.",
+        "transfer_id": transfer.id,
+        "transfer_number": transfer.transfer_number,
+        "status": transfer.status,
+    }
+
+@router.post("/central-store/transfers/{transfer_id}/approve-dispatch")
+def approve_central_store_dispatch(
+    transfer_id: str = Path(...),
+    payload: Optional[Dict[str, Any]] = Body(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Admin approval: deduct Central Store stock and release the transfer to the outlet as IN_TRANSIT."""
+    require_head_office_role(current_user, db)
+    transfer = _resolve_transfer_for_company(db, transfer_id, current_user.company_id)
+    if transfer.status != "PENDING_APPROVAL":
+        raise BadRequestException(f"Transfer '{transfer.transfer_number}' is not pending dispatch approval.")
+
+    dispatched_lines = [ti for ti in transfer.items if Decimal(str(ti.dispatched_qty or 0)) > 0]
+    if not dispatched_lines:
+        raise BadRequestException("No dispatch quantity has been entered for this transfer.")
+
+    # This helper validates stock and writes TRANSFER_OUT ledger movements.
+    _apply_transfer_out_stock(db, transfer, current_user)
+
+    transfer.status = "IN_TRANSIT"
+    transfer.approved_by_id = current_user.id
+    transfer.approved_at = datetime.utcnow()
+    transfer.dispatched_by_id = transfer.dispatched_by_id or current_user.id
+    transfer.dispatched_at = datetime.utcnow()
+    if payload and payload.get("notes"):
+        transfer.dispatch_notes = ((transfer.dispatch_notes or "") + f" [Admin Approval: {payload['notes']}]").strip()
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="APPROVE_CENTRAL_STORE_DISPATCH",
+        entity_type="StockTransfer",
+        entity_id=transfer.id,
+        company_id=transfer.company_id,
+        branch_id=transfer.destination_branch_id,
+        new_values={
+            "status": "IN_TRANSIT",
+            "approved_by": current_user.email,
+            "dispatched_items": [
+                {"transfer_item_id": ti.id, "dispatch_qty": float(ti.dispatched_qty or 0)}
+                for ti in dispatched_lines
+            ],
+        },
+    )
+    db.commit()
+    return {
+        "success": True,
+        "message": "Dispatch approved. Transfer is now visible to the outlet for receiving.",
+        "transfer_id": transfer.id,
+        "transfer_number": transfer.transfer_number,
+        "status": transfer.status,
+    }
+
+def list_central_store_receiving(
+    branch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Outlet receiving queue: only Admin-approved IN_TRANSIT Central Store transfers."""
+    query = db.query(StockTransfer).filter(
+        StockTransfer.company_id == current_user.company_id,
+        StockTransfer.status == "IN_TRANSIT",
+    )
+    target_branch_id = branch_id or getattr(getattr(current_user, "branch", None), "id", None)
+    if branch_id:
+        check_user_outlet_access(current_user, branch_id, db)
+        query = query.filter(StockTransfer.destination_branch_id == branch_id)
+    else:
+        # For a scoped outlet user, infer from UserBranch memberships when exactly one is present.
+        memberships = db.query(UserBranch).filter(UserBranch.user_id == current_user.id).all()
+        if len(memberships) == 1:
+            target_branch_id = memberships[0].branch_id
+            query = query.filter(StockTransfer.destination_branch_id == target_branch_id)
+        elif not memberships and current_user.role and getattr(current_user.role, "name", "").upper() not in HQ_APPROVER_ROLES:
+            return []
+
+    transfers = query.order_by(desc(StockTransfer.created_at)).all()
+    result = []
+    for transfer in transfers:
+        destination = db.query(Branch).filter(Branch.id == transfer.destination_branch_id).first()
+        source = db.query(Warehouse).filter(Warehouse.id == transfer.from_warehouse_id).first()
+        items = []
+        for ti in transfer.items:
+            item = db.query(Item).filter(Item.id == ti.item_id).first()
+            items.append({
+                "transfer_item_id": ti.id,
+                "item_id": ti.item_id,
+                "item_name": item.name if item else "Unknown Item",
+                "item_code": item.code if item else None,
+                "unit": item.unit.symbol if item and getattr(item, "unit", None) else "UNIT",
+                "dispatch_qty": float(ti.dispatched_qty or 0),
+                "received_qty": float(ti.accepted_qty or 0),
+                "unit_cost": float(ti.unit_cost or 0),
+                "amount": float((ti.unit_cost or 0) * (ti.dispatched_qty or 0)),
+            })
+        result.append({
+            "id": transfer.id,
+            "transfer_number": transfer.transfer_number,
+            "status": transfer.status,
+            "source_warehouse_name": source.name if source else "Central Store",
+            "destination_branch_id": transfer.destination_branch_id,
+            "destination_branch_name": destination.name if destination else None,
+            "transfer_date": transfer.transfer_date,
+            "items": items,
+            "total_amount": sum(row["amount"] for row in items),
+        })
+    return result
+
+def receive_central_store_transfer(
+    transfer_id: str = Path(...),
+    payload: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Outlet receives an Admin-approved Central Store transfer and stock is increased only here."""
+    transfer = _resolve_transfer_for_company(db, transfer_id, current_user.company_id)
+    if transfer.status != "IN_TRANSIT":
+        raise BadRequestException(f"Transfer '{transfer.transfer_number}' is not ready for receiving.")
+
+    check_user_outlet_access(current_user, transfer.destination_branch_id, db)
+
+    raw_items = payload.get("items") or []
+    if not raw_items:
+        # Default to full receipt of all dispatched quantities.
+        raw_items = [
+            {"transfer_item_id": ti.id, "received_qty": float(ti.dispatched_qty or 0)}
+            for ti in transfer.items if Decimal(str(ti.dispatched_qty or 0)) > 0
+        ]
+
+    receive_map = {str(row.get("transfer_item_id") or row.get("id")): Decimal(str(row.get("received_qty") or 0)) for row in raw_items}
+    for ti in transfer.items:
+        received_qty = receive_map.get(ti.id, Decimal("0.0000"))
+        dispatched_qty = Decimal(str(ti.dispatched_qty or 0))
+        if received_qty < 0 or received_qty > dispatched_qty:
+            raise BadRequestException(
+                f"Received quantity must be between 0 and dispatched quantity for transfer item '{ti.id}'."
+            )
+
+        if received_qty <= 0:
+            continue
+
+        sb = (
+            db.query(StockBalance)
+            .filter(
+                StockBalance.warehouse_id == transfer.to_warehouse_id,
+                StockBalance.item_id == ti.item_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if sb:
+            sb.quantity = (sb.quantity or Decimal("0")) + received_qty
+            sb.updated_at = datetime.utcnow()
+        else:
+            sb = StockBalance(
+                warehouse_id=transfer.to_warehouse_id,
+                item_id=ti.item_id,
+                quantity=received_qty,
+                min_stock_level=Decimal("0.0000"),
+                reorder_qty=Decimal("0.0000"),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(sb)
+            db.flush()
+
+        item = db.query(Item).filter(Item.id == ti.item_id).first()
+        unit_cost = Decimal(str(ti.unit_cost or (getattr(item, "cost_price", 0) if item else 0) or 0))
+        db.add(StockLedger(
+            company_id=transfer.company_id,
+            branch_id=transfer.destination_branch_id,
+            warehouse_id=transfer.to_warehouse_id,
+            item_id=ti.item_id,
+            unit_id=getattr(item, "unit_id", None) if item else None,
+            movement_type="TRANSFER_IN",
+            change_qty=received_qty,
+            balance_qty=sb.quantity,
+            unit_cost=unit_cost,
+            total_cost=received_qty * unit_cost,
+            reference_type="STOCK_TRANSFER_RECEIVE",
+            reference_id=transfer.id,
+            idempotency_key=f"{transfer.id}:{ti.id}:TRANSFER_IN",
+            notes=f"Outlet receiving for {transfer.transfer_number}",
+            created_by_id=current_user.id,
+            created_at=datetime.utcnow(),
+        ))
+        ti.accepted_qty = received_qty
+
+    transfer.status = "FULLY_RECEIVED"
+    transfer.received_by_id = current_user.id
+    transfer.received_at = datetime.utcnow()
+    transfer.reconciled_at = datetime.utcnow()
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="RECEIVE_CENTRAL_STORE_TRANSFER",
+        entity_type="StockTransfer",
+        entity_id=transfer.id,
+        company_id=transfer.company_id,
+        branch_id=transfer.destination_branch_id,
+        new_values={
+            "status": "FULLY_RECEIVED",
+            "received_items": [
+                {"transfer_item_id": ti.id, "received_qty": float(ti.accepted_qty or 0)}
+                for ti in transfer.items
+            ],
+        },
+    )
+    db.commit()
+    return {
+        "success": True,
+        "message": "Transfer received successfully. Outlet stock has been updated.",
+        "transfer_id": transfer.id,
+        "transfer_number": transfer.transfer_number,
+        "status": transfer.status,
+    }
