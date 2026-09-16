@@ -6,7 +6,6 @@ import { useAuth } from '@/context/AuthContext';
 import { usePWA } from '@/context/PWAContext';
 import { SystemHealth } from '@/types';
 import { WorkspaceId } from '@/components/common/Sidebar';
-import { Building2 } from 'lucide-react';
 import OutletDashboard from '@/components/workspaces/OutletDashboard';
 import AdminOwnerDashboard from '@/components/workspaces/AdminOwnerDashboard';
 import CentralStoreDashboard from '@/components/workspaces/CentralStoreDashboard';
@@ -16,58 +15,111 @@ interface DashboardOverviewProps {
   setActiveWorkspace: (id: WorkspaceId) => void;
 }
 
-export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ health: _health, setActiveWorkspace }) => {
-  const { activeOutlet, isHeadOffice } = useOutlet();
+export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
+  health: _health,
+  setActiveWorkspace,
+}) => {
+  const { activeOutlet } = useOutlet();
   const { isOnline: _isOnline } = usePWA();
   const { user } = useAuth();
 
-  const userRole = typeof user?.role === 'object' ? user.role.name : (user?.role || '');
+  const userRole =
+    typeof user?.role === 'object'
+      ? user.role.name
+      : user?.role || '';
+
   const isAdmin = [
-    'SUPER_ADMIN','SUPERADMIN','OWNER','ADMIN','HQ_ADMIN','HEAD_OFFICE_ADMIN',
+    'SUPER_ADMIN',
+    'SUPERADMIN',
+    'OWNER',
+    'ADMIN',
+    'HQ_ADMIN',
+    'HEAD_OFFICE_ADMIN',
   ].includes(String(userRole).toUpperCase());
 
   const activeOutletAny = activeOutlet as any;
-  const isCentralStore = String(activeOutletAny?.type || activeOutletAny?.branch_type || '').toUpperCase() === 'CENTRAL_STORE';
 
-  const [viewMode, setViewMode] = React.useState<'outlet' | 'executive'>(
-    isAdmin || isHeadOffice ? 'executive' : 'outlet'
+  /*
+   * IMPORTANT:
+   * An outlet is considered selected only when it has a real outlet ID.
+   * "all" and empty ID mean no single outlet is selected.
+   */
+  const hasSelectedOutlet = Boolean(
+    activeOutlet?.id &&
+    activeOutlet.id !== 'all'
   );
 
-  React.useEffect(() => {
-    if (isAdmin || isHeadOffice) setViewMode('executive');
-  }, [isAdmin, isHeadOffice]);
+  /*
+   * Central Store has its own dashboard.
+   */
+  const isCentralStore =
+    String(
+      activeOutletAny?.type ||
+      activeOutletAny?.branch_type ||
+      ''
+    ).toUpperCase() === 'CENTRAL_STORE';
 
-  // Scope routing is intentionally strict: Central Store never falls through to
-  // the Admin or Outlet dashboard. Admin/HQ and Outlet dashboards remain separate.
+  /*
+   * 1. CENTRAL STORE
+   *
+   * Central Store must always use Central Store Dashboard.
+   */
   if (isCentralStore) {
-    return <CentralStoreDashboard setActiveWorkspace={setActiveWorkspace} />;
-  }
-
-  if (!isAdmin && (!isHeadOffice || viewMode === 'outlet')) {
     return (
-      <div className="space-y-4">
-        {isHeadOffice && !isAdmin && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] text-xs shadow-xs">
-            <div className="flex items-center gap-2 text-[#707070]">
-              <Building2 className="w-4 h-4 text-[#C79A3B] shrink-0" />
-              <span><strong className="text-[#1C1C1C]">Head Office Mode:</strong> Viewing single outlet operational command cockpit</span>
-            </div>
-            <button onClick={() => setViewMode('executive')} className="px-3.5 py-1.5 rounded-xl bg-[#1C1C1C] text-white font-bold text-xs">Switch to Group Executive View</button>
-          </div>
-        )}
-        <OutletDashboard branchId={activeOutlet?.id && activeOutlet.id !== 'all' ? activeOutlet.id : undefined} setActiveWorkspace={setActiveWorkspace} />
-      </div>
+      <CentralStoreDashboard
+        setActiveWorkspace={setActiveWorkspace}
+      />
     );
   }
 
+  /*
+   * 2. SINGLE OUTLET SELECTED
+   *
+   * THIS IS THE IMPORTANT FIX.
+   *
+   * Even when the logged-in user is ADMIN,
+   * selecting an outlet means the dashboard must become
+   * that outlet's operational dashboard.
+   *
+   * Example:
+   * Salt Lake selected
+   *   -> Salt Lake Dashboard
+   *
+   * Digha selected
+   *   -> Digha Dashboard
+   */
+  if (hasSelectedOutlet) {
+    return (
+      <OutletDashboard
+        branchId={activeOutlet!.id}
+        setActiveWorkspace={setActiveWorkspace}
+      />
+    );
+  }
+
+  /*
+   * 3. NO SINGLE OUTLET SELECTED
+   *
+   * Admin / Owner sees the group Executive Dashboard.
+   */
+  if (isAdmin) {
+    return (
+      <AdminOwnerDashboard
+        setActiveWorkspace={setActiveWorkspace}
+      />
+    );
+  }
+
+  /*
+   * 4. NON-ADMIN USER WITHOUT A SELECTED OUTLET
+   *
+   * Keep the existing OutletDashboard fallback.
+   */
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] text-xs shadow-xs">
-        <div className="flex items-center gap-2 text-[#707070]"><Building2 className="w-4 h-4 text-[#C79A3B] shrink-0" /><span><strong className="text-[#1C1C1C]">Head Office Mode:</strong> Admin / Owner dashboard across all outlets</span></div>
-        <button onClick={() => setViewMode('outlet')} className="px-3.5 py-1.5 rounded-xl bg-[#1C1C1C] text-white font-bold text-xs">Open Single-Outlet Cockpit</button>
-      </div>
-      <AdminOwnerDashboard setActiveWorkspace={setActiveWorkspace} />
-    </div>
+    <OutletDashboard
+      branchId={undefined}
+      setActiveWorkspace={setActiveWorkspace}
+    />
   );
 };
 

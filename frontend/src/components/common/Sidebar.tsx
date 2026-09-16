@@ -227,7 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       defaultOpen: true,
       items: [
         { id: 'purchase', label: 'Purchase', icon: ShoppingCart, initialTab: 'needs' as const, badge: null },
-        { id: 'purchase', label: 'Receiving', icon: Truck, initialTab: 'receiving' as const, badge: null },
+        { id: 'purchase', label: 'Vendor Receiving', icon: Truck, initialTab: 'receiving' as const, badge: null },
         { id: 'purchase', label: 'My Bills', icon: FileText, initialTab: 'my_bills' as const, badge: null },
       ],
     },

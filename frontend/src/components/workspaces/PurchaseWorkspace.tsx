@@ -25,6 +25,8 @@ import {
   Trash2,
   X,
   Check,
+  Upload,
+  Camera,
 } from 'lucide-react';
 
 interface PurchaseWorkspaceProps {
@@ -103,7 +105,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
   const [newGRNInvoiceAmt, setNewGRNInvoiceAmt] = useState<number>(0);
   const [newGRNNotes, setNewGRNNotes] = useState<string>('');
   const [newGRNLines, setNewGRNLines] = useState<
-    Array<{ po_item_id: string; item_name: string; unit: string; outstanding_qty: number; received_qty: number; accepted_qty: number }>
+    Array<{ po_item_id: string; item_name: string; unit: string; ordered_qty: number; already_received_qty: number; outstanding_qty: number; received_qty: number; accepted_qty: number }>
   >([]);
   const [newGRNInvoiceFile, setNewGRNInvoiceFile] = useState<{
     fileName: string;
@@ -118,10 +120,12 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
   const [billPurchaseDate, setBillPurchaseDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [billInvoiceNumber, setBillInvoiceNumber] = useState<string>('');
   const [billNotes, setBillNotes] = useState<string>('');
-  const [billFile, setBillFile] = useState<{ fileName: string; fileBase64: string; size: number } | null>(null);
-  const [billLines, setBillLines] = useState<
-    Array<{ item_id: string; quantity: number; rate: number }>
-  >([{ item_id: '', quantity: 1, rate: 0 }]);
+  const [billFile, setBillFile] = useState<{
+    fileName: string;
+    fileType: string;
+    fileBase64: string;
+    size: number;
+  } | null>(null);
 
   // Fetch Core Data
   const fetchData = async () => {
@@ -174,6 +178,32 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
     fetchData();
   }, [activeOutlet.id, isHeadOffice]);
 
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        resolve(result.includes(',') ? result.split(',')[1] : result);
+      };
+      reader.onerror = () => reject(new Error('Could not read the selected file.'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleBillFile = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const fileBase64 = await fileToBase64(file);
+      setBillFile({
+        fileName: file.name,
+        fileType: file.type || 'application/octet-stream',
+        fileBase64,
+        size: file.size,
+      });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.message || 'Could not read bill file.' });
+    }
+  };
+
   // Handle Item Selection in Need Form (Auto-determine vendor from Setup mapping)
   const handleSelectPRItem = (index: number, itemId: string) => {
     const itemObj = inventoryItems.find((i) => i.id === itemId);
@@ -211,7 +241,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
     setItemSearchQueries((prev) => ({ ...prev, [index]: '' }));
   };
 
-  // Submit New Need (PR)
+  // Submit Purchase Requirement (PR)
   const handleCreatePR = async () => {
     if (newPRLines.length === 0 || !newPRLines[0].item_id) {
       setFeedback({ type: 'error', message: 'Please select at least one item.' });
@@ -245,43 +275,76 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
     }
   };
 
-  // Submit Receiving / GRN
+  // Submit Vendor Receiving / GRN
   const handleCreateGRN = async () => {
     if (!newGRNPOId) {
-      setFeedback({ type: 'error', message: 'Please select an approved Purchase Order for receiving.' });
+      setFeedback({ type: 'error', message: 'Please select an approved Purchase Order for Vendor Receiving.' });
       return;
     }
-    if (!newGRNInvoiceNum.trim()) {
-      setFeedback({ type: 'error', message: 'Please enter the Supplier Invoice / Challan Number.' });
+
+    if (!newGRNInvoiceFile) {
+      setFeedback({ type: 'error', message: 'Please upload or capture the vendor bill/invoice.' });
       return;
     }
-    if (!newGRNLines.length || !newGRNLines.some((line) => line.received_qty > 0) || newGRNLines.some((line) => line.accepted_qty < 0 || line.accepted_qty > line.received_qty)) {
-      setFeedback({ type: 'error', message: 'Enter valid delivered and accepted quantities.' });
+
+    const selectedPO = orders.find((po) => po.id === newGRNPOId);
+    const poAmount = Number(selectedPO?.net_amount || selectedPO?.total_amount || 0);
+    const finalInvoiceNumber = newGRNInvoiceNum.trim() || `BILL-${Date.now().toString().slice(-8)}`;
+
+    if (newGRNInvoiceAmt < poAmount - 0.01) {
+      setFeedback({
+        type: 'error',
+        message: `Bill amount cannot be lower than the approved PO amount ₹${poAmount.toFixed(2)}.`,
+      });
       return;
     }
+
+    if (!newGRNLines.length || !newGRNLines.some((line) => Number(line.received_qty) > 0)) {
+      setFeedback({ type: 'error', message: 'The selected PO has no outstanding quantity to receive.' });
+      return;
+    }
+
     setLoading(true);
     try {
+      const uploadRes = await apiClient.post('/procurement/receiving/upload-invoice', {
+        branch_id: activeOutlet.id,
+        invoice_number: finalInvoiceNumber,
+        invoice_amount: Number(newGRNInvoiceAmt || poAmount),
+        file_name: newGRNInvoiceFile.fileName,
+        file_type: newGRNInvoiceFile.fileType,
+        file_base64: newGRNInvoiceFile.fileBase64,
+      });
+
+      const uploadData = uploadRes?.data?.data ?? uploadRes?.data ?? {};
+      const storageRef = uploadData?.storage_ref || '';
+
       await procurementApi.createGoodsReceiveFromPO({
         po_id: newGRNPOId,
         branch_id: activeOutlet.id,
-        supplier_invoice_number: newGRNInvoiceNum.trim(),
-        invoice_amount: Number(newGRNInvoiceAmt || 0),
-        invoice_file_name: newGRNInvoiceFile?.fileName || undefined,
-        notes: newGRNNotes || undefined,
-        items: newGRNLines.filter((line) => line.received_qty > 0).map((line) => ({
-          po_item_id: line.po_item_id,
-          received_qty: Number(line.received_qty),
-          accepted_qty: Number(line.accepted_qty),
-          rejected_qty: Number(line.received_qty) - Number(line.accepted_qty),
-        })),
+        supplier_invoice_number: finalInvoiceNumber,
+        invoice_amount: Number(newGRNInvoiceAmt || poAmount),
+        invoice_file_name: storageRef
+          ? `${newGRNInvoiceFile.fileName} | ${storageRef}`
+          : newGRNInvoiceFile.fileName,
+        notes: `${newGRNNotes.trim()}${storageRef ? ` [Invoice Storage: ${storageRef}]` : ''}`.trim() || undefined,
+        // PO quantities are loaded automatically and are not user-editable.
+        items: newGRNLines
+          .filter((line) => Number(line.received_qty) > 0)
+          .map((line) => ({
+            po_item_id: line.po_item_id,
+            received_qty: Number(line.received_qty),
+            accepted_qty: Number(line.accepted_qty),
+            rejected_qty: Number(line.received_qty) - Number(line.accepted_qty),
+          })),
       });
 
       setFeedback({
         type: 'success',
-        message: 'Delivery receiving submitted! Queued for Head Office approval.',
+        message: 'Vendor Receiving submitted. Sent to Head Office for approval; stock is not added yet.',
       });
       setCreateGRNModalOpen(false);
       setNewGRNPOId('');
+      setNewGRNSupplierId('');
       setNewGRNInvoiceNum('');
       setNewGRNInvoiceAmt(0);
       setNewGRNNotes('');
@@ -291,57 +354,48 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        message: err?.response?.data?.message || err?.message || 'GRN submission failed.',
+        message: err?.response?.data?.message || err?.response?.data?.detail || err?.message || 'Vendor Receiving submission failed.',
       });
     } finally {
       setLoading(false);
     }
   };
 
-  // Submit Emergency / Local Bill
+  // Submit My Bill via invoice OCR (no manual item/qty/rate entry)
   const handleSubmitLocalBill = async () => {
-    if (billLines.length === 0 || !billLines[0].item_id) {
-      setFeedback({ type: 'error', message: 'Please select at least one item.' });
+    if (!billFile) {
+      setFeedback({ type: 'error', message: 'Please upload or capture the purchase bill first.' });
       return;
     }
+
     const effectivePlatform =
       billPlatform === 'Other' ? billCustomPlatform || 'Local Supplier' : billPlatform;
-    const totalAmount = billLines.reduce(
-      (sum, l) => sum + Number(l.quantity || 0) * Number(l.rate || 0),
-      0
-    );
 
     setLoading(true);
     try {
-      const invNum = billInvoiceNumber.trim() || `BILL-${Date.now().toString().slice(-6)}`;
-      const combinedNotes = `[Platform: ${effectivePlatform}] ${billNotes || ''} ${
-        billFile ? `[Attachment: ${billFile.fileName}]` : ''
-      }`.trim();
-
-      await procurementApi.createGoodsReceiveNote({
+      const res = await apiClient.post('/procurement/my-bills/submit-ocr', {
         branch_id: activeOutlet.id,
-        supplier_invoice_number: invNum,
-        invoice_amount: totalAmount,
-        receive_date: new Date(billPurchaseDate).toISOString(),
-        notes: combinedNotes,
-        status: 'PENDING_APPROVAL',
-        auto_approve: false,
-        items: billLines.map((l) => ({
-          item_id: l.item_id,
-          received_qty: Number(l.quantity),
-          accepted_qty: Number(l.quantity),
-          rejected_qty: 0,
-          unit_price: Number(l.rate),
-          qc_status: 'PASSED',
-        })),
+        file_name: billFile.fileName,
+        file_type: billFile.fileType,
+        file_base64: billFile.fileBase64,
+        purchase_date: billPurchaseDate || undefined,
+        invoice_number: billInvoiceNumber.trim() || undefined,
+        platform: effectivePlatform,
+        notes: billNotes || undefined,
       });
+
+      const extracted = res?.data || res || {};
+      const extractedItems = Array.isArray(extracted.items) ? extracted.items.length : 0;
+      const extractedTotal = Number(extracted.invoice_amount || extracted.total_amount || 0);
 
       setFeedback({
         type: 'success',
-        message: 'Bill submitted successfully for HO approval. Stock will be added upon approval.',
+        message: `My Bill submitted for Head Office approval. OCR extracted ${extractedItems} item(s)${extractedTotal > 0 ? ` and ₹${extractedTotal.toFixed(2)}` : ''}. Stock will be added only after approval.`,
       });
       setSubmitBillModalOpen(false);
-      setBillLines([{ item_id: '', quantity: 1, rate: 0 }]);
+      setBillPlatform('Local Supplier');
+      setBillCustomPlatform('');
+      setBillPurchaseDate(new Date().toISOString().slice(0, 10));
       setBillInvoiceNumber('');
       setBillNotes('');
       setBillFile(null);
@@ -349,7 +403,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        message: err?.response?.data?.message || err?.message || 'Failed to submit bill.',
+        message: err?.response?.data?.message || err?.message || 'My Bill OCR submission failed.',
       });
     } finally {
       setLoading(false);
@@ -443,13 +497,17 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-[#1C1C1C] font-['Outfit']">Purchase</h1>
+            <h1 className="text-xl font-bold text-[#1C1C1C] font-['Outfit']">{activeTab === 'receiving' ? 'Vendor Receiving' : activeTab === 'my_bills' ? 'My Bills' : 'Purchase'}</h1>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
               [{activeOutlet.code}]
             </span>
           </div>
           <p className="text-xs text-[#707070] mt-0.5">
-            Manage supplies, receiving & outlet purchases
+            {activeTab === 'receiving'
+              ? 'Approved vendor delivery → receiving → Head Office approval → stock'
+              : activeTab === 'my_bills'
+              ? 'Direct / emergency purchase bills → OCR → Head Office approval → stock'
+              : 'Purchase requests'}
           </p>
         </div>
 
@@ -469,17 +527,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold hover:bg-[#2D2D2D] shadow-xs transition-all active:scale-[0.98]"
             >
               <Plus className="w-3.5 h-3.5 text-[#C79A3B]" />
-              + New Need
-            </button>
-          )}
-
-          {activeTab === 'receiving' && (
-            <button
-              onClick={() => setCreateGRNModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs transition-all active:scale-[0.98]"
-            >
-              <PackageCheck className="w-3.5 h-3.5" />
-              + Receive Delivery
+              + New Purchase Request
             </button>
           )}
 
@@ -518,59 +566,8 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
         </div>
       )}
 
-      {/* 3 Streamlined Tabs */}
-      <div className="flex items-center gap-2 border-b border-[rgba(45,45,45,0.08)] pb-2 overflow-x-auto">
-        <button
-          type="button"
-          onClick={() => setActiveTab('needs')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'needs'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs border border-[#B8862D]/30'
-              : 'text-[#707070] hover:bg-[#FAF8F5] border border-transparent'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          Needs
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/80 border border-current font-mono">
-            {requests.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('receiving')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'receiving'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs border border-[#B8862D]/30'
-              : 'text-[#707070] hover:bg-[#FAF8F5] border border-transparent'
-          }`}
-        >
-          <PackageCheck className="w-4 h-4" />
-          Receiving
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/80 border border-current font-mono">
-            {supplierGRNs.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('my_bills')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'my_bills'
-              ? 'bg-[#F1E4C5] text-[#B8862D] shadow-xs border border-[#B8862D]/30'
-              : 'text-[#707070] hover:bg-[#FAF8F5] border border-transparent'
-          }`}
-        >
-          <Receipt className="w-4 h-4" />
-          My Bills
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/80 border border-current font-mono">
-            {localBills.length}
-          </span>
-        </button>
-      </div>
-
       {/* ========================================================================= */}
-      {/* TAB 1: NEEDS (Outlet Supply Requirements) */}
+      {/* TAB 1: PURCHASE (Outlet Purchase Requests) */}
       {/* ========================================================================= */}
       {activeTab === 'needs' && (
         <div className="space-y-4">
@@ -603,14 +600,14 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
             </div>
           </div>
 
-          {/* Needs List */}
+          {/* Purchase Request List */}
           <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
             {filteredNeeds.length === 0 ? (
               <div className="p-12 text-center">
                 <FileText className="w-8 h-8 text-[#B8862D] mx-auto mb-2 opacity-60" />
-                <h3 className="text-sm font-bold text-[#1C1C1C]">No supply requirements found</h3>
+                <h3 className="text-sm font-bold text-[#1C1C1C]">No purchase requests found</h3>
                 <p className="text-xs text-[#707070] mt-1 max-w-sm mx-auto">
-                  Click "+ New Need" above to submit an item requirement for this outlet to Head Office.
+                  Click "+ New Purchase Request" above to submit an item requirement for this outlet to Head Office.
                 </p>
               </div>
             ) : (
@@ -685,7 +682,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: RECEIVING (Approved Deliveries & GRNs) */}
+      {/* TAB 2: VENDOR RECEIVING (Approved PO Deliveries & GRNs) */}
       {/* ========================================================================= */}
       {activeTab === 'receiving' && (
         <div className="space-y-6">
@@ -748,6 +745,26 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                           setNewGRNPOId(po.id);
                           setNewGRNSupplierId(po.supplier_id || '');
                           setNewGRNInvoiceAmt(Number(po.net_amount || po.total_amount || 0));
+                          setNewGRNInvoiceNum('');
+                          setNewGRNNotes('');
+                          setNewGRNInvoiceFile(null);
+                          setNewGRNLines((po.items || [])
+                            .map((line: any) => {
+                              const ordered = Number(line.ordered_qty || line.quantity || 0);
+                              const alreadyReceived = Number(line.received_qty || 0);
+                              const outstanding = Math.max(0, ordered - alreadyReceived);
+                              return {
+                                po_item_id: line.id,
+                                item_name: line.item_name || line.item?.name || 'Item',
+                                unit: line.unit_symbol || line.item?.unit?.symbol || '',
+                                ordered_qty: ordered,
+                                already_received_qty: alreadyReceived,
+                                outstanding_qty: outstanding,
+                                received_qty: outstanding,
+                                accepted_qty: outstanding,
+                              };
+                            })
+                            .filter((line: any) => line.outstanding_qty > 0));
                           setCreateGRNModalOpen(true);
                         }}
                         className="px-3 py-1.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257247] shadow-xs flex items-center gap-1"
@@ -765,7 +782,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
           {/* Receiving History Log */}
           <div className="space-y-2">
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#707070]">
-              Delivery Receipts Log (GRN)
+              Vendor Receiving Log (GRN)
             </h3>
             <div className="bg-white rounded-2xl border border-[rgba(45,45,45,0.08)] shadow-xs overflow-hidden">
               {supplierGRNs.length === 0 ? (
@@ -773,7 +790,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                   <PackageCheck className="w-8 h-8 text-[#2E8B57] mx-auto mb-2 opacity-60" />
                   <h3 className="text-sm font-bold text-[#1C1C1C]">No delivery receipts yet</h3>
                   <p className="text-xs text-[#707070] mt-1">
-                    Received supplier deliveries and GRNs will appear here.
+                    Approved vendor deliveries submitted here will appear in the receiving log.
                   </p>
                 </div>
               ) : (
@@ -839,23 +856,15 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 3: MY BILLS (Emergency / Local Purchases) */}
+      {/* TAB 3: MY BILLS */}
       {/* ========================================================================= */}
       {activeTab === 'my_bills' && (
         <div className="space-y-4">
-          <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-xs font-bold text-[#1C1C1C]">Outlet Emergency & Local Purchase Bills</h3>
-              <p className="text-[11px] text-[#707070] mt-0.5">
-                Submit local store bills (Blinkit, Flipkart, Local Supplier, Cash). HO approval adds stock directly.
-              </p>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#707070]">MY BILLS HISTORY</h3>
+              <p className="text-[11px] text-[#707070] mt-1">Submitted direct purchase bills and their approval status.</p>
             </div>
-            <button
-              onClick={() => setSubmitBillModalOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-[#B8862D] text-white text-xs font-bold hover:bg-[#9c7124] shadow-xs flex items-center gap-1.5 self-start sm:self-auto"
-            >
-              <Plus className="w-3.5 h-3.5" /> + Submit Bill
-            </button>
           </div>
 
           {/* Bills List */}
@@ -946,16 +955,16 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 1: CREATE NEED (+ New Need) */}
+      {/* MODAL 1: CREATE NEED (+ New Purchase Request) */}
       {/* ========================================================================= */}
       {createPRModalOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
           <div className="bg-white rounded-3xl p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto space-y-4 shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
-                <h3 className="text-base font-bold text-[#1C1C1C]">Create Supply Requirement</h3>
+                <h3 className="text-base font-bold text-[#1C1C1C]">Create Purchase Requirement</h3>
                 <p className="text-xs text-[#707070]">
-                  Submit need for [{activeOutlet.name}] to Head Office. Mapped vendors are auto-determined.
+                  Submit a purchase requirement for [{activeOutlet.name}] to Head Office. Mapped vendors are auto-determined.
                 </p>
               </div>
               <button onClick={() => setCreatePRModalOpen(false)} className="text-gray-400 hover:text-gray-600">
@@ -1195,157 +1204,123 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 2: RECEIVE DELIVERY (+ Receive Delivery) */}
+      {/* ========================================================================= */}
+      {/* MODAL 2: VENDOR RECEIVING */}
       {/* ========================================================================= */}
       {createGRNModalOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto space-y-4 shadow-xl">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+          <div className="bg-white w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl shadow-xl">
+            <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-[#1C1C1C]">Receive Supplier Delivery</h3>
-                <p className="text-xs text-[#707070]">
-                  Record physical stock intake against an approved PO.
-                </p>
+                <div className="font-bold text-base text-[#1C1C1C]">Receive Vendor Bill</div>
+                <div className="text-xs text-[#777] mt-1">
+                  {(() => {
+                    const po = orders.find((x) => x.id === newGRNPOId);
+                    return po ? `PO ${po.po_number} · ${po.supplier_name || po.supplier?.name || 'Vendor'}` : 'Approved Purchase Order';
+                  })()}
+                </div>
               </div>
-              <button onClick={() => setCreateGRNModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setCreateGRNModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-700" aria-label="Close receiving">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[11px] font-semibold text-[#707070] mb-1">Select Purchase Order</label>
-                <select
-                  value={newGRNPOId}
-                  onChange={(e) => {
-                    const poId = e.target.value;
-                    setNewGRNPOId(poId);
-                    const po = orders.find((o) => o.id === poId);
-                    if (po) {
-                      setNewGRNSupplierId(po.supplier_id || '');
-                      setNewGRNInvoiceAmt(Number(po.net_amount || po.total_amount || 0));
-                      setNewGRNLines((po.items || []).map((line: any) => {
-                        const outstanding = Math.max(0, Number(line.ordered_qty || 0) - Number(line.received_qty || 0));
-                        return {
-                          po_item_id: line.id,
-                          item_name: line.item_name || line.item?.name || 'Item',
-                          unit: line.unit_symbol || line.item?.unit?.symbol || '',
-                          outstanding_qty: outstanding,
-                          received_qty: outstanding,
-                          accepted_qty: outstanding,
-                        };
-                      }));
-                    } else {
-                      setNewGRNLines([]);
-                    }
-                  }}
-                  className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl font-semibold"
-                >
-                  <option value="">-- Choose Approved PO --</option>
-                  {orders.map((po) => (
-                    <option key={po.id} value={po.id}>
-                      {po.po_number} - {po.supplier_name || 'Vendor'} (₹{Number(po.net_amount || po.total_amount || 0).toFixed(2)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {newGRNLines.length > 0 && (
-                <div className="space-y-2">
-                  <label className="block text-[11px] font-semibold text-[#707070]">Delivered / Accepted Quantity</label>
-                  {newGRNLines.map((line, index) => (
-                    <div key={line.po_item_id} className="grid grid-cols-[1fr_74px_74px] gap-2 items-center p-2.5 bg-[#FAF8F5] rounded-xl">
-                      <div className="text-xs font-semibold text-[#1C1C1C]">
-                        {line.item_name} <span className="text-[10px] text-[#707070]">(PO balance {line.outstanding_qty} {line.unit})</span>
-                      </div>
-                      <input
-                        type="number"
-                        min="0"
-                        max={line.outstanding_qty}
-                        aria-label={`Delivered quantity for ${line.item_name}`}
-                        value={line.received_qty}
-                        onChange={(e) => {
-                          const value = Math.min(line.outstanding_qty, Math.max(0, Number(e.target.value)));
-                          setNewGRNLines((lines) => lines.map((entry, i) => i === index ? { ...entry, received_qty: value, accepted_qty: Math.min(entry.accepted_qty, value) } : entry));
-                        }}
-                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs text-right font-mono"
-                        title="Delivered"
-                      />
-                      <input
-                        type="number"
-                        min="0"
-                        max={line.received_qty}
-                        aria-label={`Accepted quantity for ${line.item_name}`}
-                        value={line.accepted_qty}
-                        onChange={(e) => {
-                          const value = Math.min(line.received_qty, Math.max(0, Number(e.target.value)));
-                          setNewGRNLines((lines) => lines.map((entry, i) => i === index ? { ...entry, accepted_qty: value } : entry));
-                        }}
-                        className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs text-right font-mono"
-                        title="Accepted"
-                      />
-                    </div>
-                  ))}
-                  <p className="text-[10px] text-[#707070]">Delivered quantity is recorded against the PO; only accepted quantity posts to outlet stock after approval.</p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-[#707070] mb-1">Invoice / Challan #</label>
-                  <input
-                    type="text"
-                    placeholder="INV-9921..."
-                    value={newGRNInvoiceNum}
-                    onChange={(e) => setNewGRNInvoiceNum(e.target.value)}
-                    className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-[#707070] mb-1">Invoice Amount (₹)</label>
-                  <input
-                    type="number"
-                    value={newGRNInvoiceAmt}
-                    onChange={(e) => setNewGRNInvoiceAmt(Number(e.target.value))}
-                    className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl text-right font-mono"
-                  />
+            <div className="p-5 space-y-4">
+              <div className="rounded-2xl border border-[#E8DDBF] bg-[#FFFDF7] p-4">
+                <div className="flex items-start gap-3">
+                  <PackageCheck className="w-5 h-5 text-[#8A6A1F] mt-0.5" />
+                  <div>
+                    <div className="font-bold text-sm text-[#1C1C1C]">PO quantities are locked</div>
+                    <div className="text-xs text-[#6F644B] mt-1">Approved PO items and remaining quantities are loaded automatically. No manual item, received-quantity or accepted-quantity entry is allowed.</div>
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-semibold text-[#707070] mb-1">Notes / Receiving Remarks</label>
-                <textarea
-                  rows={2}
-                  value={newGRNNotes}
-                  onChange={(e) => setNewGRNNotes(e.target.value)}
-                  placeholder="e.g. All items verified with good condition..."
-                  className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl text-xs"
-                />
+              <div className="rounded-2xl border border-gray-200 p-4 bg-[#FAF8F5]">
+                <div className="text-xs font-bold text-[#1C1C1C]">Vendor Bill / Invoice</div>
+                <div className="text-[11px] text-[#666] mt-1">Take a photo from camera or upload the supplier bill/PDF. The bill is attached to this approved PO and sent for Head Office approval.</div>
+
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#707070] mb-1">Bill / Invoice Number</label>
+                    <input type="text" placeholder="Optional — auto reference if blank" value={newGRNInvoiceNum} onChange={(e) => setNewGRNInvoiceNum(e.target.value)} className="w-full p-2.5 bg-white border border-gray-200 rounded-xl" />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <label className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold cursor-pointer flex items-center gap-2">
+                      <Upload className="w-3.5 h-3.5" /> Choose Bill
+                      <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={async (e) => {
+                        const file = e.target.files?.[0] || null;
+                        if (!file) return;
+                        try {
+                          const base64 = await fileToBase64(file);
+                          setNewGRNInvoiceFile({ fileName: file.name, fileType: file.type || 'application/octet-stream', fileBase64: base64, size: file.size });
+                        } catch (err: any) {
+                          setFeedback({ type: 'error', message: err?.message || 'Could not read bill file.' });
+                        }
+                      }} />
+                    </label>
+                    <label className="px-3 py-2 rounded-xl bg-[#F1E4C5] text-[#7A5B17] text-xs font-bold cursor-pointer flex items-center gap-2">
+                      <Camera className="w-3.5 h-3.5" /> Camera
+                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => {
+                        const file = e.target.files?.[0] || null;
+                        if (!file) return;
+                        try {
+                          const base64 = await fileToBase64(file);
+                          setNewGRNInvoiceFile({ fileName: file.name, fileType: file.type || 'image/jpeg', fileBase64: base64, size: file.size });
+                        } catch (err: any) {
+                          setFeedback({ type: 'error', message: err?.message || 'Could not read camera image.' });
+                        }
+                      }} />
+                    </label>
+                  </div>
+                </div>
+
+                {newGRNInvoiceFile && <div className="mt-3 rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-xs text-green-800"><b>Selected:</b> {newGRNInvoiceFile.fileName}</div>}
+
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#707070] mb-1">Actual Bill Amount (₹)</label>
+                    <input type="number" min={Number(orders.find((x) => x.id === newGRNPOId)?.net_amount || orders.find((x) => x.id === newGRNPOId)?.total_amount || 0)} value={newGRNInvoiceAmt} onChange={(e) => setNewGRNInvoiceAmt(Number(e.target.value))} className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-right font-mono font-semibold" />
+                    <p className="text-[10px] text-[#707070] mt-1">PO amount is prefilled. Change only when the actual vendor bill is higher.</p>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#707070] mb-1">Receiving Notes</label>
+                    <input type="text" value={newGRNNotes} onChange={(e) => setNewGRNNotes(e.target.value)} placeholder="Condition / remarks / delivery note..." className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-xs" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 bg-white border-b border-gray-100">
+                  <div className="text-sm font-bold text-[#1C1C1C]">PO Items</div>
+                  <div className="text-[11px] text-[#777] mt-0.5">Items and remaining quantities come directly from the approved PO.</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-[#FAF8F5]"><tr className="text-[#707070]"><th className="text-left px-4 py-2.5 font-semibold">Item</th><th className="text-right px-4 py-2.5 font-semibold">Ordered</th><th className="text-right px-4 py-2.5 font-semibold">Already Received</th><th className="text-right px-4 py-2.5 font-semibold">Remaining</th></tr></thead>
+                    <tbody>
+                      {newGRNLines.length ? newGRNLines.map((line) => (
+                        <tr key={line.po_item_id} className="border-t border-gray-100">
+                          <td className="px-4 py-3 font-semibold text-[#1C1C1C]">{line.item_name}<span className="block text-[10px] text-[#777] mt-0.5">{line.unit || 'Unit'}</span></td>
+                          <td className="px-4 py-3 text-right font-mono">{Number(line.ordered_qty || 0).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-right font-mono">{Number(line.already_received_qty || 0).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-right font-mono font-bold">{Number(line.outstanding_qty || 0).toFixed(2)}</td>
+                        </tr>
+                      )) : <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-500">Select an approved Purchase Order.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
-              <button
-                type="button"
-                onClick={() => setCreateGRNModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleCreateGRN}
-                disabled={loading}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#2E8B57] text-white hover:bg-[#257247] shadow-xs"
-              >
-                Submit Receiving
-              </button>
+            <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setCreateGRNModalOpen(false)} className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-100">Close</button>
+              <button type="button" onClick={handleCreateGRN} disabled={loading || !newGRNInvoiceFile} className="px-4 py-2 rounded-xl text-xs font-bold bg-[#2E8B57] text-white hover:bg-[#257247] shadow-xs disabled:opacity-50">Submit Receiving</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
       {/* MODAL 3: SUBMIT LOCAL BILL (+ Submit Bill) */}
       {/* ========================================================================= */}
       {submitBillModalOpen && (
@@ -1353,10 +1328,8 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
           <div className="bg-white rounded-3xl p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto space-y-4 shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
-                <h3 className="text-base font-bold text-[#1C1C1C]">Submit Local / Emergency Purchase Bill</h3>
-                <p className="text-xs text-[#707070]">
-                  Submit bill from Blinkit, Flipkart, local supplier, or cash purchase for HO approval.
-                </p>
+                <h3 className="text-base font-bold text-[#1C1C1C]">My Bills — Direct Purchase</h3>
+                <p className="text-xs text-[#707070]">Upload the bill or invoice. Item, quantity, rate, tax and total are extracted automatically; there is no manual item entry.</p>
               </div>
               <button onClick={() => setSubmitBillModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
@@ -1364,11 +1337,10 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
             </div>
 
             <div className="space-y-3 text-xs">
-              {/* Platform Selector */}
               <div>
-                <label className="block text-[11px] font-semibold text-[#707070] mb-1.5">Supplier / Platform</label>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {['Blinkit', 'Flipkart', 'Local Supplier', 'Cash Purchase', 'Other'].map((p) => (
+                <label className="block text-[11px] font-semibold text-[#707070] mb-1.5">Purchase Source</label>
+                <div className="flex flex-wrap gap-2">
+                  {['Blinkit', 'Amazon', 'Flipkart', 'Local Supplier', 'Cash Purchase', 'Other'].map((p) => (
                     <button
                       key={p}
                       type="button"
@@ -1389,7 +1361,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                     placeholder="Enter vendor / platform name..."
                     value={billCustomPlatform}
                     onChange={(e) => setBillCustomPlatform(e.target.value)}
-                    className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl"
+                    className="w-full mt-2 p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl"
                   />
                 )}
               </div>
@@ -1405,10 +1377,10 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-[#707070] mb-1">Bill / Invoice Reference #</label>
+                  <label className="block text-[11px] font-semibold text-[#707070] mb-1">Bill / Invoice # (optional)</label>
                   <input
                     type="text"
-                    placeholder="e.g. BLINK-4921"
+                    placeholder="OCR will read this if blank"
                     value={billInvoiceNumber}
                     onChange={(e) => setBillInvoiceNumber(e.target.value)}
                     className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl"
@@ -1416,89 +1388,44 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                 </div>
               </div>
 
-              {/* Bill Items */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-[11px] font-semibold text-[#707070]">Items Purchased</label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setBillLines([...billLines, { item_id: '', quantity: 1, rate: 0 }])
-                    }
-                    className="text-[11px] text-[#B8862D] font-bold hover:underline"
-                  >
-                    + Add Item
-                  </button>
+              <div className="rounded-2xl border-2 border-dashed border-[#D8C18C] bg-[#FFFDF7] p-6 text-center">
+                <Receipt className="mx-auto h-8 w-8 text-[#B8862D]" />
+                <div className="mt-2 text-sm font-bold text-[#1C1C1C]">Bill / Invoice Upload</div>
+                <div className="mt-1 text-xs text-gray-500">PDF, JPG, PNG or WebP</div>
+
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" /> Upload Bill
+                    <input
+                      type="file"
+                      accept="application/pdf,image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => handleBillFile(e.target.files?.[0] || null)}
+                    />
+                  </label>
+                  <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F1E4C5] text-[#7A5B17] text-xs font-bold cursor-pointer">
+                    <Camera className="w-3.5 h-3.5" /> Camera
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleBillFile(e.target.files?.[0] || null)}
+                    />
+                  </label>
                 </div>
 
-                {billLines.map((line, idx) => (
-                  <div key={idx} className="p-3 bg-[#FAF8F5] rounded-xl space-y-2 border border-gray-100">
-                    <div className="grid grid-cols-[1fr_80px_90px_auto] gap-2 items-center">
-                      <select
-                        value={line.item_id}
-                        onChange={(e) => {
-                          const updated = [...billLines];
-                          updated[idx].item_id = e.target.value;
-                          setBillLines(updated);
-                        }}
-                        className="p-2 bg-white border border-gray-200 rounded-xl text-xs"
-                      >
-                        <option value="">-- Choose Item --</option>
-                        {inventoryItems.map((itm) => (
-                          <option key={itm.id} value={itm.id}>
-                            {itm.name} ({itm.unit?.symbol || 'Unit'})
-                          </option>
-                        ))}
-                      </select>
-
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="Qty"
-                        value={line.quantity}
-                        onChange={(e) => {
-                          const updated = [...billLines];
-                          updated[idx].quantity = Number(e.target.value);
-                          setBillLines(updated);
-                        }}
-                        className="p-2 bg-white border border-gray-200 rounded-xl text-xs text-right font-mono"
-                      />
-
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="Rate ₹"
-                        value={line.rate}
-                        onChange={(e) => {
-                          const updated = [...billLines];
-                          updated[idx].rate = Number(e.target.value);
-                          setBillLines(updated);
-                        }}
-                        className="p-2 bg-white border border-gray-200 rounded-xl text-xs text-right font-mono"
-                      />
-
-                      {billLines.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setBillLines(billLines.filter((_, i) => i !== idx))}
-                          className="text-red-500 hover:text-red-700 p-1"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="text-right text-[11px] font-bold text-[#1C1C1C]">
-                      Line Total: ₹{(Number(line.quantity || 0) * Number(line.rate || 0)).toFixed(2)}
-                    </div>
+                {billFile && (
+                  <div className="mt-4 px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-xs text-green-800 font-semibold">
+                    Selected: {billFile.fileName}
                   </div>
-                ))}
+                )}
+              </div>
 
-                <div className="p-3 rounded-xl bg-[#F1E4C5]/40 border border-[#B8862D]/30 flex items-center justify-between font-bold text-xs">
-                  <span>Grand Total:</span>
-                  <span className="font-mono text-sm text-[#B8862D]">
-                    ₹{billLines.reduce((sum, l) => sum + Number(l.quantity || 0) * Number(l.rate || 0), 0).toFixed(2)}
-                  </span>
-                </div>
+              <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-[11px] text-gray-600">
+                <div className="font-bold text-gray-800">Automatic processing</div>
+                <div className="mt-1">Bill → OCR → Vendor / Invoice No / Date / Item / Qty / Rate / Tax / Total → Admin approval → Stock.</div>
+                <div className="mt-1 font-semibold text-amber-700">Uploading the bill does not add stock. Admin approval is required.</div>
               </div>
 
               <div>
@@ -1507,7 +1434,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
                   rows={2}
                   value={billNotes}
                   onChange={(e) => setBillNotes(e.target.value)}
-                  placeholder="e.g. Emergency purchase due to sudden guest surge..."
+                  placeholder="e.g. Emergency outlet purchase..."
                   className="w-full p-2.5 bg-[#FAF8F5] border border-gray-200 rounded-xl text-xs"
                 />
               </div>
@@ -1524,10 +1451,10 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
               <button
                 type="button"
                 onClick={handleSubmitLocalBill}
-                disabled={loading}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B8862D] text-white hover:bg-[#9c7124] shadow-xs"
+                disabled={loading || !billFile}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B8862D] text-white hover:bg-[#9c7124] shadow-xs disabled:opacity-50"
               >
-                Submit Bill for Approval
+                {loading ? 'Reading & Submitting…' : 'Submit Bill for Approval'}
               </button>
             </div>
           </div>
@@ -1543,7 +1470,7 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
                 <h3 className="text-base font-bold text-[#1C1C1C] font-mono">{viewPRModal.request_number}</h3>
-                <p className="text-xs text-[#707070]">Need Requirement Details</p>
+                <p className="text-xs text-[#707070]">Purchase Request Details</p>
               </div>
               <button onClick={() => setViewPRModal(null)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />

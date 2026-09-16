@@ -3750,6 +3750,226 @@ def submit_central_store_ocr_receiving(payload: Dict[str, Any] = Body(...), db: 
     return {"id":str(grn.id),"grn_number":grn.grn_number,"status":grn.status,"invoice_number":invoice_number,"invoice_amount":summary.get("invoice_amount"),"has_mismatch":summary.get("has_mismatch"),"mismatches":summary.get("mismatches") or [],"message":"OCR receiving submitted for Admin approval. Stock has not been posted yet."}
 
 
+# ------------------------------------------------------------------------------
+# OUTLET MY BILLS — DIRECT BILL OCR (NO PO / NO MANUAL ITEM ENTRY)
+# ------------------------------------------------------------------------------
+def _extract_direct_bill_vendor(text: str) -> Optional[str]:
+    for raw in text.splitlines()[:12]:
+        line = _normalise_ocr_text(raw)
+        low = line.lower()
+        if not line or len(line) < 3 or len(line) > 80:
+            continue
+        if any(token in low for token in ("invoice", "tax invoice", "bill no", "gstin", "date", "total", "amount", "qty")):
+            continue
+        if re.search(r"[a-zA-Z]", line):
+            return line
+    return None
+
+
+def _match_direct_bill_items(db: Session, company_id: Optional[str], text: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    lines = [_normalise_ocr_text(x) for x in text.splitlines() if _normalise_ocr_text(x)]
+    items_query = db.query(Item).filter(Item.is_active == True)
+    if company_id and hasattr(Item, "company_id"):
+        items_query = items_query.filter(Item.company_id == company_id)
+    catalog_items = items_query.all()
+    matched: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    used_item_ids: set[str] = set()
+
+    for raw in lines:
+        low = raw.lower()
+        if any(word in low for word in ("grand total", "net payable", "invoice total", "amount payable", "tax total", "discount total", "subtotal", "total amount")):
+            continue
+        numbers = _extract_line_numbers(raw)
+        if len(numbers) < 2:
+            continue
+
+        best_item = None
+        best_score = 0.0
+        raw_tokens = _token_set(raw)
+        for item in catalog_items:
+            if str(item.id) in used_item_ids:
+                continue
+            name = str(getattr(item, "name", "") or "")
+            code = str(getattr(item, "code", "") or "").strip().lower()
+            name_tokens = _token_set(name)
+            score = 0.0
+            if code and code in low:
+                score += 1.0
+            if name_tokens:
+                score += min(len(name_tokens & raw_tokens) / max(len(name_tokens), 1), 1.0) * 0.9
+            if score > best_score:
+                best_score = score
+                best_item = item
+
+        if not best_item or best_score < 0.55:
+            continue
+
+        if len(numbers) >= 3:
+            qty, rate, line_total = numbers[-3], numbers[-2], numbers[-1]
+        else:
+            qty, rate = numbers[-2], numbers[-1]
+            line_total = qty * rate
+        if qty <= 0 or rate < 0:
+            continue
+
+        matched.append({
+            "item_id": str(best_item.id),
+            "item_name": best_item.name,
+            "quantity": float(qty),
+            "unit": best_item.unit.symbol if getattr(best_item, "unit", None) else "UNIT",
+            "rate": float(rate),
+            "line_total": float(line_total),
+            "match_score": round(best_score, 3),
+            "ocr_line": raw[:240],
+        })
+        used_item_ids.add(str(best_item.id))
+
+    if not matched:
+        warnings.append("No inventory item could be matched confidently from the bill OCR.")
+    return matched, warnings
+
+
+@router.post("/my-bills/submit-ocr")
+def submit_outlet_my_bill_ocr(payload: Dict[str, Any] = Body(...), db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    branch_id = payload.get("branch_id")
+    file_name = str(payload.get("file_name") or "bill")
+    file_type = str(payload.get("file_type") or "")
+    file_base64 = str(payload.get("file_base64") or "")
+    platform = str(payload.get("platform") or "Local Supplier").strip()
+    purchase_date = str(payload.get("purchase_date") or "").strip()
+    manual_invoice_number = str(payload.get("invoice_number") or "").strip()
+    user_notes = str(payload.get("notes") or "").strip()
+
+    if not branch_id or not file_base64:
+        raise BadRequestException("branch_id and bill file are required.")
+    check_user_outlet_access(current_user, branch_id, db)
+
+    allowed = {"application/pdf", "image/jpeg", "image/jpg", "image/png", "image/webp"}
+    if file_type not in allowed:
+        raise BadRequestException("Supported bill formats: PDF, JPG, PNG, WEBP.")
+    try:
+        raw_bytes = base64.b64decode(file_base64)
+    except Exception:
+        raise BadRequestException("Invalid bill file data.")
+    if len(raw_bytes) < 16:
+        raise BadRequestException("Bill file is empty or corrupted.")
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise NotFoundException(f"Outlet branch '{branch_id}' not found.")
+    company_id = branch.company_id or current_user.company_id
+    warehouse = db.query(Warehouse).filter(Warehouse.branch_id == branch_id, Warehouse.is_active == True).first()
+    if not warehouse:
+        raise BadRequestException("No active outlet warehouse is configured for this branch.")
+
+    upload_dir = os.path.join(os.getcwd(), "uploads", "invoices")
+    os.makedirs(upload_dir, exist_ok=True)
+    ext = ".pdf" if file_type == "application/pdf" else ".webp" if "webp" in file_type else ".png" if "png" in file_type else ".jpg"
+    safe_name = f"mybill_{uuid.uuid4().hex[:12]}_{re.sub(r'[^A-Za-z0-9_.-]', '_', file_name)}"
+    if not safe_name.lower().endswith(ext):
+        safe_name += ext
+    with open(os.path.join(upload_dir, safe_name), "wb") as f:
+        f.write(raw_bytes)
+    storage_ref = f"uploads/invoices/{safe_name}"
+
+    ocr = _scan_invoice_file(storage_ref)
+    header = _parse_invoice_header(ocr.get("text") or "")
+    invoice_number = manual_invoice_number or header.get("invoice_number")
+    invoice_amount = header.get("invoice_amount")
+    if not invoice_number:
+        raise BadRequestException("Bill / Invoice number could not be read. Please upload a clearer bill.")
+    if invoice_amount is None or float(invoice_amount) <= 0:
+        raise BadRequestException("Bill total could not be read. Please upload a clear bill showing the final amount.")
+
+    duplicate = db.query(GoodsReceiveNote).filter(
+        GoodsReceiveNote.branch_id == branch_id,
+        GoodsReceiveNote.invoice_number == invoice_number,
+        GoodsReceiveNote.status != "REJECTED",
+    ).first()
+    if duplicate:
+        raise ConflictException(f"Bill / Invoice '{invoice_number}' has already been submitted for this outlet.")
+
+    matched_items, warnings = _match_direct_bill_items(db, company_id, ocr.get("text") or "")
+    if not matched_items:
+        raise BadRequestException("OCR could not confidently identify any inventory items from this bill. Please upload a clearer full bill; manual item entry is disabled for My Bills.")
+
+    vendor_name = _extract_direct_bill_vendor(ocr.get("text") or "") or platform
+    grn_number = f"MYB-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+    notes = (
+        f"[MY_BILL] [Platform: {platform}] [Vendor: {vendor_name}] "
+        f"[Invoice Date OCR: {header.get('invoice_date') or purchase_date or 'UNKNOWN'}] "
+        f"[INVOICE_STORAGE={storage_ref}] "
+        f"[OCR_WARNINGS={json.dumps(warnings, ensure_ascii=False)}] "
+        f"{user_notes}"
+    ).strip()
+
+    grn = GoodsReceiveNote(
+        company_id=company_id,
+        branch_id=branch_id,
+        warehouse_id=warehouse.id,
+        supplier_id=None,
+        po_id=None,
+        grn_number=grn_number,
+        receive_date=datetime.utcnow(),
+        invoice_number=invoice_number,
+        total_amount=Decimal(str(invoice_amount)),
+        status="PENDING_APPROVAL",
+        notes=notes,
+        received_by_id=current_user.id,
+    )
+    db.add(grn)
+    db.flush()
+
+    for row in matched_items:
+        qty = Decimal(str(row["quantity"]))
+        rate = Decimal(str(row["rate"]))
+        db.add(GoodsReceiveItem(
+            grn_id=grn.id,
+            po_item_id=None,
+            item_id=row["item_id"],
+            received_qty=qty,
+            accepted_qty=qty,
+            rejected_qty=Decimal("0"),
+            unit_price=rate,
+            total_price=qty * rate,
+            batch_number=None,
+            expiry_date=None,
+            qc_status="PENDING",
+            qc_notes="My Bill OCR - awaiting Head Office approval",
+        ))
+
+    log_procurement_audit(
+        db=db, user=current_user, action="SUBMIT_MY_BILL_OCR",
+        entity_type="GoodsReceiveNote", entity_id=grn.id,
+        company_id=company_id, branch_id=branch_id,
+        new_values={
+            "grn_number": grn.grn_number,
+            "invoice_number": invoice_number,
+            "invoice_amount": float(invoice_amount),
+            "platform": platform,
+            "vendor_name": vendor_name,
+            "items_count": len(matched_items),
+            "status": "PENDING_APPROVAL",
+        },
+    )
+    db.commit()
+    db.refresh(grn)
+
+    return {
+        "id": str(grn.id),
+        "grn_number": grn.grn_number,
+        "status": grn.status,
+        "invoice_number": invoice_number,
+        "invoice_amount": float(invoice_amount),
+        "vendor_name": vendor_name,
+        "invoice_date": header.get("invoice_date") or purchase_date or None,
+        "items": matched_items,
+        "warnings": warnings,
+        "message": "My Bill submitted for Head Office approval. Stock has not been posted yet.",
+    }
+
+
 # ==============================================================================
 # Twice-Monthly Closing & Stock Valuation Endpoints
 # ==============================================================================
