@@ -44,7 +44,10 @@ from app.core.exceptions import (
 )
 from app.models.user import User, UserBranch
 from app.models.organization import Company, Branch, Warehouse
-from app.models.inventory import Item, Unit, StockBalance, StockLedger, StockTransfer, StockTransferItem, StockMovementType, StockBatch
+from app.models.inventory import (
+    Item, Unit, StockBalance, StockLedger, StockTransfer, StockTransferItem,
+    StockMovementType, StockBatch, OutletStockBalance, OutletStockBatch, OutletStockLedger,
+)
 from app.models.procurement import (
     Supplier,
     SupplierItem,
@@ -2675,107 +2678,273 @@ def format_grn_response(grn: GoodsReceiveNote, db: Session) -> GoodsReceiveNoteR
     )
 
 
+def _uses_outlet_stock_for_grn(branch: Branch) -> bool:
+    """Return True only for real restaurant/outlet destinations.
+
+    Outlet Sales/Consumption uses branch-level outlet stock. Central Store and
+    production/warehouse locations keep using the existing warehouse stock
+    workflow.
+    """
+    branch_type = str(getattr(branch, "type", "") or "").upper()
+    return branch_type in {
+        "RESTAURANT",
+        "RESTAURANT_OUTLET",
+        "HOTEL",
+        "HYBRID",
+        "OUTLET",
+    }
+
+
 def post_stock_for_grn(grn: GoodsReceiveNote, db: Session, current_user: User):
     """
-    Idempotently posts stock from an approved GRN directly to destination warehouse
-    StockBalance and StockLedger, updates linked PO items received quantities, and
-    progresses PO status.
+    Idempotently post an approved GRN.
+
+    Central Store / production locations continue to post to the existing
+    warehouse StockBalance + StockLedger.
+
+    Real outlet destinations post ONLY to OutletStockBalance,
+    OutletStockBatch and OutletStockLedger. No Central Store or warehouse stock
+    is read or deducted for outlet receiving.
     """
     if grn.status in ["APPROVED", "RECEIVED", "QC_PASSED"]:
         return
 
+    branch = db.query(Branch).filter(
+        Branch.id == grn.branch_id,
+        Branch.company_id == grn.company_id,
+    ).first()
+    if not branch:
+        raise NotFoundException(f"Destination branch '{grn.branch_id}' not found.")
+
+    outlet_stock = _uses_outlet_stock_for_grn(branch)
+
     warehouse_id = grn.warehouse_id
-    if not warehouse_id:
-        wh = db.query(Warehouse).filter(Warehouse.branch_id == grn.branch_id, Warehouse.is_active == True).first()
-        if not wh:
-            raise NotFoundException(f"No active warehouse found for branch '{grn.branch_id}'.")
-        warehouse_id = wh.id
-        grn.warehouse_id = warehouse_id
+    if not outlet_stock:
+        if not warehouse_id:
+            wh = db.query(Warehouse).filter(
+                Warehouse.branch_id == grn.branch_id,
+                Warehouse.is_active == True,  # noqa: E712
+            ).first()
+            if not wh:
+                raise NotFoundException(
+                    f"No active warehouse found for branch '{branch.name}'."
+                )
+            warehouse_id = wh.id
+            grn.warehouse_id = warehouse_id
 
     po = None
     if grn.po_id:
-        po = db.query(PurchaseOrder).filter(PurchaseOrder.id == grn.po_id).first()
+        po = db.query(PurchaseOrder).filter(
+            PurchaseOrder.id == grn.po_id,
+            PurchaseOrder.company_id == grn.company_id,
+        ).first()
 
     for itm in grn.items:
-        # Calculate and update Moving Average Cost (MAC)
-        master_item = db.query(Item).filter(Item.id == itm.item_id).with_for_update().first()
-        if master_item:
+        accepted_qty = Decimal(str(itm.accepted_qty or 0))
+        if accepted_qty <= Decimal("0.0000"):
+            continue
+
+        master_item = db.query(Item).filter(
+            Item.id == itm.item_id,
+            Item.company_id == grn.company_id,
+            Item.is_active == True,  # noqa: E712
+        ).with_for_update().first()
+        if not master_item:
+            raise NotFoundException(f"Item '{itm.item_id}' not found.")
+
+        received_cost = Decimal(str(itm.unit_price or 0))
+
+        if outlet_stock:
+            # --------------------------------------------------------------
+            # OUTLET DIRECT/VENDOR RECEIVING
+            # --------------------------------------------------------------
+            balance = db.query(OutletStockBalance).filter(
+                OutletStockBalance.company_id == grn.company_id,
+                OutletStockBalance.branch_id == grn.branch_id,
+                OutletStockBalance.item_id == itm.item_id,
+            ).with_for_update().first()
+
+            if balance:
+                balance.quantity = (
+                    Decimal(str(balance.quantity or 0)) + accepted_qty
+                ).quantize(Decimal("0.0001"))
+                balance.updated_at = datetime.utcnow()
+            else:
+                balance = OutletStockBalance(
+                    id=str(uuid.uuid4()),
+                    company_id=grn.company_id,
+                    branch_id=grn.branch_id,
+                    item_id=itm.item_id,
+                    quantity=accepted_qty,
+                    min_stock_level=Decimal(str(master_item.min_stock_level or 0)),
+                    reorder_qty=Decimal(str(master_item.reorder_qty or 0)),
+                    updated_at=datetime.utcnow(),
+                )
+                db.add(balance)
+                db.flush()
+
+            batch_number = (
+                (itm.batch_number or "").strip()
+                or f"GRN-{grn.grn_number}-{str(itm.id)[-8:]}"
+            )
+
+            outlet_batch = db.query(OutletStockBatch).filter(
+                OutletStockBatch.company_id == grn.company_id,
+                OutletStockBatch.branch_id == grn.branch_id,
+                OutletStockBatch.item_id == itm.item_id,
+                OutletStockBatch.batch_number == batch_number,
+            ).with_for_update().first()
+
+            if outlet_batch:
+                outlet_batch.quantity = (
+                    Decimal(str(outlet_batch.quantity or 0)) + accepted_qty
+                ).quantize(Decimal("0.0001"))
+                outlet_batch.unit_cost = received_cost
+                outlet_batch.expiry_date = (
+                    itm.expiry_date.date()
+                    if hasattr(itm.expiry_date, "date")
+                    else itm.expiry_date
+                )
+                outlet_batch.is_active = outlet_batch.quantity > 0
+            else:
+                outlet_batch = OutletStockBatch(
+                    id=str(uuid.uuid4()),
+                    company_id=grn.company_id,
+                    branch_id=grn.branch_id,
+                    item_id=itm.item_id,
+                    batch_number=batch_number,
+                    quantity=accepted_qty,
+                    unit_cost=received_cost,
+                    expiry_date=(
+                        itm.expiry_date.date()
+                        if hasattr(itm.expiry_date, "date")
+                        else itm.expiry_date
+                    ),
+                    mfg_date=None,
+                    is_active=True,
+                )
+                db.add(outlet_batch)
+
+            db.add(
+                OutletStockLedger(
+                    id=str(uuid.uuid4()),
+                    company_id=grn.company_id,
+                    branch_id=grn.branch_id,
+                    item_id=itm.item_id,
+                    unit_id=master_item.unit_id,
+                    batch_number=batch_number,
+                    expiry_date=(
+                        itm.expiry_date.date()
+                        if hasattr(itm.expiry_date, "date")
+                        else itm.expiry_date
+                    ),
+                    movement_type="GRN",
+                    change_qty=accepted_qty,
+                    balance_qty=balance.quantity,
+                    unit_cost=received_cost,
+                    total_cost=Decimal(str(itm.total_price or (accepted_qty * received_cost))),
+                    reference_type="GRN",
+                    reference_id=grn.id,
+                    notes=f"Outlet receipt via GRN {grn.grn_number}",
+                    created_by_id=current_user.id,
+                    created_at=datetime.utcnow(),
+                )
+            )
+
+        else:
+            # --------------------------------------------------------------
+            # EXISTING WAREHOUSE RECEIVING — PRESERVED
+            # --------------------------------------------------------------
             old_qty = db.query(func.sum(StockBalance.quantity)).filter(
                 StockBalance.item_id == itm.item_id
             ).scalar() or Decimal("0.0000")
-            
             old_cost = Decimal(str(master_item.cost_price or 0))
-            received_qty = Decimal(str(itm.accepted_qty))
-            received_cost = Decimal(str(itm.unit_price or 0))
-            
             if old_qty <= 0:
                 master_item.cost_price = received_cost
             else:
-                total_val = (old_qty * old_cost) + (received_qty * received_cost)
-                new_qty = old_qty + received_qty
+                total_val = (old_qty * old_cost) + (accepted_qty * received_cost)
+                new_qty = old_qty + accepted_qty
                 if new_qty > 0:
-                    master_item.cost_price = (total_val / new_qty).quantize(Decimal("0.0001"))
+                    master_item.cost_price = (
+                        total_val / new_qty
+                    ).quantize(Decimal("0.0001"))
 
-        # 1. Update/Create StockBalance in destination warehouse
-        sb = db.query(StockBalance).filter(
-            StockBalance.warehouse_id == warehouse_id,
-            StockBalance.item_id == itm.item_id
-        ).first()
+            sb = db.query(StockBalance).filter(
+                StockBalance.warehouse_id == warehouse_id,
+                StockBalance.item_id == itm.item_id,
+            ).with_for_update().first()
 
-        new_balance = itm.accepted_qty
-        if sb:
-            sb.quantity = (sb.quantity or Decimal("0.0000")) + itm.accepted_qty
-            sb.updated_at = datetime.utcnow()
-            new_balance = sb.quantity
-        else:
-            sb = StockBalance(
-                warehouse_id=warehouse_id,
-                item_id=itm.item_id,
-                quantity=itm.accepted_qty,
-                min_stock_level=Decimal("0.0000"),
-                reorder_qty=Decimal("0.0000"),
-                updated_at=datetime.utcnow()
+            if sb:
+                sb.quantity = (
+                    Decimal(str(sb.quantity or 0)) + accepted_qty
+                ).quantize(Decimal("0.0001"))
+                sb.updated_at = datetime.utcnow()
+            else:
+                sb = StockBalance(
+                    warehouse_id=warehouse_id,
+                    item_id=itm.item_id,
+                    quantity=accepted_qty,
+                    min_stock_level=Decimal("0.0000"),
+                    reorder_qty=Decimal("0.0000"),
+                    updated_at=datetime.utcnow(),
+                )
+                db.add(sb)
+                db.flush()
+
+            db.add(
+                StockLedger(
+                    warehouse_id=warehouse_id,
+                    item_id=itm.item_id,
+                    batch_number=itm.batch_number,
+                    expiry_date=itm.expiry_date,
+                    movement_type="GRN",
+                    change_qty=accepted_qty,
+                    balance_qty=sb.quantity,
+                    unit_cost=received_cost,
+                    total_cost=Decimal(str(itm.total_price or (accepted_qty * received_cost))),
+                    reference_type="GRN",
+                    reference_id=grn.id,
+                    notes=f"Receipt via GRN {grn.grn_number}",
+                    created_by_id=current_user.id,
+                    created_at=datetime.utcnow(),
+                )
             )
-            db.add(sb)
 
-        # 2. Write to StockLedger
-        ledger_entry = StockLedger(
-            warehouse_id=warehouse_id,
-            item_id=itm.item_id,
-            batch_number=itm.batch_number,
-            expiry_date=itm.expiry_date,
-            movement_type='GRN',
-            change_qty=itm.accepted_qty,
-            balance_qty=new_balance,
-            unit_cost=itm.unit_price,
-            total_cost=itm.total_price,
-            reference_type="GRN",
-            reference_id=grn.id,
-            notes=f"Receipt via GRN {grn.grn_number}",
-            created_by_id=current_user.id,
-            created_at=datetime.utcnow(),
-        )
-        db.add(ledger_entry)
-
-        # 3. Update PO line item received qty if linked
+        # PO received quantity is common to both stock destinations.
         if itm.po_item_id:
-            po_itm = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.id == itm.po_item_id).first()
+            po_query = db.query(PurchaseOrderItem).filter(
+                PurchaseOrderItem.id == itm.po_item_id,
+            )
+            if po:
+                po_query = po_query.filter(PurchaseOrderItem.po_id == po.id)
+            po_itm = po_query.first()
             if po_itm:
-                po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm.accepted_qty
+                po_itm.received_qty = (
+                    Decimal(str(po_itm.received_qty or 0)) + accepted_qty
+                ).quantize(Decimal("0.0001"))
         elif po:
             po_itm = db.query(PurchaseOrderItem).filter(
                 PurchaseOrderItem.po_id == po.id,
-                PurchaseOrderItem.item_id == itm.item_id
+                PurchaseOrderItem.item_id == itm.item_id,
             ).first()
             if po_itm:
-                po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm.accepted_qty
+                po_itm.received_qty = (
+                    Decimal(str(po_itm.received_qty or 0)) + accepted_qty
+                ).quantize(Decimal("0.0001"))
 
-    # 4. If PO linked, calculate total ordered vs received
     if po:
         db.flush()
-        po_items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.po_id == po.id).all()
-        total_ord = sum([pi.ordered_qty for pi in po_items])
-        total_rec = sum([pi.received_qty or Decimal("0.0000") for pi in po_items])
+        po_items = db.query(PurchaseOrderItem).filter(
+            PurchaseOrderItem.po_id == po.id
+        ).all()
+        total_ord = sum(
+            (Decimal(str(pi.ordered_qty or 0)) for pi in po_items),
+            Decimal("0.0000"),
+        )
+        total_rec = sum(
+            (Decimal(str(pi.received_qty or 0)) for pi in po_items),
+            Decimal("0.0000"),
+        )
         if total_rec >= total_ord:
             po.status = POStatus.RECEIVED
         elif total_rec > Decimal("0.0000"):
@@ -2793,7 +2962,12 @@ def post_stock_for_grn(grn: GoodsReceiveNote, db: Session, current_user: User):
         entity_id=grn.id,
         company_id=grn.company_id,
         branch_id=grn.branch_id,
-        new_values={"grn_number": grn.grn_number, "status": "APPROVED", "total_amount": float(grn.total_amount or 0)}
+        new_values={
+            "grn_number": grn.grn_number,
+            "status": "APPROVED",
+            "stock_destination": "OUTLET" if outlet_stock else "WAREHOUSE",
+            "total_amount": float(grn.total_amount or 0),
+        },
     )
 
 
@@ -2910,73 +3084,10 @@ def create_goods_receive_note(
         db.add(grn_item)
 
     if not is_pending:
-        # Immediately post stock
-        for itm in items_to_create:
-            # 1. Update/Create StockBalance in destination warehouse
-            sb = db.query(StockBalance).filter(
-                StockBalance.warehouse_id == warehouse_id,
-                StockBalance.item_id == itm["item_id"]
-            ).first()
-
-            new_balance = itm["accepted_qty"]
-            if sb:
-                sb.quantity = (sb.quantity or Decimal("0.0000")) + itm["accepted_qty"]
-                sb.updated_at = datetime.utcnow()
-                new_balance = sb.quantity
-            else:
-                sb = StockBalance(
-                    warehouse_id=warehouse_id,
-                    item_id=itm["item_id"],
-                    quantity=itm["accepted_qty"],
-                    min_stock_level=Decimal("0.0000"),
-                    reorder_qty=Decimal("0.0000"),
-                    updated_at=datetime.utcnow()
-                )
-                db.add(sb)
-
-            # 2. Write to StockLedger
-            ledger_entry = StockLedger(
-                warehouse_id=warehouse_id,
-                item_id=itm["item_id"],
-                batch_number=itm["batch_number"],
-                expiry_date=itm["expiry_date"],
-                movement_type='GRN',
-                change_qty=itm["accepted_qty"],
-                balance_qty=new_balance,
-                unit_cost=itm["unit_price"],
-                total_cost=itm["total_price"],
-                reference_type="GRN",
-                reference_id=grn.id,
-                notes=f"Receipt via GRN {grn.grn_number}",
-                created_by_id=current_user.id,
-                created_at=datetime.utcnow(),
-            )
-            db.add(ledger_entry)
-
-            # 3. Update PO line item received qty if linked
-            if itm["po_item_id"]:
-                po_itm = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.id == itm["po_item_id"]).first()
-                if po_itm:
-                    po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm["accepted_qty"]
-            elif po:
-                po_itm = db.query(PurchaseOrderItem).filter(
-                    PurchaseOrderItem.po_id == po.id,
-                    PurchaseOrderItem.item_id == itm["item_id"]
-                ).first()
-                if po_itm:
-                    po_itm.received_qty = (po_itm.received_qty or Decimal("0.0000")) + itm["accepted_qty"]
-
-        # 4. If PO linked, calculate total ordered vs received
-        if po:
-            db.flush()
-            po_items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.po_id == po.id).all()
-            total_ord = sum([pi.ordered_qty for pi in po_items])
-            total_rec = sum([pi.received_qty or Decimal("0.0000") for pi in po_items])
-            if total_rec >= total_ord:
-                po.status = POStatus.RECEIVED
-            elif total_rec > Decimal("0.0000"):
-                po.status = POStatus.PARTIALLY_RECEIVED
-            po.updated_at = datetime.utcnow()
+        # Ensure newly-added GRN item rows are flushed before the shared
+        # stock-posting function reads grn.items.
+        db.flush()
+        post_stock_for_grn(grn, db, current_user)
 
     db.commit()
     db.refresh(grn)
