@@ -7,15 +7,21 @@ import {
   ArrowUpFromLine,
   Boxes,
   CheckCircle2,
+  ClipboardCheck,
   Clock3,
   RefreshCw,
   Search,
+  Send,
   Truck,
   Warehouse,
+  LockKeyhole,
+  XCircle,
 } from 'lucide-react';
 import { reportsApi } from '@/api/reports';
 import { apiClient } from '@/api/client';
-import { useOutlet } from '@/context/OutletContext';
+import { inventoryApi, type StockCount } from '@/api/inventory';
+import { useOutlet, getCurrentClosingPeriod } from '@/context/OutletContext';
+import { useAuth } from '@/context/AuthContext';
 import { Button, Badge, EmptyState, StatCard } from '@/components/ui';
 
 interface StockRow {
@@ -177,10 +183,35 @@ export default function CentralStoreStockWorkspace() {
 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [activeSection, setActiveSection] = useState<'STOCK' | 'MOVEMENTS'>('STOCK');
+  const [activeSection, setActiveSection] = useState<'STOCK' | 'COUNT' | 'MOVEMENTS'>('STOCK');
   const [message, setMessage] = useState('');
 
   const centralBranchId = activeOutlet?.id;
+  const closingInfo = getCurrentClosingPeriod();
+  const { user } = useAuth();
+
+  const [centralWarehouseId, setCentralWarehouseId] = useState('');
+  const [stockCount, setStockCount] = useState<StockCount | null>(null);
+  const [physicalQty, setPhysicalQty] = useState<Record<string, string>>({});
+  const [countLoading, setCountLoading] = useState(false);
+  const [countSaving, setCountSaving] = useState(false);
+
+  const reviewRoles = new Set([
+    'SUPER_ADMIN',
+    'SUPERADMIN',
+    'OWNER',
+    'ADMIN',
+    'HQ_ADMIN',
+    'HEAD_OFFICE_ADMIN',
+    'CENTRAL_PURCHASE_MANAGER',
+    'CENTRAL_STORE_MANAGER',
+    'GENERAL_MANAGER',
+    'DIRECTOR',
+  ]);
+  const roleName = String(
+    typeof user?.role === 'object' ? user?.role?.name : user?.role || '',
+  ).trim().toUpperCase();
+  const canReview = reviewRoles.has(roleName);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -307,6 +338,217 @@ export default function CentralStoreStockWorkspace() {
     load();
   }, [load]);
 
+  const loadCentralWarehouse = useCallback(async () => {
+    if (!centralBranchId) {
+      setCentralWarehouseId('');
+      return;
+    }
+
+    try {
+      const warehouses = await inventoryApi.getWarehouses({ branch_id: centralBranchId });
+      const active = (warehouses || []).filter((warehouse: any) => warehouse?.is_active !== false);
+      const preferred = active.find((warehouse: any) => {
+        const label = `${warehouse?.name || ''} ${warehouse?.code || ''}`.toLowerCase();
+        return label.includes('central store') || label.includes('central');
+      });
+      setCentralWarehouseId(String((preferred || active[0] || warehouses?.[0])?.id || ''));
+    } catch (error: any) {
+      setCentralWarehouseId('');
+      setMessage(
+        error?.response?.data?.detail ||
+          error?.message ||
+          'Central Store warehouse could not be resolved.',
+      );
+    }
+  }, [centralBranchId]);
+
+  useEffect(() => {
+    loadCentralWarehouse();
+  }, [loadCentralWarehouse]);
+
+  const loadCount = useCallback(async () => {
+    if (!centralWarehouseId) {
+      setStockCount(null);
+      setPhysicalQty({});
+      return;
+    }
+
+    setCountLoading(true);
+    try {
+      const counts = await inventoryApi.getStockCounts({ warehouse_id: centralWarehouseId });
+      const periodCount = (counts || [])
+        .filter((count) => {
+          if (!count.count_date) return false;
+          const countDate = new Date(count.count_date);
+          return countDate >= new Date(closingInfo.startDate) && countDate <= new Date(closingInfo.endDate);
+        })
+        .sort((a, b) =>
+          String(b.updated_at || b.created_at || '').localeCompare(
+            String(a.updated_at || a.created_at || ''),
+          ),
+        )[0];
+
+      setStockCount(periodCount || null);
+
+      if (periodCount?.items?.length) {
+        const nextPhysical: Record<string, string> = {};
+        periodCount.items.forEach((item) => {
+          nextPhysical[item.item_id] = String(item.physical_qty ?? '');
+        });
+        setPhysicalQty(nextPhysical);
+      } else {
+        setPhysicalQty({});
+      }
+    } catch (error: any) {
+      setMessage(
+        error?.response?.data?.detail ||
+          error?.message ||
+          'Central Store stock count could not be loaded.',
+      );
+    } finally {
+      setCountLoading(false);
+    }
+  }, [centralWarehouseId, closingInfo.startDate, closingInfo.endDate]);
+
+  useEffect(() => {
+    if (activeSection === 'COUNT') {
+      loadCount();
+    }
+  }, [activeSection, loadCount]);
+
+  const countRows = useMemo(() => {
+    if (stockCount?.items?.length) {
+      return stockCount.items.map((item) => ({
+        item_id: item.item_id,
+        item_name: item.item_name || 'Item',
+        item_code: item.item_code || '',
+        unit_symbol: item.unit_symbol || '',
+        system_qty: Number(item.system_qty || 0),
+        unit_cost: Number(item.unit_cost || 0),
+      }));
+    }
+
+    return rows
+      .filter((row) => row.item_id)
+      .map((row) => ({
+        item_id: String(row.item_id),
+        item_name: row.item_name || 'Item',
+        item_code: row.item_code || '',
+        unit_symbol: row.unit || '',
+        system_qty: Number(row.quantity || 0),
+        unit_cost: Number(row.unit_cost || 0),
+      }));
+  }, [rows, stockCount]);
+
+  const countLocked =
+    stockCount?.status === 'IN_PROGRESS' ||
+    stockCount?.status === 'COMPLETED' ||
+    stockCount?.status === 'CANCELLED';
+  const countCompleted = stockCount?.status === 'COMPLETED';
+  const countPending = stockCount?.status === 'IN_PROGRESS';
+  const countRejected = stockCount?.status === 'CANCELLED';
+
+  const startCount = async () => {
+    if (!centralWarehouseId || !centralBranchId) {
+      setMessage('Central Store stock warehouse is not configured.');
+      return;
+    }
+
+    setCountSaving(true);
+    setMessage('');
+    try {
+      const created = await inventoryApi.createStockCount({
+        warehouse_id: centralWarehouseId,
+        branch_id: centralBranchId,
+        count_date: new Date().toISOString(),
+        notes: `Central Store stock count - ${closingInfo.label}`,
+      });
+      setStockCount(created);
+      setPhysicalQty({});
+      setMessage(`Stock count ${created.count_number} started.`);
+    } catch (error: any) {
+      setMessage(
+        error?.response?.data?.detail ||
+          error?.message ||
+          'Could not start Central Store stock count.',
+      );
+    } finally {
+      setCountSaving(false);
+    }
+  };
+
+  const submitCount = async () => {
+    if (!stockCount) {
+      await startCount();
+      return;
+    }
+
+    const missing = countRows.some((row) => {
+      const raw = physicalQty[row.item_id];
+      return raw === undefined || raw.trim() === '' || Number(raw) < 0 || Number.isNaN(Number(raw));
+    });
+
+    if (missing) {
+      setMessage('Please enter physical quantity for every Central Store stock item before submitting.');
+      return;
+    }
+
+    setCountSaving(true);
+    setMessage('');
+    try {
+      const updated = await inventoryApi.submitStockCount(stockCount.id, {
+        notes: `Submitted for Central Store - ${closingInfo.label}`,
+        items: countRows.map((row) => ({
+          item_id: row.item_id,
+          physical_qty: Number(physicalQty[row.item_id]),
+          system_qty: row.system_qty,
+          unit_cost: row.unit_cost,
+        })),
+      });
+      setStockCount(updated);
+      setMessage('Central Store stock count submitted for admin approval.');
+    } catch (error: any) {
+      setMessage(
+        error?.response?.data?.detail ||
+          error?.message ||
+          'Central Store stock count submission failed.',
+      );
+    } finally {
+      setCountSaving(false);
+    }
+  };
+
+  const reviewCount = async (approved: boolean) => {
+    if (!stockCount || !canReview) return;
+
+    setCountSaving(true);
+    setMessage('');
+    try {
+      const result = approved
+        ? await inventoryApi.approveStockCount(stockCount.id, `Approved for Central Store - ${closingInfo.label}`)
+        : await inventoryApi.rejectStockCount(
+            stockCount.id,
+            'Central Store stock count rejected. Please recount and resubmit.',
+          );
+      setStockCount(result);
+      setMessage(
+        approved
+          ? 'Central Store stock count approved, reconciled and locked.'
+          : 'Central Store stock count rejected. A new count can be started after recount.',
+      );
+      await load();
+      await loadCount();
+    } catch (error: any) {
+      setMessage(
+        error?.response?.data?.detail ||
+          error?.message ||
+          (approved ? 'Approval failed.' : 'Rejection failed.'),
+      );
+    } finally {
+      setCountSaving(false);
+    }
+  };
+
   const visibleRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return rows;
@@ -400,15 +642,16 @@ export default function CentralStoreStockWorkspace() {
         <StatCard title="Transferred This Month" value={money(transferredThisMonth)} icon={<ArrowUpFromLine className="w-4 h-4" />} />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-1 bg-white rounded-xl border border-gray-200">
+      <div className="grid grid-cols-3 gap-2 p-1 bg-white rounded-xl border border-gray-200">
         {[
           ['STOCK', 'Current Stock'],
+          ['COUNT', 'Stock Count'],
           ['MOVEMENTS', 'Stock Movement'],
         ].map(([key, label]) => (
           <button
             key={key}
             type="button"
-            onClick={() => setActiveSection(key as 'STOCK' | 'MOVEMENTS')}
+            onClick={() => setActiveSection(key as 'STOCK' | 'COUNT' | 'MOVEMENTS')}
             className={`px-3 py-2.5 rounded-lg text-xs font-bold transition-all ${
               activeSection === key
                 ? 'bg-[#F1E4C5] text-[#B8862D]'
@@ -496,6 +739,150 @@ export default function CentralStoreStockWorkspace() {
             )}
           </div>
         </>
+      ) : activeSection === 'COUNT' ? (
+        <section className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-gray-100 flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.16em] font-bold text-[#B8862D]">Physical Count</p>
+              <h2 className="mt-1 text-lg font-bold">Central Store — {closingInfo.label}</h2>
+              <p className="text-xs text-[#707070] mt-1">
+                Central Store physical stock → submit → admin approval/rejection → approved = verified & locked.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {(!stockCount || countRejected) && (
+                <button
+                  type="button"
+                  onClick={startCount}
+                  disabled={countSaving || countLoading || !centralWarehouseId}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#C79A3B] text-white text-xs font-bold hover:bg-[#B8862D] disabled:opacity-60"
+                >
+                  <ClipboardCheck className="w-4 h-4" />
+                  {countRejected ? 'Start New Count' : 'Start Count'}
+                </button>
+              )}
+              {stockCount?.status === 'DRAFT' && (
+                <button
+                  type="button"
+                  onClick={submitCount}
+                  disabled={countSaving || countLoading || !countRows.length}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257348] disabled:opacity-60"
+                >
+                  <Send className="w-4 h-4" /> Submit Count
+                </button>
+              )}
+              {stockCount && countPending && canReview && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => reviewCount(true)}
+                    disabled={countSaving}
+                    className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Approve & Lock
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => reviewCount(false)}
+                    disabled={countSaving}
+                    className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#D9534F] text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    <XCircle className="w-4 h-4" /> Reject
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {countLoading ? (
+            <div className="py-16 flex items-center justify-center text-[#707070] gap-3">
+              <RefreshCw className="w-5 h-5 animate-spin text-[#C79A3B]" /> Loading Central Store count…
+            </div>
+          ) : !centralWarehouseId ? (
+            <div className="py-16 text-center text-sm text-[#707070]">
+              No active Central Store stock warehouse is configured.
+            </div>
+          ) : stockCount?.status === 'IN_PROGRESS' ? (
+            <div className="px-4 py-3 bg-[#3978B8]/10 border-b border-[#3978B8]/20 text-xs text-[#245E93] font-medium flex items-center gap-2">
+              <ClipboardCheck className="w-4 h-4" /> Submitted and waiting for admin review.
+            </div>
+          ) : countCompleted ? (
+            <div className="px-4 py-3 bg-[#2E8B57]/10 border-b border-[#2E8B57]/20 text-xs text-[#2E8B57] font-medium flex items-center gap-2">
+              <LockKeyhole className="w-4 h-4" /> Approved, verified and locked. Central Store stock ledger has been reconciled to physical quantity.
+            </div>
+          ) : countRejected ? (
+            <div className="px-4 py-3 bg-[#D9534F]/10 border-b border-[#D9534F]/20 text-xs text-[#A93F3A] font-medium flex items-center gap-2">
+              <XCircle className="w-4 h-4" /> Rejected. Recount Central Store stock and start a new count for this period.
+            </div>
+          ) : !stockCount ? (
+            <div className="px-4 py-10 sm:px-8 text-center text-sm text-[#707070]">
+              No Central Store stock count has been started for this period.
+            </div>
+          ) : null}
+
+          {stockCount && (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-sm">
+                <thead className="bg-[#FAF8F5] text-[10px] uppercase tracking-wider text-[#707070]">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Item</th>
+                    <th className="px-4 py-3 text-right">System Qty</th>
+                    <th className="px-4 py-3 text-right">Physical Qty</th>
+                    <th className="px-4 py-3 text-right">Variance</th>
+                    <th className="px-4 py-3 text-right">Variance Value</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                  {countRows.map((row) => {
+                    const raw = physicalQty[row.item_id];
+                    const physical = raw === undefined || raw === '' ? null : Number(raw);
+                    const variance = physical === null ? 0 : physical - row.system_qty;
+                    const varianceValue = variance * row.unit_cost;
+                    return (
+                      <tr key={row.item_id}>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold">{row.item_name}</div>
+                          <div className="text-[11px] text-[#707070]">
+                            {row.item_code || '—'} · {row.unit_symbol || 'UNIT'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold">
+                          {Number(row.system_qty || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 })}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={raw ?? ''}
+                            disabled={countLocked || countSaving}
+                            onChange={(event) =>
+                              setPhysicalQty((prev) => ({
+                                ...prev,
+                                [row.item_id]: event.target.value,
+                              }))
+                            }
+                            className="w-28 px-3 py-2 rounded-lg border border-gray-200 text-right outline-none focus:border-[#C79A3B] disabled:bg-[#F5F3EE] disabled:text-[#777]"
+                          />
+                        </td>
+                        <td className={`px-4 py-3 text-right font-semibold ${
+                          variance > 0 ? 'text-[#2E8B57]' : variance < 0 ? 'text-[#D9534F]' : 'text-[#707070]'
+                        }`}>
+                          {physical === null ? '—' : `${variance > 0 ? '+' : ''}${Number(variance).toLocaleString('en-IN', { maximumFractionDigits: 3 })}`}
+                        </td>
+                        <td className={`px-4 py-3 text-right ${
+                          varianceValue > 0 ? 'text-[#2E8B57]' : varianceValue < 0 ? 'text-[#D9534F]' : 'text-[#707070]'
+                        }`}>
+                          {physical === null ? '—' : money(varianceValue)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

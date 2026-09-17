@@ -15,6 +15,68 @@ import {
   StockLedgerEntry,
 } from '../types/inventory.types';
 
+export interface StockCountItem {
+  id: string;
+  stock_count_id: string;
+  item_id: string;
+  system_qty: number | string;
+  physical_qty: number | string;
+  variance_qty: number | string;
+  unit_cost?: number | string | null;
+  variance_value?: number | string | null;
+  batch_number?: string | null;
+  remarks?: string | null;
+  item_name?: string | null;
+  item_code?: string | null;
+  unit_symbol?: string | null;
+}
+
+export interface StockCount {
+  id: string;
+  company_id: string;
+  branch_id?: string | null;
+  warehouse_id: string;
+  count_number: string;
+  count_date: string;
+  status: 'DRAFT' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | string;
+  created_by_id?: string | null;
+  verified_by_id?: string | null;
+  notes?: string | null;
+  warehouse_name?: string | null;
+  items: StockCountItem[];
+  total_variance_value?: number | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface StockCountCreateInput {
+  warehouse_id: string;
+  branch_id?: string;
+  count_number?: string;
+  count_date?: string;
+  notes?: string;
+  items?: Array<{
+    item_id: string;
+    physical_qty: number;
+    system_qty?: number;
+    unit_cost?: number;
+    batch_number?: string;
+    remarks?: string;
+  }>;
+}
+
+export interface StockCountSubmitInput {
+  notes?: string;
+  items: Array<{
+    item_id: string;
+    physical_qty: number;
+    system_qty?: number;
+    unit_cost?: number;
+    batch_number?: string;
+    remarks?: string;
+  }>;
+}
+
 export const inventoryApi = {
   // Categories
   getCategories: async (): Promise<Category[]> => {
@@ -118,7 +180,6 @@ export const inventoryApi = {
     return res.data;
   },
 
-
   getReorderRecommendations: async (params?: { warehouse_id?: string }) => {
     const res = await apiClient.get('/inventory/reorder-recommendations', { params });
     return res.data;
@@ -136,6 +197,45 @@ export const inventoryApi = {
   getWarehouses: async (params?: { branch_id?: string }): Promise<Warehouse[]> => {
     const res = await apiClient.get<Warehouse[]>('/organization/warehouses', {
       params,
+    });
+    return res.data;
+  },
+
+  // Physical Stock Count
+  getStockCounts: async (params?: {
+    warehouse_id?: string;
+    status?: string;
+    scope_all?: boolean;
+  }): Promise<StockCount[]> => {
+    const res = await apiClient.get<StockCount[]>('/inventory/stock-counts', { params });
+    return res.data;
+  },
+
+  createStockCount: async (payload: StockCountCreateInput): Promise<StockCount> => {
+    const res = await apiClient.post<StockCount>('/inventory/stock-counts', payload);
+    return res.data;
+  },
+
+  getStockCount: async (countId: string): Promise<StockCount> => {
+    const res = await apiClient.get<StockCount>(`/inventory/stock-counts/${countId}`);
+    return res.data;
+  },
+
+  submitStockCount: async (countId: string, payload: StockCountSubmitInput): Promise<StockCount> => {
+    const res = await apiClient.put<StockCount>(`/inventory/stock-counts/${countId}/submit`, payload);
+    return res.data;
+  },
+
+  approveStockCount: async (countId: string, notes?: string): Promise<StockCount> => {
+    const res = await apiClient.post<StockCount>(`/inventory/stock-counts/${countId}/approve`, {
+      notes,
+    });
+    return res.data;
+  },
+
+  rejectStockCount: async (countId: string, reason: string): Promise<StockCount> => {
+    const res = await apiClient.post<StockCount>(`/inventory/stock-counts/${countId}/reject`, {
+      reason,
     });
     return res.data;
   },

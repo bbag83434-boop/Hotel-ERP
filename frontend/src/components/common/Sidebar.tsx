@@ -260,13 +260,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       defaultOpen: true,
       items: [{ id: 'inventory', label: 'Stock', icon: Boxes, initialTab: undefined, badge: null }],
     },
-    {
-      label: 'Stock Count',
-      defaultOpen: true,
-      items: [
-        { id: 'closing' as WorkspaceId, label: 'Stock Count', icon: CalendarDays, initialTab: undefined, badge: '1st–15th / Month End' },
-      ],
-    },
   ];
   // Navigation groups actually rendered: full suite for management, outlet-only for regular outlet users.
   const centralStoreNavGroups = [
@@ -279,7 +272,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'centralStoreRequirement', label: 'Own Requirement', icon: Warehouse, initialTab: undefined, badge: 'CS' },
         { id: 'centralStoreTransfer', label: 'Transfer / Dispatch', icon: Truck, initialTab: undefined, badge: 'TRF' },
         { id: 'centralStorePurchaseReceiving', label: 'Purchase Receiving', icon: FileText, initialTab: undefined, badge: 'GRN' },
-        { id: 'closing', label: 'Bi-Monthly Closing', icon: CalendarDays, initialTab: undefined, badge: '1st–15th / Month End' },
       ],
     },
   ];
@@ -298,6 +290,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setOpenGroups((current) => ({ ...current, [activeGroup.label]: true }));
     }
   }, [activeWorkspace]);
+
+  // When the active scope changes, never leave a scope-specific workspace
+  // open from the previous scope. Keep common workspaces (for example
+  // Purchase or Dashboard) open, but move Central Store <-> Outlet stock
+  // screens to the matching stock workspace automatically.
+  React.useEffect(() => {
+    const isVisibleInCurrentScope = renderedGroups.some((group) =>
+      group.items.some((item) => item.id === activeWorkspace)
+    );
+
+    if (isVisibleInCurrentScope) return;
+
+    const fallbackWorkspace: WorkspaceId = showCentralStoreSuite
+      ? 'centralStoreStock'
+      : isOutletScope
+        ? 'inventory'
+        : 'dashboard';
+
+    setActiveWorkspace(fallbackWorkspace);
+  }, [
+    activeOutlet?.id,
+    activeOutlet?.type,
+    isHeadOffice,
+    activeWorkspace,
+    showCentralStoreSuite,
+    isOutletScope,
+  ]);
 
 
   const handleSelect = (id: WorkspaceId, initialTab?: 'needs' | 'receiving' | 'my_bills') => {

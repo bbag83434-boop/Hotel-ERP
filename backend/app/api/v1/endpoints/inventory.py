@@ -3,7 +3,7 @@ import json
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any, Dict
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, select
 
@@ -2655,193 +2655,41 @@ def receive_stock_transfer(
 # 6. PHYSICAL STOCK COUNT & VARIANCE RECONCILIATION
 # =============================================================
 
-@router.get("/stock-counts", response_model=List[StockCountResponse])
-def get_stock_counts(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    warehouse_id: Optional[str] = None,
-    status_filter: Optional[str] = Query(None, alias="status"),
-):
-    query = db.query(StockCount).filter(StockCount.company_id == current_user.company_id)
-    if warehouse_id:
-        query = query.filter(StockCount.warehouse_id == warehouse_id)
-    if status_filter:
-        query = query.filter(StockCount.status == status_filter)
-
-    counts = query.order_by(StockCount.created_at.desc()).all()
-    results = []
-    for sc in counts:
-        wh = db.query(Warehouse).filter(Warehouse.id == sc.warehouse_id).first()
-        items_res = []
-        tot_var = Decimal("0.0000")
-        for itm in sc.items:
-            item_obj = db.query(Item).filter(Item.id == itm.item_id).first()
-            u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
-            var_val = Decimal(str(itm.variance_value or 0))
-            tot_var += var_val
-            items_res.append(
-                StockCountItemResponse(
-                    id=itm.id,
-                    stock_count_id=itm.stock_count_id,
-                    item_id=itm.item_id,
-                    system_qty=Decimal(str(itm.system_qty)),
-                    physical_qty=Decimal(str(itm.physical_qty)),
-                    variance_qty=Decimal(str(itm.variance_qty)),
-                    unit_cost=Decimal(str(itm.unit_cost)) if itm.unit_cost is not None else None,
-                    variance_value=var_val,
-                    batch_number=itm.batch_number,
-                    remarks=itm.remarks,
-                    item_name=item_obj.name if item_obj else None,
-                    item_code=item_obj.code if item_obj else None,
-                    unit_symbol=u.symbol if u else None,
-                )
-            )
-        results.append(
-            StockCountResponse(
-                id=sc.id,
-                company_id=sc.company_id,
-                branch_id=sc.branch_id,
-                warehouse_id=sc.warehouse_id,
-                count_number=sc.count_number,
-                count_date=sc.count_date,
-                status=sc.status,
-                created_by_id=sc.created_by_id,
-                verified_by_id=sc.verified_by_id,
-                notes=sc.notes,
-                warehouse_name=wh.name if wh else None,
-                items=items_res,
-                total_variance_value=tot_var,
-                created_at=sc.created_at,
-                updated_at=sc.updated_at,
-            )
-        )
-    return results
-
-@router.post("/stock-counts", response_model=StockCountResponse, status_code=status.HTTP_201_CREATED)
-def create_stock_count(
-    count_in: StockCountCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
+def _ensure_stock_count_access(
+    stock_count: StockCount,
+    current_user: User,
+    db: Session,
+    outlet_id: Optional[str] = None,
+) -> Warehouse:
+    """Authoritative outlet/warehouse scope check for every stock-count action."""
     wh = db.query(Warehouse).filter(
-        Warehouse.id == count_in.warehouse_id,
+        Warehouse.id == stock_count.warehouse_id,
         Warehouse.company_id == current_user.company_id,
     ).first()
     if not wh:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Warehouse not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock count warehouse not found")
 
-    cnt_num = count_in.count_number or f"CNT-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    branch_id = stock_count.branch_id or wh.branch_id
+    if _is_inventory_manager(current_user):
+        return wh
 
-    stock_count = StockCount(
-        company_id=current_user.company_id,
-        branch_id=count_in.branch_id or wh.branch_id,
-        warehouse_id=count_in.warehouse_id,
-        count_number=cnt_num,
-        count_date=count_in.count_date or datetime.now(timezone.utc),
-        status="DRAFT",
-        created_by_id=current_user.id,
-        notes=count_in.notes,
-    )
-    db.add(stock_count)
-    db.flush()
+    allowed_branch_ids = _user_branch_ids(current_user)
+    if outlet_id and branch_id != outlet_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: stock count belongs to another outlet.")
+    if branch_id not in allowed_branch_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: you are not assigned to this outlet.")
 
+    return wh
+
+
+def _stock_count_response(sc: StockCount, wh: Warehouse, db: Session) -> StockCountResponse:
     items_res = []
-    tot_var = Decimal("0.0000")
-    if count_in.items:
-        for itm_in in count_in.items:
-            item_obj = db.query(Item).filter(
-                Item.id == itm_in.item_id,
-                Item.company_id == current_user.company_id,
-            ).first()
-            if not item_obj:
-                continue
-
-            bal = db.query(StockBalance).filter(
-                StockBalance.warehouse_id == count_in.warehouse_id,
-                StockBalance.item_id == itm_in.item_id,
-            ).first()
-            sys_qty = itm_in.system_qty if itm_in.system_qty is not None else (Decimal(str(bal.quantity)) if bal else Decimal("0.0000"))
-            phys_qty = itm_in.physical_qty
-            var_qty = phys_qty - sys_qty
-            unit_cost = itm_in.unit_cost if itm_in.unit_cost is not None else Decimal(str(item_obj.cost_price or 0))
-            var_val = var_qty * unit_cost
-            tot_var += var_val
-
-            count_item = StockCountItem(
-                stock_count_id=stock_count.id,
-                item_id=itm_in.item_id,
-                system_qty=sys_qty,
-                physical_qty=phys_qty,
-                variance_qty=var_qty,
-                unit_cost=unit_cost,
-                variance_value=var_val,
-                batch_number=itm_in.batch_number,
-                remarks=itm_in.remarks,
-            )
-            db.add(count_item)
-            db.flush()
-
-            u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first()
-            items_res.append(
-                StockCountItemResponse(
-                    id=count_item.id,
-                    stock_count_id=stock_count.id,
-                    item_id=item_obj.id,
-                    system_qty=sys_qty,
-                    physical_qty=phys_qty,
-                    variance_qty=var_qty,
-                    unit_cost=unit_cost,
-                    variance_value=var_val,
-                    batch_number=count_item.batch_number,
-                    remarks=count_item.remarks,
-                    item_name=item_obj.name,
-                    item_code=item_obj.code,
-                    unit_symbol=u.symbol if u else None,
-                )
-            )
-
-    db.commit()
-    db.refresh(stock_count)
-
-    return StockCountResponse(
-        id=stock_count.id,
-        company_id=stock_count.company_id,
-        branch_id=stock_count.branch_id,
-        warehouse_id=stock_count.warehouse_id,
-        count_number=stock_count.count_number,
-        count_date=stock_count.count_date,
-        status=stock_count.status,
-        created_by_id=stock_count.created_by_id,
-        verified_by_id=stock_count.verified_by_id,
-        notes=stock_count.notes,
-        warehouse_name=wh.name,
-        items=items_res,
-        total_variance_value=tot_var,
-        created_at=stock_count.created_at,
-        updated_at=stock_count.updated_at,
-    )
-
-@router.get("/stock-counts/{count_id}", response_model=StockCountResponse)
-def get_stock_count(
-    count_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    sc = db.query(StockCount).filter(
-        StockCount.id == count_id,
-        StockCount.company_id == current_user.company_id,
-    ).first()
-    if not sc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock count not found")
-
-    wh = db.query(Warehouse).filter(Warehouse.id == sc.warehouse_id).first()
-    items_res = []
-    tot_var = Decimal("0.0000")
+    total_variance = Decimal("0.0000")
     for itm in sc.items:
         item_obj = db.query(Item).filter(Item.id == itm.item_id).first()
         u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
-        var_val = Decimal(str(itm.variance_value or 0))
-        tot_var += var_val
+        variance_value = Decimal(str(itm.variance_value or 0))
+        total_variance += variance_value
         items_res.append(
             StockCountItemResponse(
                 id=itm.id,
@@ -2851,7 +2699,7 @@ def get_stock_count(
                 physical_qty=Decimal(str(itm.physical_qty)),
                 variance_qty=Decimal(str(itm.variance_qty)),
                 unit_cost=Decimal(str(itm.unit_cost)) if itm.unit_cost is not None else None,
-                variance_value=var_val,
+                variance_value=variance_value,
                 batch_number=itm.batch_number,
                 remarks=itm.remarks,
                 item_name=item_obj.name if item_obj else None,
@@ -2873,17 +2721,187 @@ def get_stock_count(
         notes=sc.notes,
         warehouse_name=wh.name if wh else None,
         items=items_res,
-        total_variance_value=tot_var,
+        total_variance_value=total_variance,
         created_at=sc.created_at,
         updated_at=sc.updated_at,
     )
 
-@router.put("/stock-counts/{count_id}/submit", response_model=StockCountResponse)
-def submit_stock_count(
-    count_id: str,
-    submit_in: StockCountSubmit,
+
+def _apply_stock_count_approval(sc: StockCount, current_user: User, db: Session) -> None:
+    """Apply physical quantities atomically, then mark the count completed/locked."""
+    if str(sc.status) != "IN_PROGRESS":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only IN_PROGRESS stock counts can be approved. Current status: {sc.status}",
+        )
+
+    for itm in sc.items:
+        var_qty = Decimal(str(itm.variance_qty or 0))
+        physical_qty = Decimal(str(itm.physical_qty or 0))
+        unit_cost = Decimal(str(itm.unit_cost or 0))
+        variance_value = Decimal(str(itm.variance_value or (var_qty * unit_cost)))
+
+        bal = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == sc.warehouse_id,
+            StockBalance.item_id == itm.item_id,
+        ).with_for_update().first()
+
+        if not bal:
+            bal = StockBalance(
+                warehouse_id=sc.warehouse_id,
+                item_id=itm.item_id,
+                quantity=physical_qty,
+            )
+            db.add(bal)
+            db.flush()
+        else:
+            bal.quantity = physical_qty
+
+        if var_qty != 0:
+            db.add(
+                StockLedger(
+                    company_id=sc.company_id,
+                    branch_id=sc.branch_id,
+                    warehouse_id=sc.warehouse_id,
+                    item_id=itm.item_id,
+                    movement_type="ADJUSTMENT",
+                    change_qty=var_qty,
+                    balance_qty=physical_qty,
+                    unit_cost=unit_cost,
+                    total_cost=variance_value,
+                    reference_type="STOCK_COUNT",
+                    reference_id=sc.id,
+                    notes=f"Physical Count Approval #{sc.count_number}: variance={var_qty}",
+                    created_by_id=current_user.id,
+                )
+            )
+
+    sc.status = "COMPLETED"
+    sc.verified_by_id = current_user.id
+
+
+def _current_stock_count_period(now_value: Optional[datetime] = None):
+    now_value = now_value or datetime.now(timezone.utc)
+    year = now_value.year
+    month = now_value.month
+    day = now_value.day
+    if day <= 15:
+        start_day = 1
+        end_day = 15
+    else:
+        start_day = 16
+        end_day = __import__("calendar").monthrange(year, month)[1]
+    start_dt = datetime(year, month, start_day, tzinfo=timezone.utc)
+    end_dt = datetime(year, month, end_day, 23, 59, 59, 999999, tzinfo=timezone.utc)
+    return start_dt, end_dt
+
+
+# =============================================================
+# 6. PHYSICAL STOCK COUNT & VARIANCE RECONCILIATION
+# =============================================================
+
+@router.get("/stock-counts", response_model=List[StockCountResponse])
+def get_stock_counts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
+    warehouse_id: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    scope_all: bool = False,
+):
+    query = db.query(StockCount).filter(StockCount.company_id == current_user.company_id)
+
+    # HQ/management review can explicitly request all outlets.
+    if not (scope_all and _is_inventory_manager(current_user)):
+        if outlet_id:
+            query = query.join(Warehouse, Warehouse.id == StockCount.warehouse_id).filter(Warehouse.branch_id == outlet_id)
+        elif not _is_inventory_manager(current_user):
+            user_bids = list(_user_branch_ids(current_user))
+            if not user_bids:
+                return []
+            query = query.join(Warehouse, Warehouse.id == StockCount.warehouse_id).filter(Warehouse.branch_id.in_(user_bids))
+
+    if warehouse_id:
+        query = query.filter(StockCount.warehouse_id == warehouse_id)
+    if status_filter:
+        query = query.filter(StockCount.status == status_filter)
+
+    counts = query.order_by(StockCount.created_at.desc()).all()
+    return [
+        _stock_count_response(
+            sc,
+            db.query(Warehouse).filter(Warehouse.id == sc.warehouse_id).first(),
+            db,
+        )
+        for sc in counts
+    ]
+
+
+@router.post("/stock-counts", response_model=StockCountResponse, status_code=status.HTTP_201_CREATED)
+def create_stock_count(
+    count_in: StockCountCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
+):
+    wh = db.query(Warehouse).filter(
+        Warehouse.id == count_in.warehouse_id,
+        Warehouse.company_id == current_user.company_id,
+    ).first()
+    if not wh:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Warehouse not found")
+
+    if not _is_inventory_manager(current_user):
+        allowed_branch_ids = _user_branch_ids(current_user)
+        if outlet_id and wh.branch_id != outlet_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: warehouse belongs to another outlet.")
+        if wh.branch_id not in allowed_branch_ids:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: you are not assigned to this outlet.")
+
+    count_date = count_in.count_date or datetime.now(timezone.utc)
+    if count_date.tzinfo is None:
+        count_date = count_date.replace(tzinfo=timezone.utc)
+    else:
+        count_date = count_date.astimezone(timezone.utc)
+    period_start, period_end = _current_stock_count_period(count_date)
+    if count_date < period_start or count_date > period_end:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock count date must be inside the current 1–15 or 16–month-end period.")
+
+    # Only one open count should exist for an outlet warehouse in the active period.
+    existing = db.query(StockCount).filter(
+        StockCount.company_id == current_user.company_id,
+        StockCount.warehouse_id == wh.id,
+        StockCount.count_date >= period_start,
+        StockCount.count_date <= period_end,
+        StockCount.status.in_(["DRAFT", "IN_PROGRESS"]),
+    ).order_by(StockCount.created_at.desc()).first()
+    if existing:
+        return _stock_count_response(existing, wh, db)
+
+    cnt_num = count_in.count_number or f"CNT-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
+    stock_count = StockCount(
+        company_id=current_user.company_id,
+        branch_id=wh.branch_id,
+        warehouse_id=wh.id,
+        count_number=cnt_num,
+        count_date=count_date,
+        status="DRAFT",
+        created_by_id=current_user.id,
+        notes=count_in.notes,
+    )
+    db.add(stock_count)
+    db.commit()
+    db.refresh(stock_count)
+    return _stock_count_response(stock_count, wh, db)
+
+
+@router.get("/stock-counts/{count_id}", response_model=StockCountResponse)
+def get_stock_count(
+    count_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
 ):
     sc = db.query(StockCount).filter(
         StockCount.id == count_id,
@@ -2892,14 +2910,34 @@ def submit_stock_count(
     if not sc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock count not found")
 
-    if sc.status in ["APPROVED", "ADJUSTED"]:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stock count already in '{sc.status}' status")
+    wh = _ensure_stock_count_access(sc, current_user, db, outlet_id)
+    return _stock_count_response(sc, wh, db)
 
-    # Clear old items if updating
+
+@router.put("/stock-counts/{count_id}/submit", response_model=StockCountResponse)
+def submit_stock_count(
+    count_id: str,
+    submit_in: StockCountSubmit,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
+):
+    sc = db.query(StockCount).filter(
+        StockCount.id == count_id,
+        StockCount.company_id == current_user.company_id,
+    ).first()
+    if not sc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock count not found")
+
+    wh = _ensure_stock_count_access(sc, current_user, db, outlet_id)
+    if str(sc.status) in {"COMPLETED", "CANCELLED"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stock count is already in '{sc.status}' status")
+
+    if not submit_in.items:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one stock-count item is required before submission.")
+
+    # Snapshot physical-count lines. System quantity is re-read from DB so frontend cannot spoof it.
     db.query(StockCountItem).filter(StockCountItem.stock_count_id == sc.id).delete()
-
-    items_res = []
-    tot_var = Decimal("0.0000")
     for itm_in in submit_in.items:
         item_obj = db.query(Item).filter(
             Item.id == itm_in.item_id,
@@ -2912,43 +2950,25 @@ def submit_stock_count(
             StockBalance.warehouse_id == sc.warehouse_id,
             StockBalance.item_id == itm_in.item_id,
         ).first()
-        sys_qty = itm_in.system_qty if itm_in.system_qty is not None else (Decimal(str(bal.quantity)) if bal else Decimal("0.0000"))
-        phys_qty = itm_in.physical_qty
-        var_qty = phys_qty - sys_qty
+        sys_qty = Decimal(str(bal.quantity if bal else 0))
+        phys_qty = Decimal(str(itm_in.physical_qty))
+        if phys_qty < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Physical quantity cannot be negative for item {item_obj.name}.")
         unit_cost = itm_in.unit_cost if itm_in.unit_cost is not None else Decimal(str(item_obj.cost_price or 0))
+        var_qty = phys_qty - sys_qty
         var_val = var_qty * unit_cost
-        tot_var += var_val
 
-        count_item = StockCountItem(
-            stock_count_id=sc.id,
-            item_id=itm_in.item_id,
-            system_qty=sys_qty,
-            physical_qty=phys_qty,
-            variance_qty=var_qty,
-            unit_cost=unit_cost,
-            variance_value=var_val,
-            batch_number=itm_in.batch_number,
-            remarks=itm_in.remarks,
-        )
-        db.add(count_item)
-        db.flush()
-
-        u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first()
-        items_res.append(
-            StockCountItemResponse(
-                id=count_item.id,
+        db.add(
+            StockCountItem(
                 stock_count_id=sc.id,
-                item_id=item_obj.id,
+                item_id=itm_in.item_id,
                 system_qty=sys_qty,
                 physical_qty=phys_qty,
                 variance_qty=var_qty,
                 unit_cost=unit_cost,
                 variance_value=var_val,
-                batch_number=count_item.batch_number,
-                remarks=count_item.remarks,
-                item_name=item_obj.name,
-                item_code=item_obj.code,
-                unit_symbol=u.symbol if u else None,
+                batch_number=itm_in.batch_number,
+                remarks=itm_in.remarks,
             )
         )
 
@@ -2958,25 +2978,63 @@ def submit_stock_count(
 
     db.commit()
     db.refresh(sc)
+    return _stock_count_response(sc, wh, db)
 
-    wh = db.query(Warehouse).filter(Warehouse.id == sc.warehouse_id).first()
-    return StockCountResponse(
-        id=sc.id,
-        company_id=sc.company_id,
-        branch_id=sc.branch_id,
-        warehouse_id=sc.warehouse_id,
-        count_number=sc.count_number,
-        count_date=sc.count_date,
-        status=sc.status,
-        created_by_id=sc.created_by_id,
-        verified_by_id=sc.verified_by_id,
-        notes=sc.notes,
-        warehouse_name=wh.name if wh else None,
-        items=items_res,
-        total_variance_value=tot_var,
-        created_at=sc.created_at,
-        updated_at=sc.updated_at,
-    )
+
+@router.post("/stock-counts/{count_id}/approve", response_model=StockCountResponse)
+def approve_stock_count(
+    count_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if not _is_inventory_manager(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only authorised management users can approve stock counts.")
+
+    sc = db.query(StockCount).filter(
+        StockCount.id == count_id,
+        StockCount.company_id == current_user.company_id,
+    ).with_for_update().first()
+    if not sc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock count not found")
+
+    wh = _ensure_stock_count_access(sc, current_user, db)
+    _apply_stock_count_approval(sc, current_user, db)
+    if payload.get("notes"):
+        sc.notes = (sc.notes or "") + f" | {payload.get('notes')}"
+    db.commit()
+    db.refresh(sc)
+    return _stock_count_response(sc, wh, db)
+
+
+@router.post("/stock-counts/{count_id}/reject", response_model=StockCountResponse)
+def reject_stock_count(
+    count_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if not _is_inventory_manager(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only authorised management users can reject stock counts.")
+
+    sc = db.query(StockCount).filter(
+        StockCount.id == count_id,
+        StockCount.company_id == current_user.company_id,
+    ).with_for_update().first()
+    if not sc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock count not found")
+    wh = _ensure_stock_count_access(sc, current_user, db)
+
+    if str(sc.status) != "IN_PROGRESS":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Only IN_PROGRESS stock counts can be rejected. Current status: {sc.status}")
+
+    reason = str(payload.get("reason") or "Rejected by management; recount required.").strip()
+    sc.status = "CANCELLED"
+    sc.notes = (sc.notes or "") + f" | REJECTED: {reason}"
+    db.commit()
+    db.refresh(sc)
+    return _stock_count_response(sc, wh, db)
+
 
 @router.put("/stock-counts/{count_id}/adjust", response_model=StockCountResponse)
 def adjust_stock_count(
@@ -2984,103 +3042,22 @@ def adjust_stock_count(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    """Legacy approval alias kept for compatibility; management-only."""
+    if not _is_inventory_manager(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only authorised management users can adjust/approve stock counts.")
+
     sc = db.query(StockCount).filter(
         StockCount.id == count_id,
         StockCount.company_id == current_user.company_id,
-    ).first()
+    ).with_for_update().first()
     if not sc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock count not found")
 
-    if sc.status == "COMPLETED":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock count has already been adjusted into inventory")
-
-    # Apply physical quantity to StockBalance and record StockLedger ADJUSTMENT
-    tot_var = Decimal("0.0000")
-    items_res = []
-    for itm in sc.items:
-        var_qty = Decimal(str(itm.variance_qty))
-        phys_qty = Decimal(str(itm.physical_qty))
-        unit_cost = Decimal(str(itm.unit_cost or 0))
-        var_val = Decimal(str(itm.variance_value or (var_qty * unit_cost)))
-        tot_var += var_val
-
-        # Lock and update stock balance
-        bal = db.query(StockBalance).filter(
-            StockBalance.warehouse_id == sc.warehouse_id,
-            StockBalance.item_id == itm.item_id,
-        ).with_for_update().first()
-
-        if not bal:
-            bal = StockBalance(
-                warehouse_id=sc.warehouse_id,
-                item_id=itm.item_id,
-                quantity=phys_qty,
-            )
-            db.add(bal)
-            db.flush()
-        else:
-            bal.quantity = phys_qty
-
-        # Write ADJUSTMENT ledger entry if there was variance
-        if var_qty != 0:
-            ledger = StockLedger(
-                warehouse_id=sc.warehouse_id,
-                item_id=itm.item_id,
-                movement_type="ADJUSTMENT",
-                change_qty=var_qty,
-                balance_qty=phys_qty,
-                unit_cost=unit_cost,
-                total_cost=var_val,
-                reference_type="STOCK_COUNT",
-                reference_id=sc.id,
-                notes=f"Physical Count Variance Reconciliation #{sc.count_number}: variance={var_qty}",
-                created_by_id=current_user.id,
-            )
-            db.add(ledger)
-
-        item_obj = db.query(Item).filter(Item.id == itm.item_id).first()
-        u = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
-        items_res.append(
-            StockCountItemResponse(
-                id=itm.id,
-                stock_count_id=sc.id,
-                item_id=itm.item_id,
-                system_qty=Decimal(str(itm.system_qty)),
-                physical_qty=phys_qty,
-                variance_qty=var_qty,
-                unit_cost=unit_cost,
-                variance_value=var_val,
-                batch_number=itm.batch_number,
-                remarks=itm.remarks,
-                item_name=item_obj.name if item_obj else None,
-                item_code=item_obj.code if item_obj else None,
-                unit_symbol=u.symbol if u else None,
-            )
-        )
-
-    sc.status = "COMPLETED"
-    sc.verified_by_id = current_user.id
+    wh = _ensure_stock_count_access(sc, current_user, db)
+    _apply_stock_count_approval(sc, current_user, db)
     db.commit()
     db.refresh(sc)
-
-    wh = db.query(Warehouse).filter(Warehouse.id == sc.warehouse_id).first()
-    return StockCountResponse(
-        id=sc.id,
-        company_id=sc.company_id,
-        branch_id=sc.branch_id,
-        warehouse_id=sc.warehouse_id,
-        count_number=sc.count_number,
-        count_date=sc.count_date,
-        status=sc.status,
-        created_by_id=sc.created_by_id,
-        verified_by_id=sc.verified_by_id,
-        notes=sc.notes,
-        warehouse_name=wh.name if wh else None,
-        items=items_res,
-        total_variance_value=tot_var,
-        created_at=sc.created_at,
-        updated_at=sc.updated_at,
-    )
+    return _stock_count_response(sc, wh, db)
 
 
 # =============================================================
@@ -3092,6 +3069,7 @@ def adjust_stock_direct(
     adj_in: StockAdjustmentCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
 ):
     wh = db.query(Warehouse).filter(
         Warehouse.id == adj_in.warehouse_id,
@@ -3099,6 +3077,13 @@ def adjust_stock_direct(
     ).first()
     if not wh:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Warehouse not found")
+
+    if not _is_inventory_manager(current_user):
+        user_bids = _user_branch_ids(current_user)
+        if outlet_id and wh.branch_id != outlet_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: warehouse belongs to another outlet.")
+        if wh.branch_id not in user_bids:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: you are not assigned to this outlet.")
 
     item_obj = db.query(Item).filter(
         Item.id == adj_in.item_id,
@@ -3941,6 +3926,7 @@ def get_reorder_recommendations(
     warehouse_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    outlet_id: Optional[str] = Depends(optional_outlet_scope),
 ):
     query = (
         db.query(StockBalance, Warehouse, Item, Unit)
@@ -3952,6 +3938,18 @@ def get_reorder_recommendations(
             Item.is_active == True,
         )
     )
+    if outlet_id:
+        query = query.filter(Warehouse.branch_id == outlet_id)
+    elif not _is_inventory_manager(current_user):
+        user_bids = list(_user_branch_ids(current_user))
+        if not user_bids:
+            return ReorderRecommendationResponse(
+                total_items_to_reorder=0,
+                total_estimated_replenishment_cost=Decimal("0.0000"),
+                recommendations=[],
+            )
+        query = query.filter(Warehouse.branch_id.in_(user_bids))
+
     if warehouse_id:
         query = query.filter(StockBalance.warehouse_id == warehouse_id)
 

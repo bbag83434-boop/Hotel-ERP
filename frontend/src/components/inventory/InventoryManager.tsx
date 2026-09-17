@@ -1,7 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { inventoryApi } from '@/api/inventory';
+import {
+  inventoryApi,
+  type StockCount,
+} from '@/api/inventory';
 import { organizationApi } from '@/api/organization';
 import {
   Item,
@@ -17,7 +20,8 @@ import {
   ReorderRecommendation,
 } from '@/types/inventory.types';
 import { Warehouse } from '@/types/organization.types';
-import { useOutlet } from '@/context/OutletContext';
+import { getCurrentClosingPeriod, useOutlet } from '@/context/OutletContext';
+import { useAuth } from '@/context/AuthContext';
 import {
   Boxes,
   Package,
@@ -34,11 +38,15 @@ import {
   ArrowRight,
   TrendingDown,
   Warehouse as WarehouseIcon,
+  ClipboardCheck,
+  LockKeyhole,
+  Send,
+  XCircle,
 } from 'lucide-react';
 
-export const InventoryManager: React.FC = () => {
+const InventoryManagerAdmin: React.FC = () => {
   const { currentOutlet } = useOutlet();
-  const [subTab, setSubTab] = useState<'balances' | 'alerts' | 'reorder' | 'ledger' | 'items' | 'transfers' | 'categories'>('balances');
+  const [subTab, setSubTab] = useState<'balances' | 'alerts' | 'reorder' | 'ledger' | 'items' | 'transfers' | 'categories' | 'stock-counts'>('balances');
 
   // Domain Data
   const [balances, setBalances] = useState<StockBalance[]>([]);
@@ -147,14 +155,6 @@ export const InventoryManager: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
-
-  // Keep operational stock screens fresh without requiring a manual refresh.
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') loadData();
-    }, 30000);
-    return () => window.clearInterval(timer);
   }, [loadData]);
 
   // Form Handlers
@@ -325,7 +325,7 @@ export const InventoryManager: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
             <span>Sync</span>
           </button>
-          {subTab === 'balances' && (
+      {subTab === 'balances' && (
             <button
               onClick={() => setShowAdjustmentModal(true)}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#2E8B57] hover:bg-[#2E8B57]/90 text-white text-xs font-semibold shadow-md transition-all active:scale-95"
@@ -491,6 +491,22 @@ export const InventoryManager: React.FC = () => {
         </button>
 
         <button
+          onClick={() => { setSubTab('stock-counts'); setSearchQuery(''); }}
+          className={`p-4 rounded-xl text-left border transition-all ${
+            subTab === 'stock-counts'
+              ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
+              : 'bg-white/80 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
+          }`}
+        >
+          <div className="flex items-center justify-between text-[#707070] mb-1">
+            <span className="text-xs font-semibold">Stock Count Review</span>
+            <ClipboardCheck className="w-4 h-4 text-[#3978B8]" />
+          </div>
+          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">Review</p>
+          <p className="text-[10px] text-[#3978B8] mt-1 font-medium">Approve / reject submitted counts</p>
+        </button>
+
+        <button
           onClick={() => { setSubTab('categories'); setSearchQuery(''); }}
           className={`p-4 rounded-xl text-left border transition-all ${
             subTab === 'categories'
@@ -510,7 +526,7 @@ export const InventoryManager: React.FC = () => {
       {/* Sub-Tabs & Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
         <div className="flex border-b border-[rgba(45,45,45,0.08)] space-x-3 overflow-x-auto">
-          {(['balances', 'alerts', 'reorder', 'ledger', 'items', 'transfers', 'categories'] as const).map((tab) => (
+          {(['balances', 'alerts', 'reorder', 'ledger', 'items', 'transfers', 'categories', 'stock-counts'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => { setSubTab(tab); setSearchQuery(''); }}
@@ -520,7 +536,7 @@ export const InventoryManager: React.FC = () => {
                   : 'border-transparent text-[#707070] hover:text-[#1C1C1C]'
               }`}
             >
-              {tab === 'balances' ? 'Live Balances' : tab === 'alerts' ? 'Stock Alerts' : tab === 'reorder' ? 'Reorder Queue' : tab === 'ledger' ? 'Stock History' : tab === 'items' ? 'Items Catalogue' : tab === 'transfers' ? 'Inter-Outlet Transfers' : 'Categories & Units'}
+              {tab === 'balances' ? 'Live Balances' : tab === 'alerts' ? 'Stock Alerts' : tab === 'reorder' ? 'Reorder Queue' : tab === 'ledger' ? 'Stock History' : tab === 'items' ? 'Items Catalogue' : tab === 'transfers' ? 'Inter-Outlet Transfers' : tab === 'stock-counts' ? 'Stock Count Review' : 'Categories & Units'}
             </button>
           ))}
         </div>
@@ -563,6 +579,10 @@ export const InventoryManager: React.FC = () => {
       ) : (
         <div>
           {/* SUBTAB 1: Live Balances */}
+          {subTab === 'stock-counts' && (
+            <StockCountReviewWorkspace />
+          )}
+
           {subTab === 'balances' && (
             <div className="space-y-4">
               {filteredBalances.length === 0 ? (
@@ -1296,6 +1316,643 @@ export const InventoryManager: React.FC = () => {
       )}
     </div>
   );
+};
+
+
+type OutletStockScope = {
+  id: string;
+  code?: string;
+  name?: string;
+  type?: string;
+};
+
+const STOCK_COUNT_REVIEW_ROLES = new Set([
+  'SUPER_ADMIN',
+  'SUPERADMIN',
+  'OWNER',
+  'ADMIN',
+  'HQ_ADMIN',
+  'HEAD_OFFICE_ADMIN',
+  'CENTRAL_PURCHASE_MANAGER',
+  'CENTRAL_STORE_MANAGER',
+  'GENERAL_MANAGER',
+  'DIRECTOR',
+]);
+
+const getRoleName = (user: any): string => {
+  const raw = typeof user?.role === 'object' ? user?.role?.name : user?.role;
+  return String(raw || '').trim().toUpperCase();
+};
+
+const moneyINR = (value: number) =>
+  `₹${Number(value || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const formatQty = (value: number) =>
+  Number(value || 0).toLocaleString('en-IN', {
+    maximumFractionDigits: 3,
+  });
+
+const countDateInPeriod = (dateValue: string | undefined, start: string, end: string) => {
+  if (!dateValue) return false;
+  const date = new Date(dateValue);
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  return date >= startDate && date <= endDate;
+};
+
+const getApiError = (error: any, fallback: string) =>
+  error?.response?.data?.detail ||
+  error?.response?.data?.message ||
+  error?.message ||
+  fallback;
+
+interface OutletStockWorkspaceProps {
+  outlet: OutletStockScope;
+}
+
+const OutletStockWorkspace: React.FC<OutletStockWorkspaceProps> = ({ outlet }) => {
+  const { user } = useAuth();
+  const closingInfo = getCurrentClosingPeriod();
+  const isCentralStore = String(outlet.type || '').toUpperCase() === 'CENTRAL_STORE';
+  const scopeLabel = isCentralStore ? 'Central Store' : (outlet.name || 'Outlet');
+  const isSaltLakeKitchen = !isCentralStore && (
+    String(outlet.code || '').toUpperCase() === 'BB-01' ||
+    String(outlet.name || '').toLowerCase().includes('salt lake')
+  );
+
+  const [activeTab, setActiveTab] = useState<'stock' | 'count'>('stock');
+  const [balances, setBalances] = useState<any[]>([]);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
+  const [warehouseId, setWarehouseId] = useState<string>('');
+  const [stockCount, setStockCount] = useState<StockCount | null>(null);
+  const [physicalQty, setPhysicalQty] = useState<Record<string, string>>({});
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [countLoading, setCountLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const roleName = getRoleName(user);
+  const canReview = STOCK_COUNT_REVIEW_ROLES.has(roleName);
+
+  const loadStock = useCallback(async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const branchWarehouses = await inventoryApi.getWarehouses({ branch_id: outlet.id });
+      setWarehouses(branchWarehouses || []);
+
+      const selected = branchWarehouses?.[0];
+      const nextWarehouseId = selected?.id || '';
+      setWarehouseId(nextWarehouseId);
+
+      if (!nextWarehouseId) {
+        setBalances([]);
+        return;
+      }
+
+      const data = await inventoryApi.getStockBalances({ warehouse_id: nextWarehouseId });
+      setBalances(data || []);
+    } catch (error: any) {
+      setMessage({ type: 'error', text: getApiError(error, 'Stock could not be loaded.') });
+      setBalances([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [outlet.id]);
+
+  const loadCount = useCallback(async () => {
+    if (!warehouseId) {
+      setStockCount(null);
+      setPhysicalQty({});
+      return;
+    }
+
+    setCountLoading(true);
+    try {
+      const counts = await inventoryApi.getStockCounts({ warehouse_id: warehouseId });
+      const periodCount = (counts || [])
+        .filter((row) => countDateInPeriod(row.count_date, closingInfo.startDate, closingInfo.endDate))
+        .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))[0];
+
+      setStockCount(periodCount || null);
+
+      if (periodCount?.items?.length) {
+        const nextPhysical: Record<string, string> = {};
+        periodCount.items.forEach((item) => {
+          nextPhysical[item.item_id] = String(item.physical_qty ?? '');
+        });
+        setPhysicalQty(nextPhysical);
+      } else {
+        setPhysicalQty({});
+      }
+    } catch (error: any) {
+      setMessage({ type: 'error', text: getApiError(error, 'Stock count could not be loaded.') });
+    } finally {
+      setCountLoading(false);
+    }
+  }, [warehouseId, closingInfo.startDate, closingInfo.endDate]);
+
+  useEffect(() => {
+    loadStock();
+  }, [loadStock]);
+
+  useEffect(() => {
+    if (activeTab === 'count') {
+      loadCount();
+    }
+  }, [activeTab, loadCount]);
+
+  const currentRows = balances.map((row: any) => ({
+    ...row,
+    quantityNumber: Number(row.quantity || 0),
+    costNumber: Number(row.avg_unit_cost || 0),
+  }));
+
+  const filteredRows = currentRows.filter((row: any) =>
+    `${row.item_name || ''} ${row.item_code || ''}`.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const totalQty = currentRows.reduce((sum, row) => sum + row.quantityNumber, 0);
+  const stockValue = currentRows.reduce((sum, row) => sum + row.quantityNumber * row.costNumber, 0);
+  const lowStockCount = currentRows.filter((row) => {
+    const min = Number(row.min_stock_level || 0);
+    return min > 0 && row.quantityNumber <= min;
+  }).length;
+
+  const countRows = stockCount?.items?.length
+    ? stockCount.items.map((item) => ({
+        item_id: item.item_id,
+        item_name: item.item_name || 'Item',
+        item_code: item.item_code || '',
+        unit_symbol: item.unit_symbol || '',
+        system_qty: Number(item.system_qty || 0),
+        unit_cost: Number(item.unit_cost || 0),
+      }))
+    : currentRows.map((row) => ({
+        item_id: String(row.item_id),
+        item_name: row.item_name || 'Item',
+        item_code: row.item_code || '',
+        unit_symbol: row.unit_symbol || '',
+        system_qty: row.quantityNumber,
+        unit_cost: row.costNumber,
+      }));
+
+  const countLocked = stockCount?.status === 'IN_PROGRESS' || stockCount?.status === 'COMPLETED' || stockCount?.status === 'CANCELLED';
+  const countCompleted = stockCount?.status === 'COMPLETED';
+  const countPending = stockCount?.status === 'IN_PROGRESS';
+  const countRejected = stockCount?.status === 'CANCELLED';
+
+  const startCount = async () => {
+    if (!warehouseId) {
+      setMessage({ type: 'error', text: 'No stock warehouse is configured for this outlet.' });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      const created = await inventoryApi.createStockCount({
+        warehouse_id: warehouseId,
+        branch_id: outlet.id,
+        count_date: new Date().toISOString(),
+        notes: `${isCentralStore ? 'Central Store' : 'Bi-monthly stock count'} - ${closingInfo.label}`,
+      });
+      setStockCount(created);
+      setPhysicalQty({});
+      setMessage({ type: 'success', text: `Stock count ${created.count_number} started.` });
+    } catch (error: any) {
+      setMessage({ type: 'error', text: getApiError(error, 'Could not start stock count.') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitCount = async () => {
+    if (!stockCount) {
+      await startCount();
+      return;
+    }
+
+    const missing = countRows.some((row) => {
+      const raw = physicalQty[row.item_id];
+      return raw === undefined || raw.trim() === '' || Number(raw) < 0 || Number.isNaN(Number(raw));
+    });
+
+    if (missing) {
+      setMessage({ type: 'error', text: 'Please enter physical quantity for every stock item before submitting.' });
+      return;
+    }
+
+    setSaving(true);
+    setMessage(null);
+    try {
+      const updated = await inventoryApi.submitStockCount(stockCount.id, {
+        notes: `Submitted for ${closingInfo.label}`,
+        items: countRows.map((row) => ({
+          item_id: row.item_id,
+          physical_qty: Number(physicalQty[row.item_id]),
+          system_qty: row.system_qty,
+          unit_cost: row.unit_cost,
+        })),
+      });
+      setStockCount(updated);
+      setMessage({ type: 'success', text: 'Stock count submitted for admin approval.' });
+    } catch (error: any) {
+      setMessage({ type: 'error', text: getApiError(error, 'Stock count submission failed.') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reviewApproval = async (approved: boolean) => {
+    if (!stockCount || !canReview) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const result = approved
+        ? await inventoryApi.approveStockCount(stockCount.id, `Approved for ${closingInfo.label}`)
+        : await inventoryApi.rejectStockCount(stockCount.id, 'Stock count rejected by admin. Please recount and resubmit.');
+      setStockCount(result);
+      setMessage({
+        type: approved ? 'success' : 'error',
+        text: approved ? 'Stock count approved, reconciled and locked.' : 'Stock count rejected. A new count can be started.',
+      });
+      await loadStock();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: getApiError(error, approved ? 'Approval failed.' : 'Rejection failed.') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-5 text-[#1C1C1C]">
+      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.18em] font-bold text-[#B8862D]">{isCentralStore ? 'Central Store Stock' : 'Outlet Stock'}</p>
+          <h1 className="mt-1 text-2xl sm:text-3xl font-bold font-['Outfit']">{scopeLabel} — Stock</h1>
+          <p className="mt-1 text-sm text-[#707070]">Only this {isCentralStore ? 'Central Store' : 'outlet'}'s stock is shown. Warehouse selection is intentionally hidden.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => activeTab === 'stock' ? loadStock() : loadCount()}
+          disabled={loading || countLoading}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] text-xs font-bold hover:bg-[#FAF8F5] disabled:opacity-60"
+        >
+          <RefreshCw className={`w-4 h-4 ${(loading || countLoading) ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-4">
+          <p className="text-xs text-[#707070]">Items</p>
+          <p className="mt-1 text-2xl font-bold font-['Outfit']">{currentRows.length}</p>
+        </div>
+        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-4">
+          <p className="text-xs text-[#707070]">Total Qty</p>
+          <p className="mt-1 text-2xl font-bold font-['Outfit']">{formatQty(totalQty)}</p>
+        </div>
+        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-4">
+          <p className="text-xs text-[#707070]">Stock Value</p>
+          <p className="mt-1 text-2xl font-bold font-['Outfit']">{moneyINR(stockValue)}</p>
+        </div>
+        <div className={`rounded-2xl border p-4 ${lowStockCount ? 'bg-[#FFF7E8] border-[#D99625]/30' : 'bg-white border-[rgba(45,45,45,0.08)]'}`}>
+          <p className="text-xs text-[#707070]">Low Stock</p>
+          <p className="mt-1 text-2xl font-bold font-['Outfit']">{lowStockCount}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 border-b border-[rgba(45,45,45,0.08)]">
+        <button
+          type="button"
+          onClick={() => setActiveTab('stock')}
+          className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === 'stock' ? 'border-[#C79A3B] text-[#B8862D]' : 'border-transparent text-[#707070]'}`}
+        >
+          Current Stock
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('count')}
+          className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === 'count' ? 'border-[#C79A3B] text-[#B8862D]' : 'border-transparent text-[#707070]'}`}
+        >
+          Stock Count
+        </button>
+        {isSaltLakeKitchen && (
+          <div className="ml-auto hidden sm:flex items-center gap-2 text-[11px] font-bold text-[#3978B8]">
+            <ClipboardCheck className="w-4 h-4" /> Kitchen Operations enabled for BB-01
+          </div>
+        )}
+      </div>
+
+      {message && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${message.type === 'success' ? 'bg-[#2E8B57]/10 border-[#2E8B57]/30 text-[#2E8B57]' : 'bg-[#D9534F]/10 border-[#D9534F]/30 text-[#D9534F]'}`}>
+          {message.text}
+        </div>
+      )}
+
+      {activeTab === 'stock' && (
+        <section className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-[rgba(45,45,45,0.08)] flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-bold">Current Stock</h2>
+              <p className="text-xs text-[#707070] mt-1">Live stock for {scopeLabel}.</p>
+            </div>
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#999]" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search item / code"
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] outline-none text-sm"
+              />
+            </div>
+          </div>
+          {loading ? (
+            <div className="py-16 flex flex-col items-center justify-center gap-3 text-[#707070]">
+              <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
+              <p className="text-sm">Loading {isCentralStore ? 'Central Store' : 'outlet'} stock…</p>
+            </div>
+          ) : !warehouseId ? (
+            <div className="py-16 text-center text-sm text-[#707070]">No active stock warehouse is configured for this {isCentralStore ? 'Central Store' : 'outlet'}.</div>
+          ) : filteredRows.length === 0 ? (
+            <div className="py-16 text-center text-sm text-[#707070]">No stock items found.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="bg-[#FAF8F5] text-[10px] uppercase tracking-wider text-[#707070]">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Item</th>
+                    <th className="px-4 py-3 text-left">Code</th>
+                    <th className="px-4 py-3 text-right">Qty</th>
+                    <th className="px-4 py-3 text-right">Unit Cost</th>
+                    <th className="px-4 py-3 text-right">Value</th>
+                    <th className="px-4 py-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                  {filteredRows.map((row) => {
+                    const min = Number(row.min_stock_level || 0);
+                    const isLow = min > 0 && row.quantityNumber <= min;
+                    return (
+                      <tr key={row.id} className="hover:bg-[#FAF8F5]/70">
+                        <td className="px-4 py-3">
+                          <div className="font-semibold">{row.item_name || 'Unnamed item'}</div>
+                          <div className="text-[11px] text-[#707070]">{row.unit_symbol || 'UNIT'}</div>
+                        </td>
+                        <td className="px-4 py-3 text-[#707070]">{row.item_code || '—'}</td>
+                        <td className="px-4 py-3 text-right font-semibold">{formatQty(row.quantityNumber)}</td>
+                        <td className="px-4 py-3 text-right">{moneyINR(row.costNumber)}</td>
+                        <td className="px-4 py-3 text-right font-semibold">{moneyINR(row.quantityNumber * row.costNumber)}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${isLow ? 'bg-[#D99625]/10 text-[#A96B00]' : 'bg-[#2E8B57]/10 text-[#2E8B57]'}`}>
+                            {isLow ? 'LOW' : 'OK'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {activeTab === 'count' && (
+        <section className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-[rgba(45,45,45,0.08)] flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.16em] font-bold text-[#B8862D]">Physical Count</p>
+              <h2 className="mt-1 text-lg font-bold">{closingInfo.label}</h2>
+              <p className="text-xs text-[#707070] mt-1">Physical stock → submit → admin approval/rejection → approved = verified & locked. This count is limited to {isCentralStore ? 'Central Store stock only' : 'this outlet'}.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {(!stockCount || countRejected) && (
+                <button
+                  type="button"
+                  onClick={startCount}
+                  disabled={saving || !warehouseId}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#C79A3B] text-white text-xs font-bold hover:bg-[#B8862D] disabled:opacity-60"
+                >
+                  <ClipboardCheck className="w-4 h-4" /> {countRejected ? 'Start New Count' : 'Start Count'}
+                </button>
+              )}
+              {stockCount && stockCount.status === 'DRAFT' && (
+                <button
+                  type="button"
+                  onClick={submitCount}
+                  disabled={saving || countLoading}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257348] disabled:opacity-60"
+                >
+                  <Send className="w-4 h-4" /> Submit Count
+                </button>
+              )}
+              {stockCount && countPending && canReview && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => reviewApproval(true)}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => reviewApproval(false)}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#D9534F] text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    <XCircle className="w-4 h-4" /> Reject
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {countLoading ? (
+            <div className="py-16 flex items-center justify-center text-[#707070] gap-3">
+              <RefreshCw className="w-5 h-5 animate-spin text-[#C79A3B]" /> Loading count…
+            </div>
+          ) : stockCount?.status === 'IN_PROGRESS' ? (
+            <div className="px-4 py-3 bg-[#3978B8]/10 border-b border-[#3978B8]/20 text-xs text-[#245E93] font-medium flex items-center gap-2">
+              <ClipboardCheck className="w-4 h-4" /> Submitted and waiting for admin review.
+            </div>
+          ) : countCompleted ? (
+            <div className="px-4 py-3 bg-[#2E8B57]/10 border-b border-[#2E8B57]/20 text-xs text-[#2E8B57] font-medium flex items-center gap-2">
+              <LockKeyhole className="w-4 h-4" /> Approved, verified and locked. Stock ledger has been reconciled to physical quantity.
+            </div>
+          ) : countRejected ? (
+            <div className="px-4 py-3 bg-[#D9534F]/10 border-b border-[#D9534F]/20 text-xs text-[#A93F3A] font-medium flex items-center gap-2">
+              <XCircle className="w-4 h-4" /> Rejected. Start a new count for this period after recounting physical stock.
+            </div>
+          ) : null}
+
+          {!stockCount && (
+            <div className="px-4 py-10 sm:px-8 text-center text-sm text-[#707070]">
+              No stock count has been started for this period.
+            </div>
+          )}
+
+          {stockCount && (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-sm">
+                <thead className="bg-[#FAF8F5] text-[10px] uppercase tracking-wider text-[#707070]">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Item</th>
+                    <th className="px-4 py-3 text-right">System Qty</th>
+                    <th className="px-4 py-3 text-right">Physical Qty</th>
+                    <th className="px-4 py-3 text-right">Variance</th>
+                    <th className="px-4 py-3 text-right">Variance Value</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                  {countRows.map((row) => {
+                    const raw = physicalQty[row.item_id];
+                    const physical = raw === undefined || raw === '' ? null : Number(raw);
+                    const variance = physical === null ? 0 : physical - row.system_qty;
+                    const varianceValue = variance * row.unit_cost;
+                    return (
+                      <tr key={row.item_id}>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold">{row.item_name}</div>
+                          <div className="text-[11px] text-[#707070]">{row.item_code || '—'} · {row.unit_symbol || 'UNIT'}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold">{formatQty(row.system_qty)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={raw ?? ''}
+                            disabled={countLocked || saving}
+                            onChange={(e) => setPhysicalQty((prev) => ({ ...prev, [row.item_id]: e.target.value }))}
+                            className="w-28 px-3 py-2 rounded-lg border border-[rgba(45,45,45,0.14)] text-right outline-none focus:border-[#C79A3B] disabled:bg-[#F5F3EE] disabled:text-[#777]"
+                          />
+                        </td>
+                        <td className={`px-4 py-3 text-right font-semibold ${variance > 0 ? 'text-[#2E8B57]' : variance < 0 ? 'text-[#D9534F]' : 'text-[#707070]'}`}>
+                          {physical === null ? '—' : `${variance > 0 ? '+' : ''}${formatQty(variance)}`}
+                        </td>
+                        <td className={`px-4 py-3 text-right ${varianceValue > 0 ? 'text-[#2E8B57]' : varianceValue < 0 ? 'text-[#D9534F]' : 'text-[#707070]'}`}>
+                          {physical === null ? '—' : moneyINR(varianceValue)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+};
+
+const StockCountReviewWorkspace: React.FC = () => {
+  const [counts, setCounts] = useState<StockCount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await inventoryApi.getStockCounts({ status: 'IN_PROGRESS', scope_all: true });
+      setCounts(data || []);
+    } catch (error: any) {
+      setMessage(getApiError(error, 'Stock count review queue could not be loaded.'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const act = async (count: StockCount, approve: boolean) => {
+    setBusyId(count.id);
+    setMessage('');
+    try {
+      if (approve) {
+        await inventoryApi.approveStockCount(count.id, 'Approved from Stock Count Review');
+      } else {
+        await inventoryApi.rejectStockCount(count.id, 'Rejected from Stock Count Review');
+      }
+      await load();
+      setMessage(approve ? `${count.count_number} approved and locked.` : `${count.count_number} rejected.`);
+    } catch (error: any) {
+      setMessage(getApiError(error, approve ? 'Approval failed.' : 'Rejection failed.'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white overflow-hidden">
+      <div className="p-4 sm:p-5 border-b border-[rgba(45,45,45,0.08)] flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold">Pending Stock Count Review</h2>
+          <p className="text-xs text-[#707070] mt-1">Approve to reconcile and lock; reject to send the outlet back for recount.</p>
+        </div>
+        <button type="button" onClick={load} disabled={loading} className="p-2.5 rounded-xl border border-[rgba(45,45,45,0.12)] bg-white hover:bg-[#FAF8F5] disabled:opacity-60">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+      {message && <div className="px-4 py-3 text-xs bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)]">{message}</div>}
+      {loading ? (
+        <div className="py-16 flex items-center justify-center text-[#707070] gap-3">
+          <RefreshCw className="w-5 h-5 animate-spin text-[#C79A3B]" /> Loading review queue…
+        </div>
+      ) : counts.length === 0 ? (
+        <div className="py-16 text-center text-sm text-[#707070]">No stock counts are waiting for approval.</div>
+      ) : (
+        <div className="divide-y divide-[rgba(45,45,45,0.06)]">
+          {counts.map((count) => (
+            <div key={count.id} className="p-4 sm:p-5 flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold">{count.count_number}</span>
+                  <span className="inline-flex px-2 py-1 rounded-full text-[10px] font-bold bg-[#3978B8]/10 text-[#245E93]">PENDING</span>
+                </div>
+                <p className="text-xs text-[#707070] mt-1">{count.warehouse_name || 'Outlet Warehouse'} · {count.count_date ? new Date(count.count_date).toLocaleDateString('en-IN') : '—'}</p>
+                <p className="text-xs mt-2">Variance value: <span className="font-semibold">{moneyINR(Number(count.total_variance_value || 0))}</span></p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => act(count, true)} disabled={busyId === count.id} className="px-3.5 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold disabled:opacity-60">
+                  {busyId === count.id ? 'Processing…' : 'Approve & Lock'}
+                </button>
+                <button type="button" onClick={() => act(count, false)} disabled={busyId === count.id} className="px-3.5 py-2.5 rounded-xl bg-[#D9534F] text-white text-xs font-bold disabled:opacity-60">
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+};
+
+export const InventoryManager: React.FC = () => {
+  const { currentOutlet } = useOutlet();
+  const scopeType = String(currentOutlet?.type || '').toUpperCase();
+  const isScopedStockLocation = scopeType === 'RESTAURANT_OUTLET' || scopeType === 'CENTRAL_STORE';
+
+  // Active Outlet -> Outlet Stock workspace.
+  // Active Central Store -> the same Stock/Stock Count workspace, but scoped
+  // strictly to Central Store stock. No outlet stock is loaded or shown.
+  // HQ/no scope keeps the existing full Inventory Manager screen.
+  if (currentOutlet?.id && isScopedStockLocation) {
+    return <OutletStockWorkspace outlet={currentOutlet} />;
+  }
+
+  return <InventoryManagerAdmin />;
 };
 
 export default InventoryManager;
