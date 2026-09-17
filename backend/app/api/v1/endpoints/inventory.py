@@ -1178,7 +1178,9 @@ def get_stock_balances(
                 quantity=qty,
                 min_stock_level=min_lvl,
                 reorder_qty=sb.reorder_qty if sb.reorder_qty is not None else (it.reorder_qty if it else None),
-                avg_unit_cost=Decimal(str(sb.avg_unit_cost or 0)),
+                # StockBalance.avg_unit_cost is currently a compatibility property that returns 0.
+                # Use the item's current master cost as the fallback so stock valuation is visible.
+                avg_unit_cost=Decimal(str(it.cost_price or 0)),
                 item_name=it.name if it else None,
                 item_code=it.code if it else None,
                 item_type=it.type.value if it and hasattr(it.type, "value") else (str(it.type) if it else None),

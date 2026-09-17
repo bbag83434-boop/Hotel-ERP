@@ -1376,15 +1376,13 @@ interface OutletStockWorkspaceProps {
 const OutletStockWorkspace: React.FC<OutletStockWorkspaceProps> = ({ outlet }) => {
   const { user } = useAuth();
   const closingInfo = getCurrentClosingPeriod();
-  const isCentralStore = String(outlet.type || '').toUpperCase() === 'CENTRAL_STORE';
-  const scopeLabel = isCentralStore ? 'Central Store' : (outlet.name || 'Outlet');
-  const isSaltLakeKitchen = !isCentralStore && (
+  const isSaltLakeKitchen =
     String(outlet.code || '').toUpperCase() === 'BB-01' ||
-    String(outlet.name || '').toLowerCase().includes('salt lake')
-  );
+    String(outlet.name || '').toLowerCase().includes('salt lake');
 
   const [activeTab, setActiveTab] = useState<'stock' | 'count'>('stock');
   const [balances, setBalances] = useState<any[]>([]);
+  const [itemCosts, setItemCosts] = useState<Record<string, number>>({});
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [warehouseId, setWarehouseId] = useState<string>('');
   const [stockCount, setStockCount] = useState<StockCount | null>(null);
@@ -1402,8 +1400,16 @@ const OutletStockWorkspace: React.FC<OutletStockWorkspaceProps> = ({ outlet }) =
     setLoading(true);
     setMessage(null);
     try {
-      const branchWarehouses = await inventoryApi.getWarehouses({ branch_id: outlet.id });
+      const [branchWarehouses, itemData] = await Promise.all([
+        inventoryApi.getWarehouses({ branch_id: outlet.id }),
+        inventoryApi.getItems(),
+      ]);
       setWarehouses(branchWarehouses || []);
+      const costMap: Record<string, number> = {};
+      (itemData || []).forEach((item: any) => {
+        costMap[String(item.id)] = Number(item.cost_price || 0);
+      });
+      setItemCosts(costMap);
 
       const selected = branchWarehouses?.[0];
       const nextWarehouseId = selected?.id || '';
@@ -1469,7 +1475,9 @@ const OutletStockWorkspace: React.FC<OutletStockWorkspaceProps> = ({ outlet }) =
   const currentRows = balances.map((row: any) => ({
     ...row,
     quantityNumber: Number(row.quantity || 0),
-    costNumber: Number(row.avg_unit_cost || 0),
+    // Prefer the live stock average cost; fall back to Item Master cost so
+    // amount/value never disappears when an older balance has zero cost.
+    costNumber: Number(row.avg_unit_cost || row.unit_cost || itemCosts[String(row.item_id)] || 0),
   }));
 
   const filteredRows = currentRows.filter((row: any) =>
@@ -1490,7 +1498,7 @@ const OutletStockWorkspace: React.FC<OutletStockWorkspaceProps> = ({ outlet }) =
         item_code: item.item_code || '',
         unit_symbol: item.unit_symbol || '',
         system_qty: Number(item.system_qty || 0),
-        unit_cost: Number(item.unit_cost || 0),
+        unit_cost: Number(item.unit_cost || currentRows.find((row) => String(row.item_id) === String(item.item_id))?.costNumber || 0),
       }))
     : currentRows.map((row) => ({
         item_id: String(row.item_id),
@@ -1518,7 +1526,7 @@ const OutletStockWorkspace: React.FC<OutletStockWorkspaceProps> = ({ outlet }) =
         warehouse_id: warehouseId,
         branch_id: outlet.id,
         count_date: new Date().toISOString(),
-        notes: `${isCentralStore ? 'Central Store' : 'Bi-monthly stock count'} - ${closingInfo.label}`,
+        notes: `Bi-monthly stock count - ${closingInfo.label}`,
       });
       setStockCount(created);
       setPhysicalQty({});
@@ -1589,206 +1597,260 @@ const OutletStockWorkspace: React.FC<OutletStockWorkspaceProps> = ({ outlet }) =
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-5 text-[#1C1C1C]">
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.18em] font-bold text-[#B8862D]">{isCentralStore ? 'Central Store Stock' : 'Outlet Stock'}</p>
-          <h1 className="mt-1 text-2xl sm:text-3xl font-bold font-['Outfit']">{scopeLabel} — Stock</h1>
-          <p className="mt-1 text-sm text-[#707070]">Only this {isCentralStore ? 'Central Store' : 'outlet'}'s stock is shown. Warehouse selection is intentionally hidden.</p>
+    <div className="w-full max-w-7xl mx-auto space-y-4 sm:space-y-5 text-[#1C1C1C] min-w-0">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.16em] font-bold text-[#B8862D]">Outlet Stock</p>
+          <h1 className="mt-1 text-xl sm:text-3xl font-bold font-['Outfit'] truncate">{outlet.name || 'Outlet'} — Stock</h1>
+          <p className="mt-1 text-xs sm:text-sm text-[#707070] leading-5">Live stock for this outlet.</p>
         </div>
         <button
           type="button"
           onClick={() => activeTab === 'stock' ? loadStock() : loadCount()}
           disabled={loading || countLoading}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] text-xs font-bold hover:bg-[#FAF8F5] disabled:opacity-60"
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] text-xs font-bold hover:bg-[#FAF8F5] disabled:opacity-60 active:scale-[0.98] transition"
         >
           <RefreshCw className={`w-4 h-4 ${(loading || countLoading) ? 'animate-spin' : ''}`} />
           Refresh
         </button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-4">
-          <p className="text-xs text-[#707070]">Items</p>
-          <p className="mt-1 text-2xl font-bold font-['Outfit']">{currentRows.length}</p>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-3 sm:p-4 min-w-0">
+          <p className="text-[11px] sm:text-xs text-[#707070]">Items</p>
+          <p className="mt-1 text-xl sm:text-2xl font-bold font-['Outfit']">{currentRows.length}</p>
         </div>
-        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-4">
-          <p className="text-xs text-[#707070]">Total Qty</p>
-          <p className="mt-1 text-2xl font-bold font-['Outfit']">{formatQty(totalQty)}</p>
+        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-3 sm:p-4 min-w-0">
+          <p className="text-[11px] sm:text-xs text-[#707070]">Total Qty</p>
+          <p className="mt-1 text-xl sm:text-2xl font-bold font-['Outfit'] truncate">{formatQty(totalQty)}</p>
         </div>
-        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-4">
-          <p className="text-xs text-[#707070]">Stock Value</p>
-          <p className="mt-1 text-2xl font-bold font-['Outfit']">{moneyINR(stockValue)}</p>
+        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-3 sm:p-4 min-w-0">
+          <p className="text-[11px] sm:text-xs text-[#707070]">Stock Value</p>
+          <p className="mt-1 text-xl sm:text-2xl font-bold font-['Outfit'] truncate">{moneyINR(stockValue)}</p>
         </div>
-        <div className={`rounded-2xl border p-4 ${lowStockCount ? 'bg-[#FFF7E8] border-[#D99625]/30' : 'bg-white border-[rgba(45,45,45,0.08)]'}`}>
-          <p className="text-xs text-[#707070]">Low Stock</p>
-          <p className="mt-1 text-2xl font-bold font-['Outfit']">{lowStockCount}</p>
+        <div className={`rounded-2xl border p-3 sm:p-4 min-w-0 ${lowStockCount ? 'bg-[#FFF7E8] border-[#D99625]/30' : 'bg-white border-[rgba(45,45,45,0.08)]'}`}>
+          <p className="text-[11px] sm:text-xs text-[#707070]">Low Stock</p>
+          <p className="mt-1 text-xl sm:text-2xl font-bold font-['Outfit']">{lowStockCount}</p>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-[rgba(45,45,45,0.08)]">
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-[rgba(45,45,45,0.08)] overflow-x-auto scrollbar-hide">
         <button
           type="button"
           onClick={() => setActiveTab('stock')}
-          className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === 'stock' ? 'border-[#C79A3B] text-[#B8862D]' : 'border-transparent text-[#707070]'}`}
+          className={`shrink-0 px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-bold border-b-2 transition-colors ${activeTab === 'stock' ? 'border-[#C79A3B] text-[#B8862D]' : 'border-transparent text-[#707070]'}`}
         >
           Current Stock
         </button>
         <button
           type="button"
           onClick={() => setActiveTab('count')}
-          className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === 'count' ? 'border-[#C79A3B] text-[#B8862D]' : 'border-transparent text-[#707070]'}`}
+          className={`shrink-0 px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-bold border-b-2 transition-colors ${activeTab === 'count' ? 'border-[#C79A3B] text-[#B8862D]' : 'border-transparent text-[#707070]'}`}
         >
           Stock Count
         </button>
         {isSaltLakeKitchen && (
-          <div className="ml-auto hidden sm:flex items-center gap-2 text-[11px] font-bold text-[#3978B8]">
+          <div className="ml-auto hidden sm:flex shrink-0 items-center gap-2 text-[11px] font-bold text-[#3978B8]">
             <ClipboardCheck className="w-4 h-4" /> Kitchen Operations enabled for BB-01
           </div>
         )}
       </div>
 
       {message && (
-        <div className={`rounded-xl border px-4 py-3 text-sm ${message.type === 'success' ? 'bg-[#2E8B57]/10 border-[#2E8B57]/30 text-[#2E8B57]' : 'bg-[#D9534F]/10 border-[#D9534F]/30 text-[#D9534F]'}`}>
+        <div className={`rounded-xl border px-3.5 py-3 text-xs sm:text-sm leading-5 ${message.type === 'success' ? 'bg-[#2E8B57]/10 border-[#2E8B57]/30 text-[#2E8B57]' : 'bg-[#D9534F]/10 border-[#D9534F]/30 text-[#D9534F]'}`}>
           {message.text}
         </div>
       )}
 
+      {/* CURRENT STOCK */}
       {activeTab === 'stock' && (
         <section className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white overflow-hidden">
-          <div className="p-4 sm:p-5 border-b border-[rgba(45,45,45,0.08)] flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-base font-bold">Current Stock</h2>
-              <p className="text-xs text-[#707070] mt-1">Live stock for {scopeLabel}.</p>
+          <div className="p-3.5 sm:p-5 border-b border-[rgba(45,45,45,0.08)]">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-bold">Current Stock</h2>
+                <p className="text-xs text-[#707070] mt-1">{outlet.name || 'This outlet'} stock</p>
+              </div>
+              <div className="sm:hidden shrink-0 rounded-lg bg-[#FAF8F5] px-2.5 py-1.5 text-[10px] font-semibold text-[#707070]">
+                {filteredRows.length} items
+              </div>
             </div>
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#999]" />
+            <div className="relative w-full mt-3">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#999]" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search item / code"
-                className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] outline-none text-sm"
+                className="w-full pl-10 pr-3.5 py-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] outline-none text-sm focus:border-[#C79A3B] transition"
               />
             </div>
           </div>
+
           {loading ? (
             <div className="py-16 flex flex-col items-center justify-center gap-3 text-[#707070]">
               <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
-              <p className="text-sm">Loading {isCentralStore ? 'Central Store' : 'outlet'} stock…</p>
+              <p className="text-sm">Loading outlet stock…</p>
             </div>
           ) : !warehouseId ? (
-            <div className="py-16 text-center text-sm text-[#707070]">No active stock warehouse is configured for this {isCentralStore ? 'Central Store' : 'outlet'}.</div>
+            <div className="py-16 px-5 text-center text-sm text-[#707070]">No active stock warehouse is configured for this outlet.</div>
           ) : filteredRows.length === 0 ? (
-            <div className="py-16 text-center text-sm text-[#707070]">No stock items found.</div>
+            <div className="py-16 px-5 text-center text-sm text-[#707070]">No stock items found.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm">
-                <thead className="bg-[#FAF8F5] text-[10px] uppercase tracking-wider text-[#707070]">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Item</th>
-                    <th className="px-4 py-3 text-left">Code</th>
-                    <th className="px-4 py-3 text-right">Qty</th>
-                    <th className="px-4 py-3 text-right">Unit Cost</th>
-                    <th className="px-4 py-3 text-right">Value</th>
-                    <th className="px-4 py-3 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
-                  {filteredRows.map((row) => {
-                    const min = Number(row.min_stock_level || 0);
-                    const isLow = min > 0 && row.quantityNumber <= min;
-                    return (
-                      <tr key={row.id} className="hover:bg-[#FAF8F5]/70">
-                        <td className="px-4 py-3">
-                          <div className="font-semibold">{row.item_name || 'Unnamed item'}</div>
-                          <div className="text-[11px] text-[#707070]">{row.unit_symbol || 'UNIT'}</div>
-                        </td>
-                        <td className="px-4 py-3 text-[#707070]">{row.item_code || '—'}</td>
-                        <td className="px-4 py-3 text-right font-semibold">{formatQty(row.quantityNumber)}</td>
-                        <td className="px-4 py-3 text-right">{moneyINR(row.costNumber)}</td>
-                        <td className="px-4 py-3 text-right font-semibold">{moneyINR(row.quantityNumber * row.costNumber)}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${isLow ? 'bg-[#D99625]/10 text-[#A96B00]' : 'bg-[#2E8B57]/10 text-[#2E8B57]'}`}>
-                            {isLow ? 'LOW' : 'OK'}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* Mobile: card layout — no horizontal scrolling */}
+              <div className="sm:hidden divide-y divide-[rgba(45,45,45,0.07)]">
+                {filteredRows.map((row) => {
+                  const min = Number(row.min_stock_level || 0);
+                  const isLow = min > 0 && row.quantityNumber <= min;
+                  const value = row.quantityNumber * row.costNumber;
+                  return (
+                    <div key={row.id} className="p-3.5 active:bg-[#FAF8F5]/70 transition">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-sm leading-5 break-words">{row.item_name || 'Unnamed item'}</div>
+                          <div className="mt-0.5 text-[11px] text-[#707070] font-mono break-all">
+                            {row.item_code || '—'} <span className="font-sans">·</span> {row.unit_symbol || 'UNIT'}
+                          </div>
+                        </div>
+                        <span className={`shrink-0 inline-flex px-2 py-1 rounded-full text-[9px] font-bold ${isLow ? 'bg-[#D99625]/10 text-[#A96B00]' : 'bg-[#2E8B57]/10 text-[#2E8B57]'}`}>
+                          {isLow ? 'LOW' : 'OK'}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <div className="rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] p-2.5 min-w-0">
+                          <p className="text-[9px] uppercase tracking-wide text-[#888]">Qty</p>
+                          <p className="mt-0.5 text-sm font-bold truncate">{formatQty(row.quantityNumber)}</p>
+                        </div>
+                        <div className="rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] p-2.5 min-w-0">
+                          <p className="text-[9px] uppercase tracking-wide text-[#888]">Cost</p>
+                          <p className="mt-0.5 text-sm font-semibold truncate">{moneyINR(row.costNumber)}</p>
+                        </div>
+                        <div className="rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] p-2.5 min-w-0">
+                          <p className="text-[9px] uppercase tracking-wide text-[#888]">Value</p>
+                          <p className="mt-0.5 text-sm font-bold truncate">{moneyINR(value)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop/tablet: full table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-[#FAF8F5] text-[10px] uppercase tracking-wider text-[#707070]">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Item</th>
+                      <th className="px-4 py-3 text-left">Code</th>
+                      <th className="px-4 py-3 text-right">Qty</th>
+                      <th className="px-4 py-3 text-right">Unit Cost</th>
+                      <th className="px-4 py-3 text-right">Value</th>
+                      <th className="px-4 py-3 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                    {filteredRows.map((row) => {
+                      const min = Number(row.min_stock_level || 0);
+                      const isLow = min > 0 && row.quantityNumber <= min;
+                      return (
+                        <tr key={row.id} className="hover:bg-[#FAF8F5]/70">
+                          <td className="px-4 py-3">
+                            <div className="font-semibold">{row.item_name || 'Unnamed item'}</div>
+                            <div className="text-[11px] text-[#707070]">{row.unit_symbol || 'UNIT'}</div>
+                          </td>
+                          <td className="px-4 py-3 text-[#707070]">{row.item_code || '—'}</td>
+                          <td className="px-4 py-3 text-right font-semibold">{formatQty(row.quantityNumber)}</td>
+                          <td className="px-4 py-3 text-right">{moneyINR(row.costNumber)}</td>
+                          <td className="px-4 py-3 text-right font-semibold">{moneyINR(row.quantityNumber * row.costNumber)}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${isLow ? 'bg-[#D99625]/10 text-[#A96B00]' : 'bg-[#2E8B57]/10 text-[#2E8B57]'}`}>
+                              {isLow ? 'LOW' : 'OK'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </section>
       )}
 
+      {/* STOCK COUNT */}
       {activeTab === 'count' && (
         <section className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white overflow-hidden">
-          <div className="p-4 sm:p-5 border-b border-[rgba(45,45,45,0.08)] flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.16em] font-bold text-[#B8862D]">Physical Count</p>
-              <h2 className="mt-1 text-lg font-bold">{closingInfo.label}</h2>
-              <p className="text-xs text-[#707070] mt-1">Physical stock → submit → admin approval/rejection → approved = verified & locked. This count is limited to {isCentralStore ? 'Central Store stock only' : 'this outlet'}.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {(!stockCount || countRejected) && (
-                <button
-                  type="button"
-                  onClick={startCount}
-                  disabled={saving || !warehouseId}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#C79A3B] text-white text-xs font-bold hover:bg-[#B8862D] disabled:opacity-60"
-                >
-                  <ClipboardCheck className="w-4 h-4" /> {countRejected ? 'Start New Count' : 'Start Count'}
-                </button>
-              )}
-              {stockCount && stockCount.status === 'DRAFT' && (
-                <button
-                  type="button"
-                  onClick={submitCount}
-                  disabled={saving || countLoading}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257348] disabled:opacity-60"
-                >
-                  <Send className="w-4 h-4" /> Submit Count
-                </button>
-              )}
-              {stockCount && countPending && canReview && (
-                <div className="flex items-center gap-2">
+          <div className="p-3.5 sm:p-5 border-b border-[rgba(45,45,45,0.08)]">
+            <div className="flex flex-col gap-3">
+              <div>
+                <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.16em] font-bold text-[#B8862D]">Physical Count</p>
+                <h2 className="mt-1 text-base sm:text-lg font-bold">{closingInfo.label}</h2>
+                <p className="text-xs text-[#707070] mt-1 leading-5">Physical stock → submit → admin review → approved = verified & locked.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(!stockCount || countRejected) && (
                   <button
                     type="button"
-                    onClick={() => reviewApproval(true)}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold disabled:opacity-60"
+                    onClick={startCount}
+                    disabled={saving || !warehouseId}
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#C79A3B] text-white text-xs font-bold hover:bg-[#B8862D] disabled:opacity-60 active:scale-[0.98] transition"
                   >
-                    <CheckCircle2 className="w-4 h-4" /> Approve
+                    <ClipboardCheck className="w-4 h-4" /> {countRejected ? 'Start New Count' : 'Start Count'}
                   </button>
+                )}
+                {stockCount && stockCount.status === 'DRAFT' && (
                   <button
                     type="button"
-                    onClick={() => reviewApproval(false)}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#D9534F] text-white text-xs font-bold disabled:opacity-60"
+                    onClick={submitCount}
+                    disabled={saving || countLoading}
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold hover:bg-[#257348] disabled:opacity-60 active:scale-[0.98] transition"
                   >
-                    <XCircle className="w-4 h-4" /> Reject
+                    <Send className="w-4 h-4" /> Submit Count
                   </button>
-                </div>
-              )}
+                )}
+                {stockCount && countPending && canReview && (
+                  <div className="w-full sm:w-auto grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => reviewApproval(true)}
+                      disabled={saving}
+                      className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#2E8B57] text-white text-xs font-bold disabled:opacity-60 active:scale-[0.98] transition"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => reviewApproval(false)}
+                      disabled={saving}
+                      className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#D9534F] text-white text-xs font-bold disabled:opacity-60 active:scale-[0.98] transition"
+                    >
+                      <XCircle className="w-4 h-4" /> Reject
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           {countLoading ? (
-            <div className="py-16 flex items-center justify-center text-[#707070] gap-3">
+            <div className="py-16 flex items-center justify-center text-[#707070] gap-3 px-5 text-sm">
               <RefreshCw className="w-5 h-5 animate-spin text-[#C79A3B]" /> Loading count…
             </div>
           ) : stockCount?.status === 'IN_PROGRESS' ? (
-            <div className="px-4 py-3 bg-[#3978B8]/10 border-b border-[#3978B8]/20 text-xs text-[#245E93] font-medium flex items-center gap-2">
-              <ClipboardCheck className="w-4 h-4" /> Submitted and waiting for admin review.
+            <div className="px-3.5 py-3 bg-[#3978B8]/10 border-b border-[#3978B8]/20 text-xs text-[#245E93] font-medium flex items-start gap-2 leading-5">
+              <ClipboardCheck className="w-4 h-4 shrink-0 mt-0.5" /> Submitted and waiting for admin review.
             </div>
           ) : countCompleted ? (
-            <div className="px-4 py-3 bg-[#2E8B57]/10 border-b border-[#2E8B57]/20 text-xs text-[#2E8B57] font-medium flex items-center gap-2">
-              <LockKeyhole className="w-4 h-4" /> Approved, verified and locked. Stock ledger has been reconciled to physical quantity.
+            <div className="px-3.5 py-3 bg-[#2E8B57]/10 border-b border-[#2E8B57]/20 text-xs text-[#2E8B57] font-medium flex items-start gap-2 leading-5">
+              <LockKeyhole className="w-4 h-4 shrink-0 mt-0.5" /> Approved, verified and locked. Stock ledger has been reconciled to physical quantity.
             </div>
           ) : countRejected ? (
-            <div className="px-4 py-3 bg-[#D9534F]/10 border-b border-[#D9534F]/20 text-xs text-[#A93F3A] font-medium flex items-center gap-2">
-              <XCircle className="w-4 h-4" /> Rejected. Start a new count for this period after recounting physical stock.
+            <div className="px-3.5 py-3 bg-[#D9534F]/10 border-b border-[#D9534F]/20 text-xs text-[#A93F3A] font-medium flex items-start gap-2 leading-5">
+              <XCircle className="w-4 h-4 shrink-0 mt-0.5" /> Rejected. Start a new count for this period after recounting physical stock.
             </div>
           ) : null}
 
@@ -1799,53 +1861,122 @@ const OutletStockWorkspace: React.FC<OutletStockWorkspaceProps> = ({ outlet }) =
           )}
 
           {stockCount && (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-sm">
-                <thead className="bg-[#FAF8F5] text-[10px] uppercase tracking-wider text-[#707070]">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Item</th>
-                    <th className="px-4 py-3 text-right">System Qty</th>
-                    <th className="px-4 py-3 text-right">Physical Qty</th>
-                    <th className="px-4 py-3 text-right">Variance</th>
-                    <th className="px-4 py-3 text-right">Variance Value</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
-                  {countRows.map((row) => {
-                    const raw = physicalQty[row.item_id];
-                    const physical = raw === undefined || raw === '' ? null : Number(raw);
-                    const variance = physical === null ? 0 : physical - row.system_qty;
-                    const varianceValue = variance * row.unit_cost;
-                    return (
-                      <tr key={row.item_id}>
-                        <td className="px-4 py-3">
-                          <div className="font-semibold">{row.item_name}</div>
-                          <div className="text-[11px] text-[#707070]">{row.item_code || '—'} · {row.unit_symbol || 'UNIT'}</div>
-                        </td>
-                        <td className="px-4 py-3 text-right font-semibold">{formatQty(row.system_qty)}</td>
-                        <td className="px-4 py-3 text-right">
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.001"
-                            value={raw ?? ''}
-                            disabled={countLocked || saving}
-                            onChange={(e) => setPhysicalQty((prev) => ({ ...prev, [row.item_id]: e.target.value }))}
-                            className="w-28 px-3 py-2 rounded-lg border border-[rgba(45,45,45,0.14)] text-right outline-none focus:border-[#C79A3B] disabled:bg-[#F5F3EE] disabled:text-[#777]"
-                          />
-                        </td>
-                        <td className={`px-4 py-3 text-right font-semibold ${variance > 0 ? 'text-[#2E8B57]' : variance < 0 ? 'text-[#D9534F]' : 'text-[#707070]'}`}>
-                          {physical === null ? '—' : `${variance > 0 ? '+' : ''}${formatQty(variance)}`}
-                        </td>
-                        <td className={`px-4 py-3 text-right ${varianceValue > 0 ? 'text-[#2E8B57]' : varianceValue < 0 ? 'text-[#D9534F]' : 'text-[#707070]'}`}>
-                          {physical === null ? '—' : moneyINR(varianceValue)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* Mobile count cards */}
+              <div className="sm:hidden divide-y divide-[rgba(45,45,45,0.07)]">
+                {countRows.map((row) => {
+                  const raw = physicalQty[row.item_id];
+                  const physical = raw === undefined || raw === '' ? null : Number(raw);
+                  const variance = physical === null ? 0 : physical - row.system_qty;
+                  const varianceValue = variance * row.unit_cost;
+                  const varianceClass = variance > 0 ? 'text-[#2E8B57]' : variance < 0 ? 'text-[#D9534F]' : 'text-[#707070]';
+                  return (
+                    <div key={row.item_id} className="p-3.5 bg-white">
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-sm leading-5 break-words">{row.item_name}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-[#707070]">
+                            <span className="font-mono break-all">{row.item_code || '—'}</span>
+                            <span className="inline-flex items-center rounded-full bg-[#C79A3B]/10 border border-[#C79A3B]/20 px-2 py-0.5 font-bold text-[#9A741F]">
+                              UNIT: {row.unit_symbol || 'UNIT'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] p-2.5">
+                          <p className="text-[9px] uppercase tracking-wide text-[#888]">System Qty</p>
+                          <p className="mt-1 text-sm font-bold text-[#1C1C1C]">{formatQty(row.system_qty)} <span className="text-[10px] font-medium text-[#707070]">{row.unit_symbol || 'UNIT'}</span></p>
+                        </div>
+                        <div className="rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] p-2.5">
+                          <label className="block text-[9px] uppercase tracking-wide text-[#888] mb-1">Physical Qty</label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              inputMode="decimal"
+                              value={raw ?? ''}
+                              disabled={countLocked || saving}
+                              onChange={(e) => setPhysicalQty((prev) => ({ ...prev, [row.item_id]: e.target.value }))}
+                              className="w-full min-w-0 px-2.5 py-2.5 rounded-lg bg-white border border-[rgba(45,45,45,0.14)] text-right text-base font-semibold outline-none focus:border-[#C79A3B] disabled:bg-[#F5F3EE] disabled:text-[#777]"
+                            />
+                            <span className="shrink-0 text-[10px] font-bold text-[#707070]">{row.unit_symbol || 'UNIT'}</span>
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] p-2.5">
+                          <p className="text-[9px] uppercase tracking-wide text-[#888]">Variance</p>
+                          <p className={`mt-1 text-sm font-bold ${varianceClass}`}>
+                            {physical === null ? '—' : `${variance > 0 ? '+' : ''}${formatQty(variance)} ${row.unit_symbol || ''}`}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] p-2.5">
+                          <p className="text-[9px] uppercase tracking-wide text-[#888]">Variance Amount</p>
+                          <p className={`mt-1 text-sm font-bold ${varianceClass}`}>
+                            {physical === null ? '—' : moneyINR(varianceValue)}
+                          </p>
+                          <p className="mt-0.5 text-[9px] text-[#707070]">Cost {moneyINR(row.unit_cost)} / {row.unit_symbol || 'UNIT'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop/tablet count table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-[#FAF8F5] text-[10px] uppercase tracking-wider text-[#707070]">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Item / Unit</th>
+                      <th className="px-4 py-3 text-right">System Qty</th>
+                      <th className="px-4 py-3 text-right">Physical Qty</th>
+                      <th className="px-4 py-3 text-right">Variance</th>
+                      <th className="px-4 py-3 text-right">Variance Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[rgba(45,45,45,0.06)]">
+                    {countRows.map((row) => {
+                      const raw = physicalQty[row.item_id];
+                      const physical = raw === undefined || raw === '' ? null : Number(raw);
+                      const variance = physical === null ? 0 : physical - row.system_qty;
+                      const varianceValue = variance * row.unit_cost;
+                      return (
+                        <tr key={row.item_id}>
+                          <td className="px-4 py-3">
+                            <div className="font-semibold">{row.item_name}</div>
+                            <div className="mt-1 flex items-center gap-2 text-[11px] text-[#707070]">
+                              <span>{row.item_code || '—'}</span>
+                              <span className="inline-flex rounded-full bg-[#C79A3B]/10 px-2 py-0.5 font-bold text-[#9A741F]">UNIT: {row.unit_symbol || 'UNIT'}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold">{formatQty(row.system_qty)} <span className="text-[10px] font-medium text-[#707070]">{row.unit_symbol || 'UNIT'}</span></td>
+                          <td className="px-4 py-3 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              value={raw ?? ''}
+                              disabled={countLocked || saving}
+                              onChange={(e) => setPhysicalQty((prev) => ({ ...prev, [row.item_id]: e.target.value }))}
+                              className="w-28 px-3 py-2 rounded-lg border border-[rgba(45,45,45,0.14)] text-right outline-none focus:border-[#C79A3B] disabled:bg-[#F5F3EE] disabled:text-[#777]"
+                            />
+                          </td>
+                          <td className={`px-4 py-3 text-right font-semibold ${variance > 0 ? 'text-[#2E8B57]' : variance < 0 ? 'text-[#D9534F]' : 'text-[#707070]'}`}>
+                            {physical === null ? '—' : `${variance > 0 ? '+' : ''}${formatQty(variance)}`}
+                          </td>
+                          <td className={`px-4 py-3 text-right ${varianceValue > 0 ? 'text-[#2E8B57]' : varianceValue < 0 ? 'text-[#D9534F]' : 'text-[#707070]'}`}>
+                            <div className="font-semibold">{physical === null ? '—' : moneyINR(varianceValue)}</div>
+                            <div className="text-[9px] text-[#888] mt-0.5">Cost {moneyINR(row.unit_cost)} / {row.unit_symbol || 'UNIT'}</div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </section>
       )}
@@ -1941,14 +2072,15 @@ const StockCountReviewWorkspace: React.FC = () => {
 
 export const InventoryManager: React.FC = () => {
   const { currentOutlet } = useOutlet();
-  const scopeType = String(currentOutlet?.type || '').toUpperCase();
-  const isScopedStockLocation = scopeType === 'RESTAURANT_OUTLET' || scopeType === 'CENTRAL_STORE';
+  const { user } = useAuth();
+  const isInventoryManager = STOCK_COUNT_REVIEW_ROLES.has(getRoleName(user));
+  const isRestaurantOutlet = currentOutlet?.type === 'RESTAURANT_OUTLET';
 
-  // Active Outlet -> Outlet Stock workspace.
-  // Active Central Store -> the same Stock/Stock Count workspace, but scoped
-  // strictly to Central Store stock. No outlet stock is loaded or shown.
-  // HQ/no scope keeps the existing full Inventory Manager screen.
-  if (currentOutlet?.id && isScopedStockLocation) {
+  // Stock must always follow the active outlet scope.
+  // Admin/HQ users may still access the full Inventory Manager from the
+  // appropriate HQ/management scope, but selecting an outlet must never
+  // fall back to the old Multi-Outlet Inventory screen.
+  if (currentOutlet?.id && isRestaurantOutlet) {
     return <OutletStockWorkspace outlet={currentOutlet} />;
   }
 

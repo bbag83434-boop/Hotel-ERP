@@ -251,11 +251,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     }] : []),
     {
-      label: 'Outlet Sales & Consumption',
-      defaultOpen: true,
-      items: [{ id: 'outletSales', label: 'Sales/Consumption', icon: Banknote, initialTab: undefined, badge: null }],
-    },
-    {
       label: 'Outlet Inventory',
       defaultOpen: true,
       items: [{ id: 'inventory', label: 'Stock', icon: Boxes, initialTab: undefined, badge: null }],

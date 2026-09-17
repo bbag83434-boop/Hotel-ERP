@@ -80,6 +80,9 @@ export const AppContent = () => {
       userRole.toUpperCase()
     );
 
+  // Outlet Sales & Consumption is ADMIN ONLY on both the frontend workspace and backend API.
+  const isOutletSalesAdmin = isFoodCostAdmin;
+
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.replace('/login');
@@ -215,7 +218,18 @@ export const AppContent = () => {
 
           {activeWorkspace === 'outletSales' && (
             <div className="w-full min-w-0">
-              <OutletSalesWorkspace />
+              {isOutletSalesAdmin ? (
+                <OutletSalesWorkspace />
+              ) : (
+                <div className="p-12 text-center rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
+                  <ShieldCheck className="w-10 h-10 text-red-500 mx-auto mb-3 opacity-70" />
+                  <h3 className="text-sm font-bold text-[#1C1C1C]">Access Restricted</h3>
+                  <p className="text-xs text-[#707070] mt-1 max-w-sm mx-auto">
+                    Outlet Sales &amp; Consumption is available to Admin users only. Your role does not grant
+                    access to this module.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

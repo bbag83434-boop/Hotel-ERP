@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { apiClient } from '@/api/client';
-import { useOutlet } from '@/context/OutletContext';
 import { useAuth } from '@/context/AuthContext';
 import { Plus, History, Check, AlertCircle, ShoppingBag, Info, AlertTriangle } from 'lucide-react';
 
@@ -31,7 +30,6 @@ interface PreviewResponse {
 }
 
 export default function OutletSalesWorkspace() {
-  const { activeOutlet, isHeadOffice } = useOutlet();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'entry' | 'history'>('entry');
   
@@ -46,38 +44,64 @@ export default function OutletSalesWorkspace() {
   
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [metadataLoading, setMetadataLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   const [history, setHistory] = useState<any[]>([]);
   
-  const isManagement = ['SUPER_ADMIN', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN'].includes(
-    (typeof user?.role === 'object' ? user.role.name : user?.role)?.toUpperCase() || ''
+
+  const formatDecimal = (value: unknown, digits = 2): string => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return '0.' + '0'.repeat(digits);
+    return numericValue.toFixed(digits);
+  };
+
+  const userRole = typeof user?.role === 'object' ? user.role.name : user?.role;
+  const isAdmin = ['SUPER_ADMIN', 'SUPERADMIN', 'OWNER', 'ADMIN', 'HQ_ADMIN', 'HEAD_OFFICE_ADMIN'].includes(
+    String(userRole || '').toUpperCase()
   );
 
   useEffect(() => {
+    if (!isAdmin) return;
     fetchMetadata();
-  }, []);
-
-  useEffect(() => {
-    if (activeOutlet?.id) {
-      setSelectedBranchId(activeOutlet.id);
-    } else if (branches.length > 0) {
-      setSelectedBranchId(branches[0].id);
-    }
-  }, [activeOutlet, branches]);
+  }, [isAdmin]);
 
   const fetchMetadata = async () => {
+    setMetadataLoading(true);
+    setError(null);
+
     try {
       const [itemsRes, unitsRes, branchesRes] = await Promise.all([
         apiClient.get('/inventory/items'),
         apiClient.get('/inventory/units'),
         apiClient.get('/organization/branches')
       ]);
-      setItems(itemsRes.data?.data?.filter((i: any) => i.type === 'FINISHED_GOOD' || i.type === 'SEMI_FINISHED') || []);
-      setUnits(unitsRes.data?.data || []);
-      setBranches(branchesRes.data?.data || []);
-    } catch (err) {
+
+      const itemData = itemsRes.data?.data ?? itemsRes.data ?? [];
+      const unitData = unitsRes.data?.data ?? unitsRes.data ?? [];
+      const branchData = branchesRes.data?.data ?? branchesRes.data ?? [];
+
+      setItems(
+        Array.isArray(itemData)
+          ? itemData.filter(
+              (i: any) =>
+                i.type === 'FINISHED_GOOD' || i.type === 'SEMI_FINISHED'
+            )
+          : []
+      );
+      setUnits(Array.isArray(unitData) ? unitData : []);
+      setBranches(Array.isArray(branchData) ? branchData : []);
+    } catch (err: any) {
       console.error(err);
+      setItems([]);
+      setUnits([]);
+      setBranches([]);
+      setError(
+        err.response?.data?.detail ||
+          'Unable to load outlet sales master data.'
+      );
+    } finally {
+      setMetadataLoading(false);
     }
   };
 
@@ -86,7 +110,14 @@ export default function OutletSalesWorkspace() {
       setError('Please fill all fields');
       return;
     }
+
+    if (Number(quantity) <= 0 || Number.isNaN(Number(quantity))) {
+      setError('Quantity must be greater than zero.');
+      return;
+    }
+
     setError(null);
+    setPreviewData(null);
     setLoading(true);
     try {
       const res = await apiClient.post('/outlet-sales/preview', {
@@ -119,9 +150,14 @@ export default function OutletSalesWorkspace() {
         transaction_date: new Date().toISOString().split('T')[0],
         idempotency_key: `sale_${Date.now()}_${Math.random().toString(36).substring(7)}`
       });
-      // Success
       setPreviewData(null);
       setQuantity('');
+      setError(null);
+
+      if (activeTab === 'history') {
+        await fetchHistory();
+      }
+
       alert('Transaction posted successfully');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Error posting transaction');
@@ -145,10 +181,24 @@ export default function OutletSalesWorkspace() {
   };
 
   useEffect(() => {
-    if (activeTab === 'history') {
+    if (isAdmin && activeTab === 'history' && selectedBranchId) {
       fetchHistory();
     }
-  }, [activeTab, selectedBranchId]);
+  }, [activeTab, selectedBranchId, isAdmin]);
+
+  if (!isAdmin) {
+    return (
+      <div className="w-full min-w-0">
+        <div className="p-12 text-center rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-xs">
+          <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-3 opacity-70" />
+          <h3 className="text-sm font-bold text-[#1C1C1C]">Access Restricted</h3>
+          <p className="text-xs text-[#707070] mt-1 max-w-sm mx-auto">
+            Outlet Sales &amp; Consumption is available to Admin users only.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -174,16 +224,30 @@ export default function OutletSalesWorkspace() {
         </button>
       </div>
 
-      {isManagement && (
+      {isAdmin && (
         <div className="mb-4 bg-white p-3 rounded-lg shadow-sm">
           <label className="block text-xs font-medium text-gray-700 mb-1">Outlet (Admin View)</label>
           <select
             className="w-full text-sm border-gray-300 rounded-md p-2 border focus:ring-[#C79A3B]"
+            disabled={metadataLoading}
             value={selectedBranchId}
-            onChange={(e) => setSelectedBranchId(e.target.value)}
+            onChange={(e) => {
+              setSelectedBranchId(e.target.value);
+              setPreviewData(null);
+              setError(null);
+            }}
           >
-            <option value="">Select Outlet...</option>
-            {branches.filter(b => b.type !== 'HEAD_OFFICE' && b.type !== 'CENTRAL_STORE' && b.type !== 'DESSERT_KITCHEN').map((b) => (
+            <option value="">
+              {metadataLoading ? 'Loading outlets...' : 'Select Outlet...'}
+            </option>
+            {branches
+              .filter(
+                (b) =>
+                  b.type !== 'HEAD_OFFICE' &&
+                  b.type !== 'CENTRAL_STORE' &&
+                  b.type !== 'DESSERT_KITCHEN'
+              )
+              .map((b) => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
@@ -202,10 +266,17 @@ export default function OutletSalesWorkspace() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Finished / Semi-Finished Good</label>
                 <select
                   className="w-full text-sm border-gray-300 rounded-md p-2 border focus:ring-[#C79A3B]"
+                  disabled={metadataLoading}
                   value={selectedItemId}
-                  onChange={(e) => setSelectedItemId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedItemId(e.target.value);
+                    setPreviewData(null);
+                    setError(null);
+                  }}
                 >
-                  <option value="">Select item...</option>
+                  <option value="">
+                    {metadataLoading ? 'Loading items...' : 'Select item...'}
+                  </option>
                   {items.map((i) => (
                     <option key={i.id} value={i.id}>{i.name} ({i.code})</option>
                   ))}
@@ -217,8 +288,15 @@ export default function OutletSalesWorkspace() {
                   <label className="block text-xs font-medium text-gray-700 mb-1">Quantity Sold</label>
                   <input
                     type="number"
+                    min="0"
+                    step="0.0001"
                     value={quantity}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuantity(e.target.value ? Number(e.target.value) : '')}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      const value = e.target.value;
+                      setQuantity(value ? Number(value) : '');
+                      setPreviewData(null);
+                      setError(null);
+                    }}
                     className="w-full text-sm border-gray-300 rounded-md p-2 border focus:ring-[#C79A3B]"
                     placeholder="0.00"
                   />
@@ -227,10 +305,17 @@ export default function OutletSalesWorkspace() {
                   <label className="block text-xs font-medium text-gray-700 mb-1">Unit</label>
                   <select
                     className="w-full text-sm border-gray-300 rounded-md p-2 border focus:ring-[#C79A3B]"
+                    disabled={metadataLoading}
                     value={selectedUnitId}
-                    onChange={(e) => setSelectedUnitId(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedUnitId(e.target.value);
+                      setPreviewData(null);
+                      setError(null);
+                    }}
                   >
-                    <option value="">Select unit...</option>
+                    <option value="">
+                      {metadataLoading ? 'Loading units...' : 'Select unit...'}
+                    </option>
                     {units.map((u) => (
                       <option key={u.id} value={u.id}>{u.name} ({u.symbol})</option>
                     ))}
@@ -245,9 +330,15 @@ export default function OutletSalesWorkspace() {
                 </div>
               )}
 
+              {metadataLoading && (
+                <div className="p-2 bg-gray-50 text-gray-500 text-xs rounded-md border border-gray-200">
+                  Loading master data...
+                </div>
+              )}
+
               <Button 
                 onClick={handlePreview} 
-                disabled={loading || !selectedItemId || !quantity || !selectedUnitId || !selectedBranchId}
+                disabled={metadataLoading || loading || !selectedItemId || !quantity || !selectedUnitId || !selectedBranchId}
                 className="w-full bg-[#1C1C1C] hover:bg-[#333] text-white"
               >
                 {loading ? 'Calculating...' : 'Preview Consumption'}
@@ -293,21 +384,21 @@ export default function OutletSalesWorkspace() {
                       {previewData.ingredients.map((ing, idx) => (
                         <tr key={idx} className={ing.is_shortage ? "bg-red-50/50" : ""}>
                           <td className="px-4 py-2 font-medium text-gray-800">{ing.ingredient_name}</td>
-                          <td className="px-4 py-2 text-right">{ing.required_qty.toFixed(4)} {ing.unit_symbol}</td>
-                          <td className="px-4 py-2 text-right">{ing.available_qty.toFixed(4)} {ing.unit_symbol}</td>
+                          <td className="px-4 py-2 text-right">{formatDecimal(ing.required_qty, 4)} {ing.unit_symbol}</td>
+                          <td className="px-4 py-2 text-right">{formatDecimal(ing.available_qty, 4)} {ing.unit_symbol}</td>
                           <td className="px-4 py-2 text-right">
                             {ing.is_shortage ? (
-                              <span className="text-red-600 font-semibold text-xs">Short {ing.shortage_qty.toFixed(2)}</span>
+                              <span className="text-red-600 font-semibold text-xs">Short {formatDecimal(ing.shortage_qty, 2)}</span>
                             ) : (
                               <span className="text-green-600 font-semibold text-xs">OK</span>
                             )}
                           </td>
-                          <td className="px-4 py-2 text-right">${ing.cost.toFixed(2)}</td>
+                          <td className="px-4 py-2 text-right">{formatDecimal(ing.cost, 2)}</td>
                         </tr>
                       ))}
                       <tr className="bg-gray-50 font-bold">
                         <td colSpan={4} className="px-4 py-2 text-right">Total Recipe Cost</td>
-                        <td className="px-4 py-2 text-right text-[#C79A3B]">${previewData.total_cost.toFixed(2)}</td>
+                        <td className="px-4 py-2 text-right text-[#C79A3B]">{formatDecimal(previewData.total_cost, 2)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -359,7 +450,7 @@ export default function OutletSalesWorkspace() {
                     <td className="px-4 py-3">
                       {record.quantity} {units.find(u => u.id === record.unit_id)?.symbol || ''}
                     </td>
-                    <td className="px-4 py-3 font-semibold text-gray-700">${Number(record.total_cost).toFixed(2)}</td>
+                    <td className="px-4 py-3 font-semibold text-gray-700">{Number(record.total_cost).toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <span className="px-2 py-1 rounded-full text-[10px] font-bold tracking-wide bg-green-100 text-green-700">
                         {record.status}

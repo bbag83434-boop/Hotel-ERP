@@ -1,27 +1,78 @@
 from sqlalchemy import Column, String, ForeignKey, Numeric, Date, Text
 from sqlalchemy.orm import relationship, synonym
+
 from app.models.base import BaseModel
 
+
 class OutletSale(BaseModel):
+    """Header record for an Admin-posted outlet sale/consumption transaction."""
+
     __tablename__ = "outlet_sales"
 
-    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
-    branch_id = Column("branchId", String(36), ForeignKey("branches.id", ondelete="CASCADE"), nullable=False, index=True)
-    warehouse_id = Column("warehouseId", String(36), ForeignKey("warehouses.id", ondelete="CASCADE"), nullable=False, index=True)
-    item_id = Column("itemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
-    recipe_id = Column("recipeId", String(36), ForeignKey("recipes.id"), nullable=True)
-    
+    company_id = Column(
+        "companyId",
+        String(36),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    branch_id = Column(
+        "branchId",
+        String(36),
+        ForeignKey("branches.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Legacy compatibility field only.
+    # Outlet Sales/Consumption does NOT use a warehouse for stock.
+    # Existing old records can keep their warehouse reference, while all new
+    # outlet-only transactions leave this field NULL.
+    # IMPORTANT: database migration must make outlet_sales.warehouseId nullable.
+    warehouse_id = Column(
+        "warehouseId",
+        String(36),
+        ForeignKey("warehouses.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    item_id = Column(
+        "itemId",
+        String(36),
+        ForeignKey("items.id"),
+        nullable=False,
+        index=True,
+    )
+    recipe_id = Column(
+        "recipeId",
+        String(36),
+        ForeignKey("recipes.id"),
+        nullable=True,
+    )
+
     transaction_date = Column("transactionDate", Date, nullable=False)
     quantity = Column(Numeric(14, 4), default=0, nullable=False)
-    unit_id = Column("unitId", String(36), ForeignKey("units.id"), nullable=False)
-    
+    unit_id = Column(
+        "unitId",
+        String(36),
+        ForeignKey("units.id"),
+        nullable=False,
+    )
+
     total_cost = Column("totalCost", Numeric(14, 4), default=0, nullable=False)
     cost_per_unit = Column("costPerUnit", Numeric(14, 4), default=0, nullable=False)
-    
+
     status = Column(String(50), default="COMPLETED", nullable=False)
-    created_by_id = Column("createdById", String(36), ForeignKey("users.id"), nullable=True)
+    created_by_id = Column(
+        "createdById",
+        String(36),
+        ForeignKey("users.id"),
+        nullable=True,
+    )
     notes = Column(Text, nullable=True)
 
+    # Backward-compatible camelCase aliases used by parts of the API/codebase.
     companyId = synonym("company_id")
     branchId = synonym("branch_id")
     warehouseId = synonym("warehouse_id")
@@ -33,25 +84,53 @@ class OutletSale(BaseModel):
     costPerUnit = synonym("cost_per_unit")
     createdById = synonym("created_by_id")
 
+    # Master/detail relationships.
     item = relationship("Item", foreign_keys=[item_id])
     recipe = relationship("Recipe", foreign_keys=[recipe_id])
     unit = relationship("Unit", foreign_keys=[unit_id])
     branch = relationship("Branch", foreign_keys=[branch_id])
+
+    # Kept only for compatibility with legacy OutletSale history rows.
+    # New Outlet Sales transactions do not resolve or populate a warehouse.
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
+
     creator = relationship("User", foreign_keys=[created_by_id])
-    
-    ingredients = relationship("OutletSaleIngredient", back_populates="sale", cascade="all, delete-orphan")
-    
+
+    ingredients = relationship(
+        "OutletSaleIngredient",
+        back_populates="sale",
+        cascade="all, delete-orphan",
+    )
+
+
 class OutletSaleIngredient(BaseModel):
+    """Immutable consumption snapshot created under an OutletSale header."""
+
     __tablename__ = "outlet_sale_ingredients"
 
-    sale_id = Column("saleId", String(36), ForeignKey("outlet_sales.id", ondelete="CASCADE"), nullable=False, index=True)
-    ingredient_item_id = Column("ingredientItemId", String(36), ForeignKey("items.id"), nullable=False)
-    unit_id = Column("unitId", String(36), ForeignKey("units.id"), nullable=False)
-    
+    sale_id = Column(
+        "saleId",
+        String(36),
+        ForeignKey("outlet_sales.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ingredient_item_id = Column(
+        "ingredientItemId",
+        String(36),
+        ForeignKey("items.id"),
+        nullable=False,
+    )
+    unit_id = Column(
+        "unitId",
+        String(36),
+        ForeignKey("units.id"),
+        nullable=False,
+    )
+
     required_qty = Column("requiredQty", Numeric(14, 4), default=0, nullable=False)
     consumed_qty = Column("consumedQty", Numeric(14, 4), default=0, nullable=False)
-    
+
     rate = Column(Numeric(14, 4), default=0, nullable=False)
     cost = Column(Numeric(14, 4), default=0, nullable=False)
 

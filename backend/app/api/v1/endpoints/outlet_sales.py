@@ -1,103 +1,157 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import List
+from sqlalchemy import or_
 
 from app.core.database import get_db
-from app.core.auth import get_current_user
+from app.core.exceptions import AppException
+from app.api.v1.endpoints.auth import get_current_active_user
 from app.models.user import User
 from app.models.organization import Branch
 from app.models.outlet_sales import OutletSale
 from app.schemas.outlet_sales import (
+    OutletSaleCreate,
     OutletSalePreviewRequest,
     OutletSalePreviewResponse,
-    OutletSaleCreate,
-    OutletSaleSchema
+    OutletSaleSchema,
 )
 from app.services.outlet_sales import OutletSalesService
-from app.core.exceptions import AppException
 
-router = APIRouter()
 
-@router.post("/preview", response_model=OutletSalePreviewResponse)
+# IMPORTANT:
+# This is the API ROUTER file.
+# The business logic stays in app/services/outlet_sales.py.
+# Frontend calls: /api/v1/outlet-sales/...
+router = APIRouter(prefix="/outlet-sales", tags=["Outlet Sales"])
+
+
+ADMIN_ROLES = {
+    "SUPER_ADMIN",
+    "SUPERADMIN",
+    "OWNER",
+    "ADMIN",
+    "HQ_ADMIN",
+    "HEAD_OFFICE_ADMIN",
+}
+
+
+CENTRAL_BRANCH_TYPES = {
+    "HEAD_OFFICE",
+    "CENTRAL_STORE",
+    "DESSERT_KITCHEN",
+}
+
+
+def _role_name(user: User) -> str:
+    role = getattr(user, "role", None)
+    if isinstance(role, str):
+        return role.upper().strip()
+
+    name = getattr(role, "name", None)
+    return str(name or "").upper().strip()
+
+
+def _require_admin(current_user: User) -> None:
+    if _role_name(current_user) not in ADMIN_ROLES:
+        raise AppException(
+            403,
+            "ACCESS_DENIED",
+            "Only Admin users can access Outlet Sales & Consumption.",
+        )
+
+
+def _get_valid_outlet_branch(
+    db: Session,
+    company_id: str,
+    branch_id: str,
+) -> Branch:
+    branch = (
+        db.query(Branch)
+        .filter(
+            Branch.id == branch_id,
+            Branch.is_active.is_(True),
+            # Branch.company_id is nullable in the existing master data.
+            # Legacy/global outlets may have NULL company_id, so they must still
+            # be valid for the current company instead of returning a false 404.
+            or_(
+                Branch.company_id == company_id,
+                Branch.company_id.is_(None),
+            ),
+        )
+        .first()
+    )
+
+    if not branch:
+        raise AppException(404, "OUTLET_NOT_FOUND", "Outlet not found")
+
+    branch_type = str(getattr(branch, "type", "") or "").upper()
+    if branch_type in CENTRAL_BRANCH_TYPES:
+        raise AppException(
+            400,
+            "INVALID_OUTLET",
+            "Central Store / Head Office / Kitchen branch cannot be used as an outlet for Outlet Sales & Consumption.",
+        )
+
+    return branch
+
+
+@router.post(
+    "/preview",
+    response_model=OutletSalePreviewResponse,
+)
 def preview_outlet_sale(
-    req: OutletSalePreviewRequest,
+    payload: OutletSalePreviewRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_user),
 ):
-    """
-    Preview the consumption and stock status before posting an outlet sale.
-    Outlet user can only preview for their own outlet.
-    Admin can preview for any outlet.
-    Central Kitchen cannot use this.
-    """
-    # Check authorization
-    branch = db.query(Branch).filter(Branch.id == req.branch_id).first()
-    if not branch:
-        raise HTTPException(status_code=404, detail="Branch not found")
+    """Preview recipe consumption against the selected outlet's own stock."""
+    _require_admin(current_user)
+    _get_valid_outlet_branch(db, current_user.company_id, payload.branch_id)
 
-    if branch.type in ["HEAD_OFFICE", "CENTRAL_STORE", "DESSERT_KITCHEN"]:
-        raise HTTPException(status_code=403, detail="Central kitchen or head office cannot use Outlet Sales module")
+    service = OutletSalesService(db)
+    return service.preview_sale(current_user.company_id, payload)
 
-    is_admin = current_user.role.name == "Admin" if current_user.role else False
-    if not is_admin:
-        if req.branch_id not in [b.branch_id for b in current_user.branches]:
-            raise HTTPException(status_code=403, detail="You can only access your own outlet")
 
-    svc = OutletSalesService(db)
-    try:
-        return svc.preview_sale(current_user.company_id, req)
-    except AppException as e:
-        raise HTTPException(status_code=e.status_code, detail=e.message)
-
-@router.post("", response_model=OutletSaleSchema)
+@router.post(
+    "",
+    response_model=OutletSaleSchema,
+)
 def create_outlet_sale(
-    req: OutletSaleCreate,
+    payload: OutletSaleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_user),
 ):
-    """
-    Post an outlet sale, deducting ingredients and recording consumption.
-    """
-    # Check authorization
-    branch = db.query(Branch).filter(Branch.id == req.branch_id).first()
-    if not branch:
-        raise HTTPException(status_code=404, detail="Branch not found")
+    """Atomically post Outlet Sales/Consumption and deduct outlet-wise stock."""
+    _require_admin(current_user)
+    _get_valid_outlet_branch(db, current_user.company_id, payload.branch_id)
 
-    if branch.type in ["HEAD_OFFICE", "CENTRAL_STORE", "DESSERT_KITCHEN"]:
-        raise HTTPException(status_code=403, detail="Central kitchen or head office cannot use Outlet Sales module")
+    service = OutletSalesService(db)
+    return service.post_sale(
+        current_user.company_id,
+        payload,
+        current_user.id,
+    )
 
-    is_admin = current_user.role.name == "Admin" if current_user.role else False
-    if not is_admin:
-        if req.branch_id not in [b.branch_id for b in current_user.branches]:
-            raise HTTPException(status_code=403, detail="You can only access your own outlet")
 
-    svc = OutletSalesService(db)
-    try:
-        return svc.post_sale(current_user.company_id, current_user.id, req)
-    except AppException as e:
-        raise HTTPException(status_code=e.status_code, detail=e.message)
-
-@router.get("", response_model=List[OutletSaleSchema])
+@router.get(
+    "",
+    response_model=List[OutletSaleSchema],
+)
 def list_outlet_sales(
-    branch_id: str = None,
+    branch_id: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_user),
 ):
-    """
-    List sales history.
-    """
-    is_admin = current_user.role.name == "Admin" if current_user.role else False
-    
-    query = db.query(OutletSale).filter(OutletSale.company_id == current_user.company_id)
-    
-    if branch_id:
-        if not is_admin and branch_id not in [b.branch_id for b in current_user.branches]:
-            raise HTTPException(status_code=403, detail="You can only access your own outlet")
-        query = query.filter(OutletSale.branch_id == branch_id)
-    else:
-        if not is_admin:
-            allowed_branches = [b.branch_id for b in current_user.branches]
-            query = query.filter(OutletSale.branch_id.in_(allowed_branches))
+    """Admin history for Outlet Sales/Consumption."""
+    _require_admin(current_user)
 
-    sales = query.order_by(OutletSale.transaction_date.desc()).all()
-    return sales
+    query = db.query(OutletSale).filter(
+        OutletSale.company_id == current_user.company_id,
+    )
+
+    if branch_id:
+        _get_valid_outlet_branch(db, current_user.company_id, branch_id)
+        query = query.filter(OutletSale.branch_id == branch_id)
+
+    return query.order_by(OutletSale.created_at.desc()).all()

@@ -124,6 +124,11 @@ class Item(BaseModel):
     unit = relationship("Unit", back_populates="items")
     supplier = relationship("Supplier", foreign_keys=[supplier_id])
     stock_balances = relationship("StockBalance", back_populates="item")
+    outlet_stock_balances = relationship(
+        "OutletStockBalance",
+        back_populates="item",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("idx_item_company_code", "companyId", "code", unique=True),
@@ -432,3 +437,328 @@ class StockCountItem(Base):
 
     stock_count = relationship("StockCount", back_populates="items")
     item = relationship("Item")
+
+
+# ---------------------------------------------------------------------------
+# OUTLET-WISE STOCK
+# ---------------------------------------------------------------------------
+# These tables are intentionally separate from warehouse stock.
+#
+# Central Store / warehouse inventory continues to use:
+#   StockBalance / StockBatch / StockLedger
+#
+# Outlet Sales & Consumption uses:
+#   OutletStockBalance / OutletStockBatch / OutletStockLedger
+#
+# This keeps the existing warehouse-based Procurement / Transfer / Production
+# flows intact while allowing every outlet to have its own independent stock.
+
+class OutletStockBalance(Base):
+    __tablename__ = "outlet_stock_balances"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(
+        "companyId",
+        String(36),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    branch_id = Column(
+        "branchId",
+        String(36),
+        ForeignKey("branches.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_id = Column(
+        "itemId",
+        String(36),
+        ForeignKey("items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    quantity = Column(
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
+    min_stock_level = Column(
+        "minStockLevel",
+        Numeric(14, 4),
+        nullable=True,
+    )
+    reorder_qty = Column(
+        "reorderQty",
+        Numeric(14, 4),
+        nullable=True,
+    )
+    updated_at = Column(
+        "updatedAt",
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    companyId = synonym("company_id")
+    branchId = synonym("branch_id")
+    itemId = synonym("item_id")
+    minStockLevel = synonym("min_stock_level")
+    reorderQty = synonym("reorder_qty")
+    updatedAt = synonym("updated_at")
+
+    item = relationship("Item", back_populates="outlet_stock_balances")
+    branch = relationship("Branch")
+
+    @property
+    def avg_unit_cost(self):
+        return Decimal("0.0000")
+
+    @property
+    def avgUnitCost(self):
+        return Decimal("0.0000")
+
+    __table_args__ = (
+        Index(
+            "idx_outlet_stock_company_branch_item",
+            "companyId",
+            "branchId",
+            "itemId",
+            unique=True,
+        ),
+    )
+
+
+class OutletStockBatch(Base):
+    __tablename__ = "outlet_stock_batches"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(
+        "companyId",
+        String(36),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    branch_id = Column(
+        "branchId",
+        String(36),
+        ForeignKey("branches.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_id = Column(
+        "itemId",
+        String(36),
+        ForeignKey("items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    batch_number = Column(
+        "batchNumber",
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    quantity = Column(
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
+    unit_cost = Column(
+        "unitCost",
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
+    expiry_date = Column(
+        "expiryDate",
+        Date,
+        nullable=True,
+    )
+    mfg_date = Column(
+        "mfgDate",
+        Date,
+        nullable=True,
+    )
+    is_active = Column(
+        "isActive",
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    companyId = synonym("company_id")
+    branchId = synonym("branch_id")
+    itemId = synonym("item_id")
+    batchNumber = synonym("batch_number")
+    unitCost = synonym("unit_cost")
+    expiryDate = synonym("expiry_date")
+    mfgDate = synonym("mfg_date")
+    isActive = synonym("is_active")
+
+    item = relationship("Item")
+    branch = relationship("Branch")
+
+    __table_args__ = (
+        Index(
+            "idx_outlet_batch_company_branch_item_num",
+            "companyId",
+            "branchId",
+            "itemId",
+            "batchNumber",
+            unique=True,
+        ),
+    )
+
+
+class OutletStockLedger(Base):
+    __tablename__ = "outlet_stock_ledgers"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column(
+        "companyId",
+        String(36),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    branch_id = Column(
+        "branchId",
+        String(36),
+        ForeignKey("branches.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_id = Column(
+        "itemId",
+        String(36),
+        ForeignKey("items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    unit_id = Column(
+        "unitId",
+        String(36),
+        ForeignKey("units.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    batch_number = Column(
+        "batchNumber",
+        String(100),
+        nullable=True,
+    )
+    expiry_date = Column(
+        "expiryDate",
+        DateTime,
+        nullable=True,
+    )
+    movement_type = Column(
+        "movementType",
+        String(50),
+        nullable=False,
+    )
+    change_qty = Column(
+        "changeQty",
+        Numeric(14, 4),
+        nullable=False,
+    )
+    balance_qty = Column(
+        "balanceQty",
+        Numeric(14, 4),
+        nullable=False,
+    )
+    unit_cost = Column(
+        "unitCost",
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=True,
+    )
+    total_cost = Column(
+        "totalCost",
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=True,
+    )
+    reference_type = Column(
+        "referenceType",
+        String(100),
+        nullable=False,
+    )
+    reference_id = Column(
+        "referenceId",
+        String(36),
+        nullable=True,
+    )
+    reversal_reference_id = Column(
+        "reversalReferenceId",
+        String(36),
+        nullable=True,
+        index=True,
+    )
+    idempotency_key = Column(
+        "idempotencyKey",
+        String(255),
+        nullable=True,
+        index=True,
+    )
+    is_emergency_override = Column(
+        "isEmergencyOverride",
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    notes = Column(Text, nullable=True)
+    created_by_id = Column(
+        "createdById",
+        String(36),
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    created_at = Column(
+        "createdAt",
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    companyId = synonym("company_id")
+    branchId = synonym("branch_id")
+    itemId = synonym("item_id")
+    unitId = synonym("unit_id")
+    batchNumber = synonym("batch_number")
+    expiryDate = synonym("expiry_date")
+    movementType = synonym("movement_type")
+    changeQty = synonym("change_qty")
+    balanceQty = synonym("balance_qty")
+    unitCost = synonym("unit_cost")
+    totalCost = synonym("total_cost")
+    referenceType = synonym("reference_type")
+    referenceId = synonym("reference_id")
+    reversalReferenceId = synonym("reversal_reference_id")
+    idempotencyKey = synonym("idempotency_key")
+    isEmergencyOverride = synonym("is_emergency_override")
+    createdById = synonym("created_by_id")
+    createdAt = synonym("created_at")
+
+    item = relationship("Item")
+    branch = relationship("Branch")
+    unit = relationship("Unit", foreign_keys=[unit_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+    __table_args__ = (
+        Index(
+            "idx_outlet_ledger_company_branch_item_date",
+            "companyId",
+            "branchId",
+            "itemId",
+            "createdAt",
+        ),
+        Index(
+            "idx_outlet_ledger_company_branch",
+            "companyId",
+            "branchId",
+        ),
+    )
+

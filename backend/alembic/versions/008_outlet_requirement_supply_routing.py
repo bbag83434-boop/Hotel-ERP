@@ -16,13 +16,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("items", sa.Column("supplySource", sa.String(length=30),
-                                     nullable=False, server_default="CENTRAL_STORE"))
-    op.create_index("ix_items_supplySource", "items", ["supplySource"])
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
 
-    op.add_column("purchase_request_items", sa.Column("unit", sa.String(length=20), nullable=True))
-    op.add_column("purchase_request_items", sa.Column("supplySource", sa.String(length=30), nullable=True))
-    op.create_index("ix_purchase_request_items_supplySource", "purchase_request_items", ["supplySource"])
+    items_columns = {c["name"] for c in inspector.get_columns("items")}
+    if "supplySource" not in items_columns:
+        op.add_column("items", sa.Column("supplySource", sa.String(length=30),
+                                         nullable=False, server_default="CENTRAL_STORE"))
+
+    op.execute('CREATE INDEX IF NOT EXISTS "ix_items_supplySource" ON items ("supplySource")')
+
+    pri_columns = {c["name"] for c in inspector.get_columns("purchase_request_items")}
+    if "unit" not in pri_columns:
+        op.add_column("purchase_request_items", sa.Column("unit", sa.String(length=20), nullable=True))
+    if "supplySource" not in pri_columns:
+        op.add_column("purchase_request_items", sa.Column("supplySource", sa.String(length=30), nullable=True))
+
+    op.execute('CREATE INDEX IF NOT EXISTS "ix_purchase_request_items_supplySource" ON purchase_request_items ("supplySource")')
 
 
 def downgrade() -> None:
