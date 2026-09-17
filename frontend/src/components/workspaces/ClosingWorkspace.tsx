@@ -20,6 +20,11 @@ export default function ClosingWorkspace() {
   const { user } = useAuth();
 
   const branchId = activeOutlet?.id;
+  const isCentralStore = String(activeOutlet?.type || '').toUpperCase() === 'CENTRAL_STORE';
+  const locationLabel = isCentralStore ? 'CENTRAL STORE CLOSING' : 'OUTLET CLOSING';
+  const locationDescription = isCentralStore
+    ? 'Central Store stock is counted separately and remains scoped to the Central Store warehouse.'
+    : 'Two closing periods are maintained separately and remain available in history.';
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
@@ -34,6 +39,9 @@ export default function ClosingWorkspace() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const periodLabel = periodType === 'FIRST_HALF' ? '1 – 15' : `16 – ${new Date(year, month, 0).getDate()}`;
+  const currentStatus = String(draft?.status || 'DRAFT').toUpperCase();
+  const isReadOnlyStatus = ['SUBMITTED', 'VERIFIED', 'FINALIZED_LOCKED'].includes(currentStatus);
+  const canEditClosing = !isReadOnlyStatus;
 
   const load = useCallback(async () => {
     if (!branchId) return;
@@ -90,7 +98,7 @@ export default function ClosingWorkspace() {
         items,
       });
 
-      setMessage({ type: 'success', text: 'Closing submitted successfully. It is now recorded for this period.' });
+      setMessage({ type: 'success', text: 'Closing submitted successfully and sent for approval.' });
       await load();
     } catch (err: any) {
       setMessage({ type: 'error', text: err?.response?.data?.detail || err?.response?.data?.message || err?.message || 'Closing submission failed.' });
@@ -113,8 +121,8 @@ export default function ClosingWorkspace() {
     <div className="w-full min-w-0 space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-bold text-[#1C1C1C]">OUTLET CLOSING</h2>
-          <p className="text-xs text-[#707070] mt-1">Two closing periods are maintained separately and remain available in history.</p>
+          <h2 className="text-base font-bold text-[#1C1C1C]">{locationLabel}</h2>
+          <p className="text-xs text-[#707070] mt-1">{locationDescription}</p>
         </div>
         <button onClick={load} disabled={loading} className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold flex items-center gap-2 disabled:opacity-50">
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -184,7 +192,12 @@ export default function ClosingWorkspace() {
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="warning" icon={<CalendarDays className="w-3 h-3" />}>{monthNames[month - 1]} {year}</Badge>
           <Badge variant="outlet" icon={<Clock3 className="w-3 h-3" />}>{periodLabel}</Badge>
-          <span className="text-[#777]">Status: <b className="text-[#1C1C1C]">{draft?.status || 'DRAFT'}</b></span>
+          <span className="text-[#777]">
+            Status:{' '}
+            <b className="text-[#1C1C1C]">
+              {currentStatus}
+            </b>
+          </span>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -215,7 +228,17 @@ export default function ClosingWorkspace() {
                       <td className="px-4 py-3"><div className="font-semibold text-[#1C1C1C]">{item.item_name}</div><div className="text-[10px] text-[#888]">{item.item_code}</div></td>
                       <td className="px-4 py-3 text-right font-mono">{qty(item.physical_closing_qty)}</td>
                       <td className="px-4 py-3">{item.unit_symbol || 'UNIT'}</td>
-                      <td className="px-4 py-3 text-right"><input type="number" min="0" step="0.001" value={physical[String(item.item_id)] ?? ''} onChange={(e) => setPhysical((prev) => ({ ...prev, [String(item.item_id)]: e.target.value }))} className="w-28 ml-auto p-2 rounded-lg border border-gray-200 bg-[#FAF8F5] text-right font-mono" /></td>
+                      <td className="px-4 py-3 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={physical[String(item.item_id)] ?? ''}
+                          disabled={!canEditClosing}
+                          onChange={(e) => setPhysical((prev) => ({ ...prev, [String(item.item_id)]: e.target.value }))}
+                          className="w-28 ml-auto p-2 rounded-lg border border-gray-200 bg-[#FAF8F5] text-right font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                        />
+                      </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold">{money(value)}</td>
                     </tr>
                   );
@@ -226,12 +249,30 @@ export default function ClosingWorkspace() {
         )}
         <div className="p-4 border-t border-gray-100">
           <label className="block text-[11px] font-semibold text-[#707070] mb-1">Notes</label>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Optional closing remarks…" className="w-full p-2.5 rounded-xl border border-gray-200 bg-[#FAF8F5] text-xs" />
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            disabled={!canEditClosing}
+            rows={2}
+            placeholder="Optional closing remarks…"
+            className="w-full p-2.5 rounded-xl border border-gray-200 bg-[#FAF8F5] text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+          />
         </div>
-        <div className="p-4 flex justify-end">
-          <button onClick={submit} disabled={saving || !canSubmit} className="px-4 py-2.5 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold flex items-center gap-2 disabled:opacity-50">
+        <div className="p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-[11px] text-[#777]">
+            {currentStatus === 'SUBMITTED' && 'Waiting for Head Office approval.'}
+            {currentStatus === 'VERIFIED' && 'Approved. Only Head Office can lock this closing.'}
+            {currentStatus === 'FINALIZED_LOCKED' && 'This closing is locked and immutable.'}
+            {currentStatus === 'REJECTED' && 'Rejected. You can correct the physical count and resubmit.'}
+            {currentStatus === 'DRAFT' && 'Review the physical count before submitting.'}
+          </div>
+          <button
+            onClick={submit}
+            disabled={saving || !canSubmit || !canEditClosing}
+            className="px-4 py-2.5 rounded-xl bg-[#1C1C1C] text-white text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            Submit Closing
+            {currentStatus === 'REJECTED' ? 'Resubmit Closing' : 'Submit Closing'}
           </button>
         </div>
       </div>

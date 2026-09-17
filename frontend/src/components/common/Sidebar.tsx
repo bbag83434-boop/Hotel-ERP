@@ -260,6 +260,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       defaultOpen: true,
       items: [{ id: 'inventory', label: 'Stock', icon: Boxes, initialTab: undefined, badge: null }],
     },
+    {
+      label: 'Stock Count',
+      defaultOpen: true,
+      items: [
+        { id: 'closing' as WorkspaceId, label: 'Stock Count', icon: CalendarDays, initialTab: undefined, badge: '1st–15th / Month End' },
+      ],
+    },
   ];
   // Navigation groups actually rendered: full suite for management, outlet-only for regular outlet users.
   const centralStoreNavGroups = [

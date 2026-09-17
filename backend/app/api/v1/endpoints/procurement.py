@@ -4052,22 +4052,76 @@ def list_outlet_closings(
     branch_id: Optional[str] = None,
     year: Optional[int] = None,
     month: Optional[int] = None,
+    status_filter: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """List twice-monthly closing records."""
+    """
+    List twice-monthly closing records.
+
+    Scope rules:
+    - A scoped outlet / Central Store user can only see their assigned branch records.
+    - Head Office roles can query the full company closing queue.
+    - status_filter is optional and is primarily used by the Approval Center.
+    """
     query = db.query(OutletClosingRecord)
+
     if current_user.company_id:
         query = query.filter(OutletClosingRecord.company_id == current_user.company_id)
+
     if branch_id:
         check_user_outlet_access(current_user, branch_id, db)
         query = query.filter(OutletClosingRecord.branch_id == branch_id)
+    else:
+        # Do not leak company-wide closing records to a non-HQ user.
+        role_name = ""
+        if getattr(current_user, "role", None):
+            raw_role = getattr(current_user, "role", None)
+            if isinstance(raw_role, str):
+                role_name = raw_role
+            else:
+                role_name = getattr(raw_role, "name", "") or ""
+        if not role_name and getattr(current_user, "role_id", None):
+            from app.models.user import Role as RoleModel
+            role_obj = db.query(RoleModel).filter(RoleModel.id == current_user.role_id).first()
+            role_name = getattr(role_obj, "name", "") if role_obj else ""
+
+        is_hq = str(role_name or "").strip().upper().replace("-", "_").replace(" ", "_") in HQ_APPROVER_ROLES
+        if not is_hq:
+            assigned_branch_ids = [
+                row[0]
+                for row in db.query(UserBranch.branch_id)
+                .filter(UserBranch.user_id == current_user.id)
+                .all()
+                if row[0]
+            ]
+            if not assigned_branch_ids:
+                return []
+            query = query.filter(OutletClosingRecord.branch_id.in_(assigned_branch_ids))
+
     if year:
         query = query.filter(OutletClosingRecord.year == year)
     if month:
         query = query.filter(OutletClosingRecord.month == month)
 
-    records = query.order_by(desc(OutletClosingRecord.year), desc(OutletClosingRecord.month), desc(OutletClosingRecord.period_type)).all()
+    if status_filter:
+        normalized_status = str(status_filter).strip().upper()
+        valid_statuses = {item.value for item in ClosingStatus}
+        if normalized_status not in valid_statuses:
+            raise BadRequestException(
+                "status_filter must be one of DRAFT, SUBMITTED, VERIFIED, FINALIZED_LOCKED or REJECTED."
+            )
+        query = query.filter(
+            OutletClosingRecord.status
+            == getattr(ClosingStatus, normalized_status)
+        )
+
+    records = query.order_by(
+        desc(OutletClosingRecord.year),
+        desc(OutletClosingRecord.month),
+        desc(OutletClosingRecord.period_type),
+        desc(OutletClosingRecord.updated_at),
+    ).all()
     return [format_closing_response(r, db) for r in records]
 
 
@@ -4212,16 +4266,29 @@ def submit_outlet_closing(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Submits physical closing stock count.
-    Automatically calculates monetary valuation, actual consumption, and food cost variance.
+    Submits physical closing stock count for an Outlet or Central Store.
+
+    Workflow:
+      DRAFT / REJECTED -> SUBMITTED -> HQ approval -> VERIFIED -> LOCKED
     """
     check_user_outlet_access(current_user, payload.branch_id, db)
     branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
     if not branch:
         raise NotFoundException(f"Branch '{payload.branch_id}' not found.")
 
+    if payload.year < 2000 or payload.year > 2100:
+        raise BadRequestException("year must be between 2000 and 2100.")
+    if payload.month < 1 or payload.month > 12:
+        raise BadRequestException("month must be between 1 and 12.")
+    if payload.period_type not in {"FIRST_HALF", "SECOND_HALF"}:
+        raise BadRequestException("period_type must be FIRST_HALF or SECOND_HALF.")
+
     company_id = branch.company_id or current_user.company_id
-    period_enum = ClosingPeriodType.FIRST_HALF if payload.period_type == "FIRST_HALF" else ClosingPeriodType.SECOND_HALF
+    period_enum = (
+        ClosingPeriodType.FIRST_HALF
+        if payload.period_type == "FIRST_HALF"
+        else ClosingPeriodType.SECOND_HALF
+    )
 
     # Start & End dates
     if payload.period_type == "FIRST_HALF":
@@ -4244,10 +4311,26 @@ def submit_outlet_closing(
         OutletClosingRecord.period_type == period_enum
     ).first()
 
-    if record and record.status == ClosingStatus.FINALIZED_LOCKED:
-        raise BadRequestException("This closing period is LOCKED against modifications.")
+    if record:
+        if record.status == ClosingStatus.FINALIZED_LOCKED:
+            raise BadRequestException("This closing period is LOCKED against modifications.")
+        if record.status == ClosingStatus.SUBMITTED:
+            raise BadRequestException("This closing is already SUBMITTED and is waiting for approval.")
+        if record.status == ClosingStatus.VERIFIED:
+            raise BadRequestException("This closing is already APPROVED. Lock it from the Approval Center.")
 
-    if not record:
+        # REJECTED or DRAFT may be resubmitted.
+        db.query(ClosingStockItem).filter(
+            ClosingStockItem.closing_record_id == record.id
+        ).delete(synchronize_session=False)
+        record.start_date = start_date
+        record.end_date = end_date
+        record.company_id = company_id
+        record.notes = payload.notes
+        record.verified_by_id = None
+        record.verified_at = None
+        record.finalized_at = None
+    else:
         record = OutletClosingRecord(
             company_id=company_id,
             branch_id=payload.branch_id,
@@ -4265,18 +4348,13 @@ def submit_outlet_closing(
             actual_food_cost=Decimal("0.0000"),
             variance_amount=Decimal("0.0000"),
             variance_percentage=Decimal("0.0000"),
-            submitted_by_id=current_user.id,
-            submitted_at=datetime.utcnow(),
             notes=payload.notes,
         )
         db.add(record)
         db.flush()
-    else:
-        # Clear existing items
-        db.query(ClosingStockItem).filter(ClosingStockItem.closing_id == record.id).delete()
 
     # Calculate purchases in period
-    purchases_map = {}
+    purchases_map: Dict[str, Decimal] = {}
     grns = db.query(GoodsReceiveNote).filter(
         GoodsReceiveNote.branch_id == payload.branch_id,
         GoodsReceiveNote.receive_date >= start_date,
@@ -4284,7 +4362,10 @@ def submit_outlet_closing(
     ).all()
     for g in grns:
         for gi in g.items:
-            purchases_map[gi.item_id] = purchases_map.get(gi.item_id, Decimal("0.0000")) + gi.accepted_qty
+            purchases_map[gi.item_id] = (
+                purchases_map.get(gi.item_id, Decimal("0.0000"))
+                + (gi.accepted_qty or Decimal("0.0000"))
+            )
 
     total_opening_val = Decimal("0.0000")
     total_purchases_val = Decimal("0.0000")
@@ -4294,9 +4375,14 @@ def submit_outlet_closing(
         db_item = db.query(Item).filter(Item.id == item_sub.item_id).first()
         if not db_item:
             continue
+
         unit_cost = db_item.cost_price or Decimal("0.0000")
         rec_qty = purchases_map.get(item_sub.item_id, Decimal("0.0000"))
-        opening_qty = max(Decimal("0.0000"), item_sub.physical_closing_qty - rec_qty)
+
+        opening_qty = max(
+            Decimal("0.0000"),
+            item_sub.physical_closing_qty - rec_qty
+        )
         theo_closing = opening_qty + rec_qty
         variance_qty = item_sub.physical_closing_qty - theo_closing
         item_val = item_sub.physical_closing_qty * unit_cost
@@ -4321,10 +4407,17 @@ def submit_outlet_closing(
         db.add(ci)
 
     # Actual Consumption = Opening + Purchases - Closing
-    calculated_consumption = max(Decimal("0.0000"), total_opening_val + total_purchases_val - total_closing_val)
-    theoretical_cost = calculated_consumption * Decimal("0.95")  # standard theoretical benchmark
+    calculated_consumption = max(
+        Decimal("0.0000"),
+        total_opening_val + total_purchases_val - total_closing_val
+    )
+    theoretical_cost = calculated_consumption * Decimal("0.95")
     variance_amt = calculated_consumption - theoretical_cost
-    variance_pct = (variance_amt / calculated_consumption * Decimal("100.00")) if calculated_consumption > 0 else Decimal("0.00")
+    variance_pct = (
+        variance_amt / calculated_consumption * Decimal("100.00")
+        if calculated_consumption > 0
+        else Decimal("0.00")
+    )
 
     record.opening_valuation = total_opening_val
     record.total_purchases = total_purchases_val
@@ -4354,6 +4447,110 @@ def submit_outlet_closing(
             "period": f"{payload.year}-{payload.month} {payload.period_type}",
             "closing_valuation": float(total_closing_val),
             "calculated_consumption": float(calculated_consumption),
+            "location_type": getattr(branch, "type", None),
+        }
+    )
+    db.commit()
+    return format_closing_response(record, db)
+
+
+@router.post("/closings/{closing_id}/approve", response_model=OutletClosingRecordResponse)
+def approve_outlet_closing(
+    closing_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Approve a submitted Outlet or Central Store closing from the HQ Approval Center."""
+    require_head_office_role(current_user, db)
+
+    record = db.query(OutletClosingRecord).filter(
+        OutletClosingRecord.id == closing_id
+    ).first()
+    if not record:
+        raise NotFoundException(f"Closing record '{closing_id}' not found.")
+
+    if current_user.company_id and record.company_id != current_user.company_id:
+        raise ForbiddenException("Access denied for this closing record.")
+
+    if record.status != ClosingStatus.SUBMITTED:
+        raise BadRequestException(
+            f"Closing '{closing_id}' is not pending approval. Current status: {record.status.value}."
+        )
+
+    record.status = ClosingStatus.VERIFIED
+    record.verified_by_id = current_user.id
+    record.verified_at = datetime.utcnow()
+    record.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(record)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="APPROVE_OUTLET_CLOSING",
+        entity_type="OutletClosingRecord",
+        entity_id=record.id,
+        company_id=record.company_id,
+        branch_id=record.branch_id,
+        new_values={
+            "status": ClosingStatus.VERIFIED.value,
+            "approved_by": current_user.email,
+        }
+    )
+    db.commit()
+    return format_closing_response(record, db)
+
+
+@router.post("/closings/{closing_id}/reject", response_model=OutletClosingRecordResponse)
+def reject_outlet_closing(
+    closing_id: str = Path(...),
+    payload: PurchaseRequestRejectRequest = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Reject a submitted Outlet or Central Store closing with a mandatory reason."""
+    require_head_office_role(current_user, db)
+
+    record = db.query(OutletClosingRecord).filter(
+        OutletClosingRecord.id == closing_id
+    ).first()
+    if not record:
+        raise NotFoundException(f"Closing record '{closing_id}' not found.")
+
+    if current_user.company_id and record.company_id != current_user.company_id:
+        raise ForbiddenException("Access denied for this closing record.")
+
+    if record.status != ClosingStatus.SUBMITTED:
+        raise BadRequestException(
+            f"Closing '{closing_id}' is not pending approval. Current status: {record.status.value}."
+        )
+
+    record.status = ClosingStatus.REJECTED
+    record.verified_by_id = None
+    record.verified_at = None
+    record.finalized_at = None
+    record.notes = (
+        f"{record.notes or ''} "
+        f"[Rejected by {current_user.email}: {payload.reason}]"
+    ).strip()
+    record.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(record)
+
+    log_procurement_audit(
+        db=db,
+        user=current_user,
+        action="REJECT_OUTLET_CLOSING",
+        entity_type="OutletClosingRecord",
+        entity_id=record.id,
+        company_id=record.company_id,
+        branch_id=record.branch_id,
+        new_values={
+            "status": ClosingStatus.REJECTED.value,
+            "rejected_by": current_user.email,
+            "reason": payload.reason,
         }
     )
     db.commit()
@@ -4367,16 +4564,26 @@ def lock_outlet_closing(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Finalizes and LOCKS the twice-monthly closing period.
-    Period becomes immutable. Stock values carry forward to next period opening stock.
+    Finalizes and LOCKS an APPROVED closing period.
+    Only Head Office approval roles can lock a VERIFIED closing.
     """
-    record = db.query(OutletClosingRecord).filter(OutletClosingRecord.id == closing_id).first()
+    require_head_office_role(current_user, db)
+
+    record = db.query(OutletClosingRecord).filter(
+        OutletClosingRecord.id == closing_id
+    ).first()
     if not record:
         raise NotFoundException(f"Closing record '{closing_id}' not found.")
 
+    if current_user.company_id and record.company_id != current_user.company_id:
+        raise ForbiddenException("Access denied for this closing record.")
+
+    if record.status != ClosingStatus.VERIFIED:
+        raise BadRequestException(
+            f"Only a VERIFIED closing can be locked. Current status: {record.status.value}."
+        )
+
     record.status = ClosingStatus.FINALIZED_LOCKED
-    record.verified_by_id = current_user.id
-    record.verified_at = datetime.utcnow()
     record.finalized_at = datetime.utcnow()
     record.updated_at = datetime.utcnow()
 
@@ -4389,7 +4596,12 @@ def lock_outlet_closing(
         action="LOCK_OUTLET_CLOSING",
         entity_type="OutletClosingRecord",
         entity_id=record.id,
-        new_values={"status": "FINALIZED_LOCKED", "locked_by": current_user.email}
+        company_id=record.company_id,
+        branch_id=record.branch_id,
+        new_values={
+            "status": ClosingStatus.FINALIZED_LOCKED.value,
+            "locked_by": current_user.email,
+        }
     )
     db.commit()
     return format_closing_response(record, db)
@@ -4403,14 +4615,33 @@ def reopen_outlet_closing(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Authorized reopen of a locked closing period with mandatory reason and audit trail.
+    Reopens a LOCKED closing period for authorized HQ correction.
+    The reason is mandatory and an audit trail is recorded.
     """
-    record = db.query(OutletClosingRecord).filter(OutletClosingRecord.id == closing_id).first()
+    require_head_office_role(current_user, db)
+
+    record = db.query(OutletClosingRecord).filter(
+        OutletClosingRecord.id == closing_id
+    ).first()
     if not record:
         raise NotFoundException(f"Closing record '{closing_id}' not found.")
 
+    if current_user.company_id and record.company_id != current_user.company_id:
+        raise ForbiddenException("Access denied for this closing record.")
+
+    if record.status != ClosingStatus.FINALIZED_LOCKED:
+        raise BadRequestException(
+            f"Only a LOCKED closing can be reopened. Current status: {record.status.value}."
+        )
+
     record.status = ClosingStatus.DRAFT
-    record.notes = f"{record.notes or ''} [Reopened by {current_user.email}: {payload.reason}]".strip()
+    record.verified_by_id = None
+    record.verified_at = None
+    record.finalized_at = None
+    record.notes = (
+        f"{record.notes or ''} "
+        f"[Reopened by {current_user.email}: {payload.reason}]"
+    ).strip()
     record.updated_at = datetime.utcnow()
 
     db.commit()
@@ -4422,7 +4653,13 @@ def reopen_outlet_closing(
         action="REOPEN_OUTLET_CLOSING",
         entity_type="OutletClosingRecord",
         entity_id=record.id,
-        new_values={"status": "DRAFT", "reopened_by": current_user.email, "reason": payload.reason}
+        company_id=record.company_id,
+        branch_id=record.branch_id,
+        new_values={
+            "status": ClosingStatus.DRAFT.value,
+            "reopened_by": current_user.email,
+            "reason": payload.reason,
+        }
     )
     db.commit()
     return format_closing_response(record, db)
@@ -5942,7 +6179,7 @@ def approve_central_store_dispatch(
     """Admin approval: deduct Central Store stock and release the transfer to the outlet as IN_TRANSIT."""
     require_head_office_role(current_user, db)
     transfer = _resolve_transfer_for_company(db, transfer_id, current_user.company_id)
-    if transfer.status != "PENDING_APPROVAL":
+    if transfer.status != "PENDING":
         raise BadRequestException(f"Transfer '{transfer.transfer_number}' is not pending dispatch approval.")
 
     dispatched_lines = [ti for ti in transfer.items if Decimal(str(ti.dispatched_qty or 0)) > 0]

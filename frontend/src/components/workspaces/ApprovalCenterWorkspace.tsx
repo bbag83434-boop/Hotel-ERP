@@ -63,7 +63,7 @@ interface ApprovalItem {
   status?: string;
   createdAt?: string;
   payload: any;
-  type?: 'PURCHASE_REQUEST' | 'CENTRAL_TRANSFER';
+  type?: 'PURCHASE_REQUEST' | 'CENTRAL_TRANSFER' | 'CLOSING';
 }
 
 export default function ApprovalCenterWorkspace() {
@@ -88,12 +88,14 @@ export default function ApprovalCenterWorkspace() {
     setLoading(true);
     setMessage('');
     try {
-      const [pendingPRs, allPRs, pendingTransfers] = await Promise.all([
+      const [pendingPRs, allPRs, pendingTransfers, pendingClosings, allClosings] = await Promise.all([
         procurementApi.getPurchaseRequests({ branch_id: branchId, status_filter: 'PENDING_APPROVAL' }),
         procurementApi.getPurchaseRequests({ branch_id: branchId }),
         apiClient.get('/procurement/central-store/queue', {
           params: { status_filter: 'PENDING', ...(branchId ? { branch_id: branchId } : {}) },
         }).then((res: any) => res?.data?.data ?? res?.data ?? []).catch(() => []),
+        procurementApi.getOutletClosings({ branch_id: branchId, status_filter: 'SUBMITTED' }),
+        procurementApi.getOutletClosings({ branch_id: branchId }),
       ]);
 
       const purchasePending = (pendingPRs || []).map((x: any) => ({
@@ -120,10 +122,25 @@ export default function ApprovalCenterWorkspace() {
         payload: x,
       }));
 
-      setPending([...purchasePending, ...transferPending]);
+      const closingPending = (pendingClosings || []).map((x: any) => ({
+        id: String(x.id),
+        type: 'CLOSING' as const,
+        reference: `${x.branch_name || 'Location'} · ${String(x.period_type || '').replace('_', ' ')} · ${x.year}-${String(x.month).padStart(2, '0')}`,
+        title: 'CLOSING APPROVAL',
+        amount: Number(x.closing_physical_valuation ?? 0),
+        branch: x.branch_name,
+        status: x.status,
+        createdAt: x.submitted_at || x.updated_at || x.created_at,
+        payload: x,
+      }));
+
+      setPending(
+        [...purchasePending, ...transferPending, ...closingPending]
+          .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      );
 
       const historyStatuses = new Set(['APPROVED', 'ORDERED', 'REJECTED', 'CANCELLED']);
-      setHistory((allPRs || [])
+      const purchaseHistory = (allPRs || [])
         .filter((x: any) => historyStatuses.has(String(x?.status || '').toUpperCase()))
         .map((x: any) => ({
           id: String(x.id),
@@ -134,8 +151,30 @@ export default function ApprovalCenterWorkspace() {
           status: x.status,
           createdAt: x.created_at,
           payload: x,
-        }))
-        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))));
+        }));
+
+      const closingHistory = (allClosings || [])
+        .filter((x: any) =>
+          ['VERIFIED', 'REJECTED', 'FINALIZED_LOCKED'].includes(
+            String(x?.status || '').toUpperCase()
+          )
+        )
+        .map((x: any) => ({
+          id: String(x.id),
+          type: 'CLOSING' as const,
+          reference: `${x.branch_name || 'Location'} · ${String(x.period_type || '').replace('_', ' ')} · ${x.year}-${String(x.month).padStart(2, '0')}`,
+          title: 'CLOSING',
+          amount: Number(x.closing_physical_valuation ?? 0),
+          branch: x.branch_name,
+          status: x.status,
+          createdAt: x.updated_at || x.finalized_at || x.verified_at || x.submitted_at,
+          payload: x,
+        }));
+
+      setHistory(
+        [...purchaseHistory, ...closingHistory]
+          .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      );
     } catch (error: any) {
       const data = error?.response?.data;
       setMessage(data?.detail || data?.message || error?.message || 'Approval data could not be loaded.');
@@ -176,6 +215,9 @@ export default function ApprovalCenterWorkspace() {
       if (item.type === 'CENTRAL_TRANSFER') {
         await apiClient.post(`/procurement/central-store/transfers/${item.id}/approve-dispatch`, {});
         setMessage(`${item.reference} dispatch approved. Outlet can now receive the transfer.`);
+      } else if (item.type === 'CLOSING') {
+        await procurementApi.approveOutletClosing(item.id);
+        setMessage(`${item.reference} closing approved. It can now be locked.`);
       } else {
         await procurementApi.approvePurchaseRequest(item.id);
         setMessage(`${item.reference} approved.`);
@@ -196,6 +238,9 @@ export default function ApprovalCenterWorkspace() {
       if (item.type === 'CENTRAL_TRANSFER') {
         await apiClient.post(`/procurement/central-store/transfers/${item.id}/reject-dispatch`, { reason: 'Rejected from Approval Center' });
         setMessage(`${item.reference} dispatch rejected.`);
+      } else if (item.type === 'CLOSING') {
+        await procurementApi.rejectOutletClosing(item.id, { reason: 'Rejected from Approval Center' });
+        setMessage(`${item.reference} closing rejected. The location can correct and resubmit.`);
       } else {
         await procurementApi.rejectPurchaseRequest(item.id, { reason: 'Rejected from Approval Center' });
         setMessage(`${item.reference} rejected.`);
@@ -204,6 +249,39 @@ export default function ApprovalCenterWorkspace() {
     } catch (error: any) {
       const data = error?.response?.data;
       setMessage(data?.detail || data?.message || error?.message || 'Reject failed.');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const lockClosing = async (item: ApprovalItem) => {
+    setActingId(item.id);
+    setMessage('');
+    try {
+      await procurementApi.lockOutletClosing(item.id);
+      setMessage(`${item.reference} closing is now locked.`);
+      await loadAll();
+    } catch (error: any) {
+      const data = error?.response?.data;
+      setMessage(data?.detail || data?.message || error?.message || 'Closing lock failed.');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const reopenClosing = async (item: ApprovalItem) => {
+    const reason = window.prompt('Reopen reason:')?.trim();
+    if (!reason) return;
+
+    setActingId(item.id);
+    setMessage('');
+    try {
+      await procurementApi.reopenOutletClosing(item.id, { reason });
+      setMessage(`${item.reference} closing reopened for correction.`);
+      await loadAll();
+    } catch (error: any) {
+      const data = error?.response?.data;
+      setMessage(data?.detail || data?.message || error?.message || 'Closing reopen failed.');
     } finally {
       setActingId(null);
     }
@@ -255,7 +333,7 @@ export default function ApprovalCenterWorkspace() {
             <ShieldCheck className="w-5 h-5 text-[#B8862D]" />
             <h1 className="text-xl font-bold">Approval Center</h1>
           </div>
-          <p className="text-xs text-[#707070] mt-1">Approve requirements and Central Store dispatches, review history, then send vendor POs.</p>
+          <p className="text-xs text-[#707070] mt-1">Approve requirements, Central Store dispatches and closings, review history, then send vendor POs.</p>
         </div>
         <Button size="sm" variant="secondary" onClick={loadAll} disabled={loading || poLoading}>
           <RefreshCw className={`w-4 h-4 ${(loading || poLoading) ? 'animate-spin' : ''}`} /> Refresh
@@ -329,8 +407,28 @@ export default function ApprovalCenterWorkspace() {
                     </div>
                     <div className="text-xs text-[#707070] mt-1">{item.reference}{item.branch ? ` · ${item.branch}` : ''}</div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
                     <span className="font-bold">{money(item.amount)}</span>
+                    {item.type === 'CLOSING' && item.status === 'VERIFIED' && (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={actingId === item.id}
+                        onClick={() => lockClosing(item)}
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Lock
+                      </Button>
+                    )}
+                    {item.type === 'CLOSING' && item.status === 'FINALIZED_LOCKED' && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={actingId === item.id}
+                        onClick={() => reopenClosing(item)}
+                      >
+                        <RefreshCw className="w-4 h-4" /> Reopen
+                      </Button>
+                    )}
                     <Button size="sm" variant="secondary" onClick={() => setViewRequest(item)}>
                       <Eye className="w-4 h-4" /> View
                     </Button>
@@ -386,38 +484,103 @@ export default function ApprovalCenterWorkspace() {
           <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
             <div className="p-4 border-b flex items-center justify-between">
               <div>
-                <h3 className="font-bold text-lg">Requirement Details</h3>
+                <h3 className="font-bold text-lg">{viewRequest.type === 'CLOSING' ? 'Closing Details' : 'Requirement Details'}</h3>
                 <div className="text-xs text-gray-500">{viewRequest.reference} · {viewRequest.status}</div>
               </div>
               <button onClick={() => setViewRequest(null)} aria-label="Close"><XCircle className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
-                <div><div className="text-xs text-gray-500">Outlet</div><div>{viewRequest.branch || '—'}</div></div>
+                <div><div className="text-xs text-gray-500">Location</div><div>{viewRequest.branch || '—'}</div></div>
                 <div><div className="text-xs text-gray-500">Status</div><div className="font-semibold">{viewRequest.status}</div></div>
                 <div><div className="text-xs text-gray-500">Total</div><div className="font-bold">{money(viewRequest.amount)}</div></div>
               </div>
-              <div className="border rounded-xl overflow-hidden">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-gray-50"><tr>
-                    <th className="px-3 py-2">Item</th><th className="px-3 py-2">Source</th><th className="px-3 py-2">Vendor</th>
-                    <th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2">Unit</th><th className="px-3 py-2 text-right">Rate</th><th className="px-3 py-2 text-right">Amount</th>
-                  </tr></thead>
-                  <tbody className="divide-y">
-                    {(viewRequest.payload?.items || []).map((line: any) => (
-                      <tr key={line.id || line.item_id}>
-                        <td className="px-3 py-2 font-medium">{line.item_name || line.item?.name || 'Item'}</td>
-                        <td className="px-3 py-2">{sourceLabel(line.supply_source || line.supplySource)}</td>
-                        <td className="px-3 py-2">{line.supplier_name || line.supplier?.name || '—'}</td>
-                        <td className="px-3 py-2 text-right font-mono">{qtyOf(line)}</td>
-                        <td className="px-3 py-2">{line.unit_symbol || line.unit || '—'}</td>
-                        <td className="px-3 py-2 text-right">{money(rateOf(line))}</td>
-                        <td className="px-3 py-2 text-right font-semibold">{money(amountOf(line))}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {viewRequest.type === 'CLOSING' ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-xl bg-gray-50 p-3">
+                      <div className="text-[10px] text-gray-500 uppercase">Period</div>
+                      <div className="font-semibold text-sm">
+                        {String(viewRequest.payload?.period_type || '').replace('_', ' ')}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-gray-50 p-3">
+                      <div className="text-[10px] text-gray-500 uppercase">Opening</div>
+                      <div className="font-semibold">{money(viewRequest.payload?.opening_valuation)}</div>
+                    </div>
+                    <div className="rounded-xl bg-gray-50 p-3">
+                      <div className="text-[10px] text-gray-500 uppercase">Purchases</div>
+                      <div className="font-semibold">{money(viewRequest.payload?.total_purchases)}</div>
+                    </div>
+                    <div className="rounded-xl bg-gray-50 p-3">
+                      <div className="text-[10px] text-gray-500 uppercase">Closing Value</div>
+                      <div className="font-semibold">{money(viewRequest.payload?.closing_physical_valuation)}</div>
+                    </div>
+                  </div>
+
+                  {viewRequest.payload?.notes && (
+                    <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-900">
+                      <b>Notes:</b> {viewRequest.payload.notes}
+                    </div>
+                  )}
+
+                  <div className="border rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-gray-50"><tr>
+                        <th className="px-3 py-2">Item</th>
+                        <th className="px-3 py-2 text-right">Opening</th>
+                        <th className="px-3 py-2 text-right">Received</th>
+                        <th className="px-3 py-2 text-right">Physical</th>
+                        <th className="px-3 py-2 text-right">Variance</th>
+                        <th className="px-3 py-2 text-right">Value</th>
+                      </tr></thead>
+                      <tbody className="divide-y">
+                        {(viewRequest.payload?.closing_items || []).map((line: any) => (
+                          <tr key={line.id || line.item_id}>
+                            <td className="px-3 py-2 font-medium">
+                              <div>{line.item_name || 'Item'}</div>
+                              <div className="text-[10px] text-gray-500">{line.item_code || ''}</div>
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono">{qtyOf({ requested_qty: line.opening_qty })}</td>
+                            <td className="px-3 py-2 text-right font-mono">{qtyOf({ requested_qty: line.received_qty })}</td>
+                            <td className="px-3 py-2 text-right font-mono">{qtyOf({ requested_qty: line.physical_closing_qty })}</td>
+                            <td className="px-3 py-2 text-right font-mono">{qtyOf({ requested_qty: line.variance_qty })}</td>
+                            <td className="px-3 py-2 text-right font-semibold">{money(line.total_valuation)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                    <div><span className="text-gray-500">Consumption:</span> <b>{money(viewRequest.payload?.calculated_consumption)}</b></div>
+                    <div><span className="text-gray-500">Actual Food Cost:</span> <b>{money(viewRequest.payload?.actual_food_cost)}</b></div>
+                    <div><span className="text-gray-500">Variance:</span> <b>{money(viewRequest.payload?.variance_amount)}</b></div>
+                  </div>
+                </div>
+              ) : (
+                <div className="border rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-gray-50"><tr>
+                      <th className="px-3 py-2">Item</th><th className="px-3 py-2">Source</th><th className="px-3 py-2">Vendor</th>
+                      <th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2">Unit</th><th className="px-3 py-2 text-right">Rate</th><th className="px-3 py-2 text-right">Amount</th>
+                    </tr></thead>
+                    <tbody className="divide-y">
+                      {(viewRequest.payload?.items || []).map((line: any) => (
+                        <tr key={line.id || line.item_id}>
+                          <td className="px-3 py-2 font-medium">{line.item_name || line.item?.name || 'Item'}</td>
+                          <td className="px-3 py-2">{sourceLabel(line.supply_source || line.supplySource)}</td>
+                          <td className="px-3 py-2">{line.supplier_name || line.supplier?.name || '—'}</td>
+                          <td className="px-3 py-2 text-right font-mono">{qtyOf(line)}</td>
+                          <td className="px-3 py-2">{line.unit_symbol || line.unit || '—'}</td>
+                          <td className="px-3 py-2 text-right">{money(rateOf(line))}</td>
+                          <td className="px-3 py-2 text-right font-semibold">{money(amountOf(line))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
             <div className="p-4 border-t bg-gray-50 flex justify-end"><Button variant="secondary" onClick={() => setViewRequest(null)}>Close</Button></div>
           </div>

@@ -212,7 +212,12 @@ export const procurementApi = {
   },
 
   // 5. Twice-Monthly Closing & Food Cost Tie-In
-  getOutletClosings: async (params?: { branch_id?: string; year?: number; month?: number }): Promise<OutletClosingRecord[]> => {
+  getOutletClosings: async (params?: {
+    branch_id?: string;
+    year?: number;
+    month?: number;
+    status_filter?: string;
+  }): Promise<OutletClosingRecord[]> => {
     const res = await apiClient.get<OutletClosingRecord[]>('/procurement/closings', { params });
     return res.data;
   },
@@ -224,6 +229,22 @@ export const procurementApi = {
     const res = await apiClient.post<OutletClosingRecord>('/procurement/closings/submit', payload);
     return res.data;
   },
+  approveOutletClosing: async (closingId: string): Promise<OutletClosingRecord> => {
+    const res = await apiClient.post<OutletClosingRecord>(`/procurement/closings/${closingId}/approve`, {});
+    return res.data;
+  },
+
+  rejectOutletClosing: async (
+    closingId: string,
+    payload: { reason: string }
+  ): Promise<OutletClosingRecord> => {
+    const res = await apiClient.post<OutletClosingRecord>(
+      `/procurement/closings/${closingId}/reject`,
+      payload
+    );
+    return res.data;
+  },
+
   lockOutletClosing: async (closingId: string): Promise<OutletClosingRecord> => {
     const res = await apiClient.post<OutletClosingRecord>(`/procurement/closings/${closingId}/lock`);
     return res.data;
