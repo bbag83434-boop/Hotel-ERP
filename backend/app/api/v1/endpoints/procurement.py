@@ -221,6 +221,38 @@ def check_user_outlet_access(user: User, branch_id: str, db: Session):
 REQUISITION_TYPES = {"PURCHASE", "MAIN_KITCHEN", "CENTRAL_STORE"}
 
 
+def next_vendor_multi_po_number(db: Session, company_id: str, required_date: Optional[datetime]) -> str:
+    """Return the next company/year running consolidated Vendor PO number.
+
+    Format: DD/MULTI/YYYY/001
+    Historical PO numbers are never rewritten.
+    """
+    target_date = required_date or datetime.utcnow()
+    day = target_date.strftime("%d")
+    year = target_date.strftime("%Y")
+    prefix = f"{day}/MULTI/{year}/"
+
+    existing_numbers = db.query(PurchaseOrder.po_number).filter(
+        PurchaseOrder.company_id == company_id,
+        PurchaseOrder.po_number.ilike(f"%/MULTI/{year}/%"),
+    ).all()
+
+    max_serial = 0
+    for row in existing_numbers:
+        value = row[0] if row else None
+        if not value:
+            continue
+        match = re.search(r"/(\d{1,})$", str(value))
+        if not match:
+            continue
+        try:
+            max_serial = max(max_serial, int(match.group(1)))
+        except ValueError:
+            continue
+
+    return f"{prefix}{max_serial + 1:03d}"
+
+
 def normalize_requisition_type(value: Optional[str]) -> str:
     """
     Normalizes & validates the requisition_type classification used on the
@@ -310,7 +342,8 @@ def format_whatsapp_message(
     po_id: str,
     supplier_id: str,
     items_summary: List[Dict[str, Any]],
-    allocations_by_outlet: Dict[str, Any]
+    allocations_by_outlet: Dict[str, Any],
+    required_date: Optional[datetime] = None,
 ) -> str:
     # Determine all unique destinations and if Central Store is present
     destinations_set = set()
@@ -324,11 +357,17 @@ def format_whatsapp_message(
             destinations_set.add(bname)
 
     lines = []
+    lines.append("CB RESTAURANT MANAGEMENT")
+    lines.append("")
     lines.append(f"Hello {supplier_name},")
     lines.append("")
+    lines.append("PURCHASE ORDER")
+    lines.append("")
     if po_number:
-        lines.append(f"Purchase Order: {po_number}")
-        lines.append("")
+        lines.append(f"PO No: {po_number}")
+    if required_date:
+        lines.append(f"Required Date: {required_date.strftime('%d-%m-%Y')}")
+    lines.append("")
 
     if len(destinations_set) == 1:
         dest_name = list(destinations_set)[0]
@@ -943,6 +982,77 @@ def format_pr_response(req: PurchaseRequest, db: Session) -> PurchaseRequestResp
         updated_at=req.updated_at,
     )
 
+def _aggregate_po_item_allocations(raw_allocations: Any) -> List[Dict[str, Any]]:
+    """
+    Normalize PO item allocations for display without changing the underlying
+    Purchase Request records. Multiple allocation rows for the same outlet,
+    item and unit are combined into one display row while request provenance
+    is retained in metadata.
+    """
+    if not raw_allocations:
+        return []
+
+    if isinstance(raw_allocations, str):
+        try:
+            raw_allocations = json.loads(raw_allocations)
+        except Exception:
+            return []
+
+    if not isinstance(raw_allocations, list):
+        return []
+
+    grouped: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+
+    for allocation in raw_allocations:
+        if not isinstance(allocation, dict):
+            continue
+
+        branch_id = str(allocation.get("branch_id") or "")
+        branch_name = str(allocation.get("branch_name") or "Outlet")
+        unit = str(allocation.get("unit") or "UNIT")
+        key = (branch_id, branch_name, unit)
+
+        quantity_raw = allocation.get("quantity", allocation.get("qty", 0))
+        try:
+            quantity = Decimal(str(quantity_raw or 0))
+        except Exception:
+            quantity = Decimal("0")
+
+        row = grouped.get(key)
+        if row is None:
+            row = {
+                "branch_id": allocation.get("branch_id"),
+                "branch_name": branch_name,
+                "quantity": Decimal("0"),
+                "unit": unit,
+                "request_ids": set(),
+                "request_numbers": set(),
+            }
+            grouped[key] = row
+
+        row["quantity"] += quantity
+
+        request_id = allocation.get("request_id")
+        if request_id:
+            row["request_ids"].add(str(request_id))
+        request_number = allocation.get("request_number")
+        if request_number:
+            row["request_numbers"].add(str(request_number))
+
+    result: List[Dict[str, Any]] = []
+    for row in grouped.values():
+        result.append({
+            "branch_id": row["branch_id"],
+            "branch_name": row["branch_name"],
+            "quantity": float(row["quantity"]),
+            "unit": row["unit"],
+            "request_ids": sorted(row["request_ids"]),
+            "request_numbers": sorted(row["request_numbers"]),
+        })
+
+    result.sort(key=lambda x: (str(x.get("branch_name") or ""), str(x.get("unit") or "")))
+    return result
+
 
 def format_po_response(po: PurchaseOrder, db: Session) -> PurchaseOrderResponse:
     branch = po.branch or (db.query(Branch).filter(Branch.id == po.branch_id).first() if po.branch_id else None)
@@ -987,7 +1097,7 @@ def format_po_response(po: PurchaseOrder, db: Session) -> PurchaseOrderResponse:
                 unit_price=item.unit_price,
                 total_price=item.total_price,
                 notes=item.notes,
-                allocations=item.allocations,
+                allocations=json.dumps(_aggregate_po_item_allocations(item.allocations)),
             )
         )
     return PurchaseOrderResponse(
@@ -1067,18 +1177,17 @@ def create_purchase_request(
                 + ". Assign a preferred vendor in the Item/Vendor Master before creating the Central Store Requirement."
             )
 
-    # DIRECT_VENDOR follows the same existing Item/Vendor Master resolver.  The
-    # request payload is never a vendor-selection mechanism: every direct line
-    # is validated and mapped before a PurchaseRequest row is persisted.
+    # Vendor-vs-Central routing is resolved from the existing Item/Vendor Master
+    # authority, not from a stale client-side flag. An active SupplierItem mapping
+    # is treated as DIRECT_VENDOR by the existing routing resolver.
     missing_direct_vendor: List[str] = []
     for item_in in payload.items:
         db_item = db.query(Item).filter(Item.id == item_in.item_id).first()
         if not db_item:
             raise NotFoundException(f"Inventory Item '{item_in.item_id}' not found.")
-        if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
-            supplier_id, _ = resolve_default_item_vendor(db, db_item)
-            if not supplier_id:
-                missing_direct_vendor.append(db_item.name)
+        effective_source, supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
+        if effective_source == "DIRECT_VENDOR" and not supplier_id:
+            missing_direct_vendor.append(db_item.name)
     if missing_direct_vendor:
         raise BadRequestException(
             "Vendor is not configured for Direct Vendor item(s): "
@@ -1108,23 +1217,24 @@ def create_purchase_request(
         if not db_item:
             raise NotFoundException(f"Inventory Item '{item_in.item_id}' not found.")
 
-        # Determine supplier: explicit -> item master -> None.
-        # PART 3: Central Store own requirement NEVER carries a manually chosen
-        # vendor — it is always auto-resolved from the Item/Vendor Master.
-        if requisition_type == "CENTRAL_STORE":
-            supplier_id, _ = resolve_default_item_vendor(db, db_item)
-        elif (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
-            # Ignore any supplier_id supplied by the outlet. Direct Vendor
-            # routing is determined solely by Item/Vendor Master configuration.
-            supplier_id, _ = resolve_default_item_vendor(db, db_item)
-        else:
-            supplier_id = item_in.supplier_id or db_item.supplier_id
+        # Resolve the authoritative routing once for this item. The Outlet
+        # Requirement does not choose Vendor vs Central Store manually.
+        effective_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
 
-        # Resolve unit & supply source automatically from the Item Master supply routing —
-        # the Outlet Requirement NEVER carries a manually chosen source.
+        if requisition_type == "CENTRAL_STORE":
+            # Central Store's own requirement stays CENTRAL_STORE. Vendor is
+            # resolved only for procurement; the requirement itself is not an
+            # outlet Vendor requirement.
+            supplier_id = resolved_supplier_id or resolve_default_item_vendor(db, db_item)[0]
+            item_supply_source = "CENTRAL_STORE"
+        elif effective_source == "DIRECT_VENDOR":
+            supplier_id = resolved_supplier_id
+            item_supply_source = "DIRECT_VENDOR"
+        else:
+            supplier_id = None
+            item_supply_source = "CENTRAL_STORE"
 
         item_unit = db_item.unit.symbol if db_item.unit else None
-        item_supply_source = db_item.supply_source or "CENTRAL_STORE"
 
         pr_item = PurchaseRequestItem(
             request_id=req.id,
@@ -1135,7 +1245,7 @@ def create_purchase_request(
             requested_qty=item_in.requested_qty,
             estimated_price=(
                 get_configured_supplier_item_price(db, db_item, supplier_id)
-                if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR" and supplier_id
+                if effective_source == "DIRECT_VENDOR" and supplier_id
                 else item_in.estimated_price or db_item.cost_price or Decimal("0.0000")
             ),
             notes=item_in.notes,
@@ -1276,18 +1386,21 @@ def update_purchase_request(
                 raise NotFoundException(f"Item '{item_in.item_id}' not found.")
             # PART 3: Central Store own requirement vendors are ALWAYS resolved
             # automatically from the Item/Vendor Master — no manual override.
+            effective_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
             if req.requisition_type == "CENTRAL_STORE":
-                supplier_id, _ = resolve_default_item_vendor(db, db_item)
-            elif (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR":
-                supplier_id, _ = resolve_default_item_vendor(db, db_item)
+                supplier_id = resolved_supplier_id or resolve_default_item_vendor(db, db_item)[0]
+                item_supply_source = "CENTRAL_STORE"
+            elif effective_source == "DIRECT_VENDOR":
+                supplier_id = resolved_supplier_id
+                item_supply_source = "DIRECT_VENDOR"
             else:
-                supplier_id = item_in.supplier_id or db_item.supplier_id
-            # Resolve unit & supply source automatically from the Item Master supply routing —
-            # the Outlet Requirement NEVER carries a manually chosen source.
-
+                supplier_id = None
+                item_supply_source = "CENTRAL_STORE"
+            # Resolve unit & supply source automatically from the authoritative
+            # Item/Vendor Master. The Outlet Requirement NEVER carries a manual
+            # Vendor/Central Store choice.
 
             item_unit = db_item.unit.symbol if db_item.unit else None
-            item_supply_source = db_item.supply_source or "CENTRAL_STORE"
 
             pr_item = PurchaseRequestItem(
                 request_id=req.id,
@@ -1298,7 +1411,7 @@ def update_purchase_request(
                 requested_qty=item_in.requested_qty,
                 estimated_price=(
                     get_configured_supplier_item_price(db, db_item, supplier_id)
-                    if (db_item.supply_source or "CENTRAL_STORE").upper() == "DIRECT_VENDOR" and supplier_id
+                    if effective_source == "DIRECT_VENDOR" and supplier_id
                     else item_in.estimated_price or db_item.cost_price or Decimal("0.0000")
                 ),
                 notes=item_in.notes,
@@ -1571,14 +1684,23 @@ def approve_purchase_request(
             )
             db.commit()
     else:
-        # Outlet requirement -> Split based on Item Master supply routing
+        # Outlet requirement -> resolve the actual route from Item/Vendor Master.
+        # This also repairs legacy PR rows whose stored supply_source is stale.
         has_direct_vendor = False
         has_central_store = False
         central_store_items = []
         for itm in req.items:
             db_item = db.query(Item).filter(Item.id == itm.item_id).first()
-            supply = (itm.supply_source or (db_item.supply_source if db_item else "CENTRAL_STORE"))
-            if str(supply).upper() == "DIRECT_VENDOR":
+            effective_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
+
+            # Repair the PR row at approval time so the stored routing matches
+            # the current Vendor-Item / Item Master configuration. This keeps
+            # list/detail APIs fast and avoids per-row routing queries later.
+            itm.supply_source = effective_source
+            itm.supplier_id = resolved_supplier_id if effective_source == "DIRECT_VENDOR" else None
+            db.add(itm)
+
+            if effective_source == "DIRECT_VENDOR":
                 has_direct_vendor = True
             else:
                 has_central_store = True
@@ -1595,15 +1717,69 @@ def approve_purchase_request(
                 db=db,
                 current_user=current_user
             )
-            # Reuse the established submit lifecycle so every generated Direct
-            # Vendor PO is PENDING_APPROVAL (never vendor-sendable on creation).
-            for direct_vendor_po in direct_vendor_orders.orders:
-                submit_order_for_approval(
-                    order_id=direct_vendor_po.id,
-                    db=db,
-                    current_user=current_user,
-                )
-                
+            # consolidate_outlet_orders() returns PurchaseOrderResponse Pydantic
+            # objects, not SQLAlchemy PurchaseOrder ORM instances. Re-load the
+            # actual ORM rows by id before changing/persisting their status.
+            now = datetime.utcnow()
+            generated_ids = [
+                getattr(po, "id", None)
+                for po in (getattr(direct_vendor_orders, "orders", []) or [])
+            ]
+            generated_ids = [po_id for po_id in generated_ids if po_id]
+
+            # Do not rely only on the consolidation response. The Vendor PO may
+            # be a newly-created PO or an existing open consolidated PO. Reload
+            # every participating PO from the database so the approval event
+            # always reaches the real PurchaseOrder ORM row.
+            generated_pos = []
+            if generated_ids:
+                generated_pos = db.query(PurchaseOrder).filter(
+                    PurchaseOrder.id.in_(generated_ids),
+                    PurchaseOrder.company_id == req.company_id,
+                ).all()
+
+            participating_pos = db.query(PurchaseOrder).filter(
+                PurchaseOrder.company_id == req.company_id,
+                PurchaseOrder.supplier_id.in_(
+                    [
+                        item.supplier_id
+                        for item in req.items
+                        if item.supplier_id
+                    ]
+                ),
+                PurchaseOrder.status.in_([
+                    POStatus.DRAFT,
+                    POStatus.PENDING_APPROVAL,
+                    POStatus.APPROVED,
+                ]),
+                PurchaseOrder.allocations.ilike(f"%{req.id}%"),
+            ).all()
+
+            seen_po_ids = {po.id for po in generated_pos}
+            for po in participating_pos:
+                if po.id not in seen_po_ids:
+                    generated_pos.append(po)
+                    seen_po_ids.add(po.id)
+
+            for direct_vendor_po in generated_pos:
+                direct_vendor_po.status = POStatus.APPROVED
+                direct_vendor_po.approved_by_id = current_user.id
+                direct_vendor_po.approved_at = direct_vendor_po.approved_at or now
+                direct_vendor_po.expected_delivery_date = req.required_date or now
+                try:
+                    alloc = json.loads(direct_vendor_po.allocations) if direct_vendor_po.allocations else {}
+                except Exception:
+                    alloc = {}
+                if not isinstance(alloc, dict):
+                    alloc = {}
+                alloc["consolidation_open"] = True
+                alloc["auto_generated_vendor_po"] = True
+                alloc["required_date"] = (req.required_date or now).strftime("%Y-%m-%d")
+                direct_vendor_po.allocations = json.dumps(alloc)
+                direct_vendor_po.updated_at = now
+
+            db.commit()
+
         if has_central_store and central_store_items:
             # Create a StockTransfer (REQUESTED state) for Central Store queue
             central_wh = db.query(Warehouse).filter(
@@ -1801,17 +1977,16 @@ def consolidate_outlet_orders(
                 if not db_item:
                     raise NotFoundException(f"Item '{pr_item.item_id}' not found in catalog.")
 
-            # Identify Supply Source & apply filter
-            effective_supply_source = (pr_item.supply_source or db_item.supply_source or "CENTRAL_STORE").upper()
+            # Identify Supply Source from the authoritative Item/Vendor Master.
+            # This deliberately re-resolves legacy PR rows whose stored source may
+            # have been created before the Vendor Item routing was configured.
+            effective_supply_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
             supply_source_filter = {str(source).upper() for source in (payload.supply_source_filter or [])}
             if supply_source_filter and effective_supply_source not in supply_source_filter:
                 continue
 
-            # DIRECT_VENDOR must always use the existing authoritative Item/Vendor
-            # Master resolver; a stored or client-provided PR supplier cannot
-            # override a preferred active SupplierItem mapping.
             if effective_supply_source == "DIRECT_VENDOR":
-                effective_supplier_id, _ = resolve_default_item_vendor(db, db_item)
+                effective_supplier_id = resolved_supplier_id
             else:
                 effective_supplier_id = pr_item.supplier_id or db_item.supplier_id
             
@@ -1830,12 +2005,13 @@ def consolidate_outlet_orders(
                     f"Inactive supplier: Supplier '{supplier.name}' assigned to item '{db_item.name}' is marked inactive."
                 )
 
-            # Initialize supplier group if first time encountered
-            # A direct-vendor delivery is physically received by the requesting
-            # outlet, never by the Central Store.  Keep each outlet's vendor
-            # lines in its own PO even when the vendor is shared.
+            # Same vendor + same required date = one consolidated Vendor PO.
+            # The outlet allocation remains inside the PO so every outlet's
+            # quantity stays separately traceable. Central Store grouping keeps
+            # its existing behavior.
+            required_date_key = (pr.required_date or datetime.utcnow()).date().isoformat()
             supplier_group_key = (
-                f"{effective_supplier_id}:{pr.branch_id}"
+                f"{effective_supplier_id}:{required_date_key}"
                 if effective_supply_source == "DIRECT_VENDOR"
                 else effective_supplier_id
             )
@@ -1846,6 +2022,7 @@ def consolidate_outlet_orders(
                     "outlet_breakdown": {},
                     "participating_requests": set(),
                     "participating_branches": set(),
+                    "required_date": pr.required_date or datetime.utcnow(),
                 }
 
             s_group = supplier_groups[supplier_group_key]
@@ -1895,27 +2072,42 @@ def consolidate_outlet_orders(
             })
 
     # --------------------------------------------------------------------------
-    # Generate Consolidated Purchase Orders (One PO per Supplier)
+    # Generate Consolidated Purchase Orders
+    # Vendor: one OPEN PO per Supplier + Required Date, across all outlets.
+    # Central Store keeps its existing creation behavior.
     # --------------------------------------------------------------------------
     created_orders: List[PurchaseOrder] = []
-    timestamp_str = datetime.utcnow().strftime('%Y%m%d%H%M')
+    direct_vendor_filter = {str(x).upper() for x in (payload.supply_source_filter or [])}
+    is_vendor_consolidation = "DIRECT_VENDOR" in direct_vendor_filter
 
     for s_id, s_data in supplier_groups.items():
         supplier: Supplier = s_data["supplier"]
+        required_date = s_data.get("required_date") or datetime.utcnow()
         po_status = POStatus.PENDING_APPROVAL if payload.auto_submit else POStatus.DRAFT
-        po_num = f"PO-{timestamp_str}-{abs(hash(str(supplier.id) + str(datetime.utcnow()))) % 10000:04d}"
 
-        # Calculate totals
-        total_amt = Decimal("0.0000")
+        # For the auto-generated Vendor PO flow, numbering is the required-date
+        # based consolidated format requested by the business.
+        po_num = (
+            next_vendor_multi_po_number(db, company_id, required_date)
+            if is_vendor_consolidation
+            else f"PO-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(supplier.id) + str(datetime.utcnow()))) % 10000:04d}"
+        )
+
+        # Calculate totals for the newly approved request batch.
+        new_total_amt = Decimal("0.0000")
         for item_data in s_data["items"].values():
-            line_tot = item_data["total_qty"] * item_data["unit_price"]
-            total_amt += line_tot
+            new_total_amt += item_data["total_qty"] * item_data["unit_price"]
 
-        # Format allocation payload
+        required_date_text = required_date.strftime("%Y-%m-%d")
+
+        # New structured allocation payload.
         full_allocation_payload = {
             "supplier_id": supplier.id,
             "supplier_name": supplier.name,
             "consolidated_at": datetime.utcnow().isoformat(),
+            "required_date": required_date_text,
+            "consolidation_open": bool(is_vendor_consolidation),
+            "auto_generated_vendor_po": bool(is_vendor_consolidation),
             "outlets": s_data["outlet_breakdown"],
             "participating_request_ids": list(s_data["participating_requests"]),
             "items_summary": [
@@ -1934,65 +2126,202 @@ def consolidate_outlet_orders(
         unique_branch_ids = {r.branch_id for r in requests if r.id in s_data["participating_requests"]}
         assigned_branch_id = list(unique_branch_ids)[0] if len(unique_branch_ids) == 1 else None
 
-        # Create PO
-        po = PurchaseOrder(
-            company_id=company_id,
-            branch_id=assigned_branch_id,
-            supplier_id=supplier.id,
-            po_number=po_num,
-            status=po_status,
-            order_date=datetime.utcnow(),
-            total_amount=total_amt,
-            tax_amount=Decimal("0.0000"),
-            discount_amount=Decimal("0.0000"),
-            net_amount=total_amt,
-            notes=payload.notes or f"Auto-consolidated order for outlets: {', '.join(s_data['participating_branches'])}",
-            created_by_id=current_user.id,
-            allocations=json.dumps(full_allocation_payload),
-            whatsapp_number=supplier.effective_whatsapp_number,
-        )
-        db.add(po)
-        db.flush()
+        # Try to append to an existing unsent Vendor PO for the same company,
+        # vendor and required date. Once WhatsApp is opened, that PO is closed
+        # for further consolidation and a new PO will be created.
+        existing_po = None
+        if is_vendor_consolidation:
+            open_pos = db.query(PurchaseOrder).filter(
+                PurchaseOrder.company_id == company_id,
+                PurchaseOrder.supplier_id == supplier.id,
+                PurchaseOrder.status.in_([
+                    POStatus.APPROVED,
+                    POStatus.DRAFT,
+                    POStatus.PENDING_APPROVAL,
+                ]),
+                PurchaseOrder.whatsapp_opened_at.is_(None),
+            ).order_by(desc(PurchaseOrder.created_at)).all()
+            for candidate in open_pos:
+                try:
+                    candidate_alloc = json.loads(candidate.allocations) if candidate.allocations else {}
+                except Exception:
+                    candidate_alloc = {}
+                if not isinstance(candidate_alloc, dict):
+                    continue
+                if candidate_alloc.get("auto_generated_vendor_po") is not True:
+                    continue
+                if "/MULTI/" not in str(candidate.po_number or "").upper():
+                    continue
+                if candidate_alloc.get("consolidation_open") is not True:
+                    continue
+                if str(candidate_alloc.get("required_date") or "") != required_date_text:
+                    continue
+                if any(Decimal(str(line.received_qty or 0)) > 0 for line in (candidate.items or [])):
+                    continue
+                existing_po = candidate
+                break
 
-        # Add PO Line Items
-        for item_id, item_dict in s_data["items"].items():
-            tot_qty = item_dict["total_qty"]
-            u_price = item_dict["unit_price"]
-            tot_price = tot_qty * u_price
+        if existing_po:
+            po = existing_po
+            try:
+                merged = json.loads(po.allocations) if po.allocations else {}
+            except Exception:
+                merged = {}
+            if not isinstance(merged, dict):
+                merged = {}
 
-            po_item = PurchaseOrderItem(
-                po_id=po.id,
-                item_id=item_id,
-                ordered_qty=tot_qty,
-                received_qty=Decimal("0.0000"),
-                unit_price=u_price,
-                total_price=tot_price,
-                notes=f"Consolidated across {len(item_dict['allocations'])} outlet(s)",
-                allocations=json.dumps(item_dict["allocations"]),
+            merged.setdefault("supplier_id", supplier.id)
+            merged.setdefault("supplier_name", supplier.name)
+            merged["required_date"] = required_date_text
+            merged["consolidation_open"] = True
+            merged["auto_generated_vendor_po"] = True
+
+            request_ids = {str(x) for x in (merged.get("participating_request_ids") or [])}
+            request_ids.update(str(x) for x in s_data["participating_requests"])
+            merged["participating_request_ids"] = sorted(request_ids)
+
+            outlet_map = merged.get("outlets") if isinstance(merged.get("outlets"), dict) else {}
+            for outlet_name, rows in s_data["outlet_breakdown"].items():
+                outlet_map.setdefault(outlet_name, [])
+                outlet_map[outlet_name].extend(rows)
+            merged["outlets"] = outlet_map
+
+            existing_summaries = {}
+            for row in merged.get("items_summary") or []:
+                if isinstance(row, dict) and row.get("item_id"):
+                    existing_summaries[str(row["item_id"])] = row
+
+            for item_id, incoming in s_data["items"].items():
+                key = str(item_id)
+                incoming_allocations = list(incoming["allocations"])
+                if key in existing_summaries:
+                    row = existing_summaries[key]
+                    row["total_qty"] = float(Decimal(str(row.get("total_qty", 0))) + incoming["total_qty"])
+                    row.setdefault("allocations", [])
+                    row["allocations"].extend(incoming_allocations)
+                else:
+                    row = {
+                        "item_id": incoming["item"].id,
+                        "item_name": incoming["item_name"],
+                        "total_qty": float(incoming["total_qty"]),
+                        "unit_symbol": incoming["unit_symbol"],
+                        "unit_price": float(incoming["unit_price"]),
+                        "allocations": incoming_allocations,
+                    }
+                    existing_summaries[key] = row
+            merged["items_summary"] = list(existing_summaries.values())
+
+            # Update actual PO line items so receiving/stock workflows see the
+            # consolidated quantity as well as the outlet allocations.
+            po_item_map = {str(line.item_id): line for line in (po.items or [])}
+            for item_id, incoming in s_data["items"].items():
+                key = str(item_id)
+                line = po_item_map.get(key)
+                if line:
+                    line.ordered_qty = (line.ordered_qty or Decimal("0.0000")) + incoming["total_qty"]
+                    line.total_price = line.ordered_qty * line.unit_price
+                    old_allocs = []
+                    try:
+                        old_allocs = json.loads(line.allocations) if line.allocations else []
+                    except Exception:
+                        old_allocs = []
+                    if not isinstance(old_allocs, list):
+                        old_allocs = []
+                    line.allocations = json.dumps(old_allocs + incoming["allocations"])
+                    line.notes = f"Consolidated across {len(old_allocs + incoming['allocations'])} outlet allocation(s)"
+                else:
+                    u_price = incoming["unit_price"]
+                    db.add(PurchaseOrderItem(
+                        po_id=po.id,
+                        item_id=item_id,
+                        ordered_qty=incoming["total_qty"],
+                        received_qty=Decimal("0.0000"),
+                        unit_price=u_price,
+                        total_price=incoming["total_qty"] * u_price,
+                        notes=f"Consolidated across {len(incoming['allocations'])} outlet allocation(s)",
+                        allocations=json.dumps(incoming["allocations"]),
+                    ))
+
+            po.total_amount = (po.total_amount or Decimal("0.0000")) + new_total_amt
+            po.net_amount = (po.net_amount or po.total_amount or Decimal("0.0000")) + new_total_amt
+            po.expected_delivery_date = required_date
+            po.branch_id = None  # This PO is now explicitly multi-outlet.
+            po.allocations = json.dumps(merged)
+            po.updated_at = datetime.utcnow()
+            db.add(po)
+
+            log_procurement_audit(
+                db=db,
+                user=current_user,
+                action="MERGE_VENDOR_PURCHASE_ORDER",
+                entity_type="PurchaseOrder",
+                entity_id=po.id,
+                company_id=company_id,
+                new_values={
+                    "po_number": po.po_number,
+                    "supplier_name": supplier.name,
+                    "required_date": required_date_text,
+                    "added_outlets": list(s_data["participating_branches"]),
+                    "added_requests": list(s_data["participating_requests"]),
+                    "added_amount": float(new_total_amt),
+                },
             )
-            db.add(po_item)
+        else:
+            now = datetime.utcnow()
+            po = PurchaseOrder(
+                company_id=company_id,
+                branch_id=assigned_branch_id,
+                supplier_id=supplier.id,
+                po_number=po_num,
+                status=po_status,
+                order_date=now,
+                expected_delivery_date=required_date,
+                total_amount=new_total_amt,
+                tax_amount=Decimal("0.0000"),
+                discount_amount=Decimal("0.0000"),
+                net_amount=new_total_amt,
+                notes=payload.notes or f"Auto-consolidated order for outlets: {', '.join(sorted(s_data['participating_branches']))}",
+                created_by_id=current_user.id,
+                allocations=json.dumps(full_allocation_payload),
+                whatsapp_number=supplier.effective_whatsapp_number,
+            )
+            db.add(po)
+            db.flush()
+
+            for item_id, item_dict in s_data["items"].items():
+                po_item = PurchaseOrderItem(
+                    po_id=po.id,
+                    item_id=item_id,
+                    ordered_qty=item_dict["total_qty"],
+                    received_qty=Decimal("0.0000"),
+                    unit_price=item_dict["unit_price"],
+                    total_price=item_dict["total_qty"] * item_dict["unit_price"],
+                    notes=f"Consolidated across {len(item_dict['allocations'])} outlet allocation(s)",
+                    allocations=json.dumps(item_dict["allocations"]),
+                )
+                db.add(po_item)
+
+            log_procurement_audit(
+                db=db,
+                user=current_user,
+                action="CONSOLIDATE_PURCHASE_ORDER",
+                entity_type="PurchaseOrder",
+                entity_id=po.id,
+                company_id=company_id,
+                new_values={
+                    "po_number": po.po_number,
+                    "supplier_name": supplier.name,
+                    "supplier_id": supplier.id,
+                    "status": po.status.value,
+                    "required_date": required_date_text,
+                    "outlets": list(s_data["participating_branches"]),
+                    "items_count": len(s_data["items"]),
+                    "grand_total": float(new_total_amt),
+                    "requests": list(s_data["participating_requests"]),
+                }
+            )
 
         created_orders.append(po)
-
-        # Log detailed audit
-        log_procurement_audit(
-            db=db,
-            user=current_user,
-            action="CONSOLIDATE_PURCHASE_ORDER",
-            entity_type="PurchaseOrder",
-            entity_id=po.id,
-            company_id=company_id,
-            new_values={
-                "po_number": po.po_number,
-                "supplier_name": supplier.name,
-                "supplier_id": supplier.id,
-                "status": po.status.value,
-                "outlets": list(s_data["participating_branches"]),
-                "items_count": len(s_data["items"]),
-                "grand_total": float(total_amt),
-                "requests": list(s_data["participating_requests"]),
-            }
-        )
 
     # Update participating Purchase Requests status.
     #
@@ -2138,6 +2467,312 @@ def create_direct_purchase_order(
     return format_po_response(po, db)
 
 
+def _reconcile_open_auto_vendor_pos(db: Session, current_user: User) -> None:
+    """Repair vendor POs left in DRAFT/PENDING by the earlier approval bug.
+
+    Only auto-generated Vendor MULTI POs with no WhatsApp send timestamp are
+    eligible. Central Store POs and manually-created POs are never touched.
+    The operation is idempotent and exists to recover already-approved outlet
+    requirements without forcing the outlet to submit a duplicate requirement.
+    """
+    if not current_user.company_id:
+        return
+
+    candidates = db.query(PurchaseOrder).filter(
+        PurchaseOrder.company_id == current_user.company_id,
+        PurchaseOrder.status.in_([POStatus.DRAFT, POStatus.PENDING_APPROVAL]),
+        PurchaseOrder.whatsapp_opened_at.is_(None),
+        PurchaseOrder.allocations.ilike("%auto_generated_vendor_po%"),
+    ).all()
+
+    changed = False
+    now = datetime.utcnow()
+
+    for po in candidates:
+        try:
+            allocation = json.loads(po.allocations) if po.allocations else {}
+        except Exception:
+            allocation = {}
+        if not isinstance(allocation, dict):
+            continue
+        if allocation.get("auto_generated_vendor_po") is not True:
+            continue
+        if "/MULTI/" not in str(po.po_number or "").upper():
+            continue
+
+        request_ids = [str(x) for x in (allocation.get("participating_request_ids") or []) if x]
+        if not request_ids:
+            continue
+
+        approved_or_ordered = db.query(PurchaseRequest.id).filter(
+            PurchaseRequest.company_id == current_user.company_id,
+            PurchaseRequest.id.in_(request_ids),
+            PurchaseRequest.status.in_([PRStatus.APPROVED, PRStatus.ORDERED]),
+        ).count()
+        if approved_or_ordered == 0:
+            continue
+
+        allocation["consolidation_open"] = True
+        allocation["auto_generated_vendor_po"] = True
+        if not allocation.get("required_date") and po.expected_delivery_date:
+            allocation["required_date"] = po.expected_delivery_date.strftime("%Y-%m-%d")
+
+        po.status = POStatus.APPROVED
+        po.approved_by_id = po.approved_by_id or current_user.id
+        po.approved_at = po.approved_at or now
+        po.allocations = json.dumps(allocation)
+        po.updated_at = now
+        changed = True
+
+    # After repairing legacy Draft/Pending Vendor POs, collapse any duplicate
+    # open auto-generated Vendor POs that share the same company + vendor +
+    # required date. The earliest PO number is preserved; later duplicate POs
+    # are cancelled and their outlet/item allocations are merged into the
+    # preserved PO. This is intentionally limited to unsent MULTI Vendor POs.
+    duplicate_groups = {}
+    open_vendor_pos = db.query(PurchaseOrder).filter(
+        PurchaseOrder.company_id == current_user.company_id,
+        PurchaseOrder.status == POStatus.APPROVED,
+        PurchaseOrder.whatsapp_opened_at.is_(None),
+        PurchaseOrder.allocations.ilike("%auto_generated_vendor_po%"),
+    ).order_by(PurchaseOrder.created_at.asc()).all()
+
+    for po in open_vendor_pos:
+        try:
+            allocation = json.loads(po.allocations) if po.allocations else {}
+        except Exception:
+            allocation = {}
+        if not isinstance(allocation, dict):
+            continue
+        if allocation.get("auto_generated_vendor_po") is not True:
+            continue
+        if allocation.get("consolidation_open") is not True:
+            continue
+        if "/MULTI/" not in str(po.po_number or "").upper():
+            continue
+        required_date_text = str(
+            allocation.get("required_date")
+            or (po.expected_delivery_date.strftime("%Y-%m-%d") if po.expected_delivery_date else "")
+        )
+        if not required_date_text or not po.supplier_id:
+            continue
+        key = (str(po.supplier_id), required_date_text)
+        duplicate_groups.setdefault(key, []).append((po, allocation))
+
+    for (_supplier_id, required_date_text), group in duplicate_groups.items():
+        if len(group) <= 1:
+            continue
+
+        master, master_alloc = group[0]
+        merged_any = False
+
+        request_ids = {str(x) for x in (master_alloc.get("participating_request_ids") or []) if x}
+        outlet_map = master_alloc.get("outlets") if isinstance(master_alloc.get("outlets"), dict) else {}
+
+        summary_map = {}
+        for row in master_alloc.get("items_summary") or []:
+            if isinstance(row, dict) and row.get("item_id"):
+                summary_map[str(row["item_id"])] = row
+
+        master_lines = {str(line.item_id): line for line in (master.items or [])}
+
+        for duplicate_po, duplicate_alloc in group[1:]:
+            # Do not merge anything that has already received stock.
+            if any(Decimal(str(line.received_qty or 0)) > 0 for line in (duplicate_po.items or [])):
+                continue
+
+            duplicate_request_ids = {str(x) for x in (duplicate_alloc.get("participating_request_ids") or []) if x}
+            new_request_ids = duplicate_request_ids - request_ids
+
+            # Earlier approval failures could create the same auto-PO twice for
+            # the exact same Purchase Request. In that case the later PO is only
+            # an orphan duplicate and must be cancelled WITHOUT adding its qty a
+            # second time to the preserved PO.
+            if duplicate_request_ids and not new_request_ids:
+                duplicate_po.status = POStatus.CANCELLED
+                duplicate_po.notes = f"{duplicate_po.notes or ''} [Duplicate of {master.po_number}; same Purchase Request already consolidated]".strip()
+                duplicate_alloc["consolidation_open"] = False
+                duplicate_alloc["merged_into_po_number"] = master.po_number
+                duplicate_alloc["merged_into_po_id"] = master.id
+                duplicate_po.allocations = json.dumps(duplicate_alloc)
+                duplicate_po.updated_at = datetime.utcnow()
+                merged_any = True
+
+                log_procurement_audit(
+                    db=db,
+                    user=current_user,
+                    action="CANCEL_DUPLICATE_VENDOR_PO",
+                    entity_type="PurchaseOrder",
+                    entity_id=duplicate_po.id,
+                    company_id=current_user.company_id,
+                    new_values={
+                        "cancelled_duplicate_po": duplicate_po.po_number,
+                        "kept_po": master.po_number,
+                        "supplier_id": master.supplier_id,
+                        "required_date": required_date_text,
+                        "reason": "Same participating Purchase Request already consolidated",
+                    },
+                )
+                continue
+
+            # If this is a genuine additional request, only merge allocation
+            # rows belonging to request IDs that are not already present.
+            request_ids.update(new_request_ids)
+
+            duplicate_outlets = duplicate_alloc.get("outlets") if isinstance(duplicate_alloc.get("outlets"), dict) else {}
+            for outlet_name, rows in duplicate_outlets.items():
+                filtered_rows = [
+                    row for row in (rows or [])
+                    if str((row or {}).get("request_id") or "") in new_request_ids
+                    or not new_request_ids
+                ]
+                if filtered_rows:
+                    outlet_map.setdefault(outlet_name, [])
+                    outlet_map[outlet_name].extend(filtered_rows)
+
+            duplicate_value_added = Decimal("0.0000")
+
+            for row in duplicate_alloc.get("items_summary") or []:
+                if not isinstance(row, dict) or not row.get("item_id"):
+                    continue
+                row_allocs = [
+                    a for a in (row.get("allocations") or [])
+                    if str((a or {}).get("request_id") or "") in new_request_ids
+                    or not new_request_ids
+                ]
+                if not row_allocs:
+                    continue
+                key = str(row["item_id"])
+                added_qty = sum(
+                    Decimal(str(a.get("quantity", 0) or 0))
+                    for a in row_allocs
+                    if isinstance(a, dict)
+                )
+                if key in summary_map:
+                    target = summary_map[key]
+                    target["total_qty"] = float(Decimal(str(target.get("total_qty", 0))) + added_qty)
+                    target.setdefault("allocations", [])
+                    target["allocations"].extend(row_allocs)
+                else:
+                    new_row = dict(row)
+                    new_row["total_qty"] = float(added_qty)
+                    new_row["allocations"] = list(row_allocs)
+                    summary_map[key] = new_row
+                duplicate_value_added += added_qty * Decimal(str(row.get("unit_price", 0) or 0))
+
+            for duplicate_line in (duplicate_po.items or []):
+                duplicate_allocs = []
+                try:
+                    duplicate_allocs = json.loads(duplicate_line.allocations) if duplicate_line.allocations else []
+                except Exception:
+                    duplicate_allocs = []
+                if not isinstance(duplicate_allocs, list):
+                    duplicate_allocs = []
+                unique_allocs = [
+                    a for a in duplicate_allocs
+                    if str((a or {}).get("request_id") or "") in new_request_ids
+                    or not new_request_ids
+                ]
+                if not unique_allocs:
+                    continue
+
+                added_qty = sum(
+                    Decimal(str(a.get("quantity", 0) or 0))
+                    for a in unique_allocs
+                    if isinstance(a, dict)
+                )
+                if added_qty <= 0:
+                    continue
+
+                key = str(duplicate_line.item_id)
+                master_line = master_lines.get(key)
+                if master_line:
+                    master_line.ordered_qty = (master_line.ordered_qty or Decimal("0.0000")) + added_qty
+                    master_line.total_price = (master_line.ordered_qty or Decimal("0.0000")) * (master_line.unit_price or Decimal("0.0000"))
+                    old_allocs = []
+                    try:
+                        old_allocs = json.loads(master_line.allocations) if master_line.allocations else []
+                    except Exception:
+                        old_allocs = []
+                    if not isinstance(old_allocs, list):
+                        old_allocs = []
+                    master_line.allocations = json.dumps(old_allocs + unique_allocs)
+                    master_line.notes = f"Consolidated across {len(old_allocs + unique_allocs)} outlet allocation(s)"
+                else:
+                    u_price = duplicate_line.unit_price or Decimal("0.0000")
+                    db.add(PurchaseOrderItem(
+                        po_id=master.id,
+                        item_id=duplicate_line.item_id,
+                        ordered_qty=added_qty,
+                        received_qty=Decimal("0.0000"),
+                        unit_price=u_price,
+                        total_price=added_qty * u_price,
+                        notes=f"Consolidated across {len(unique_allocs)} outlet allocation(s)",
+                        allocations=json.dumps(unique_allocs),
+                    ))
+                    db.flush()
+                    master_lines[key] = db.query(PurchaseOrderItem).filter(
+                        PurchaseOrderItem.po_id == master.id,
+                        PurchaseOrderItem.item_id == duplicate_line.item_id,
+                    ).order_by(desc(PurchaseOrderItem.id)).first()
+
+                duplicate_value_added = max(
+                    duplicate_value_added,
+                    added_qty * (duplicate_line.unit_price or Decimal("0.0000")),
+                )
+
+            if duplicate_value_added > 0:
+                master.total_amount = (master.total_amount or Decimal("0.0000")) + duplicate_value_added
+                master.net_amount = (master.net_amount or Decimal("0.0000")) + duplicate_value_added
+
+                # Only bring over taxes/discounts when this duplicate contributes
+                # genuinely new request rows.
+                master.tax_amount = (master.tax_amount or Decimal("0.0000")) + (duplicate_po.tax_amount or Decimal("0.0000"))
+                master.discount_amount = (master.discount_amount or Decimal("0.0000")) + (duplicate_po.discount_amount or Decimal("0.0000"))
+
+            duplicate_po.status = POStatus.CANCELLED
+            duplicate_po.notes = f"{duplicate_po.notes or ''} [Merged into {master.po_number} - duplicate open Vendor PO]".strip()
+            duplicate_alloc["consolidation_open"] = False
+            duplicate_alloc["merged_into_po_number"] = master.po_number
+            duplicate_alloc["merged_into_po_id"] = master.id
+            duplicate_po.allocations = json.dumps(duplicate_alloc)
+            duplicate_po.updated_at = datetime.utcnow()
+
+            merged_any = True
+
+            log_procurement_audit(
+                db=db,
+                user=current_user,
+                action="MERGE_DUPLICATE_OPEN_VENDOR_PO",
+                entity_type="PurchaseOrder",
+                entity_id=duplicate_po.id,
+                company_id=current_user.company_id,
+                new_values={
+                    "cancelled_duplicate_po": duplicate_po.po_number,
+                    "merged_into_po": master.po_number,
+                    "supplier_id": master.supplier_id,
+                    "required_date": required_date_text,
+                    "new_request_ids": sorted(new_request_ids),
+                },
+            )
+
+        if merged_any:
+            master_alloc["required_date"] = required_date_text
+            master_alloc["consolidation_open"] = True
+            master_alloc["auto_generated_vendor_po"] = True
+            master_alloc["participating_request_ids"] = sorted(request_ids)
+            master_alloc["outlets"] = outlet_map
+            master_alloc["items_summary"] = list(summary_map.values())
+            master.branch_id = None
+            master.expected_delivery_date = master.expected_delivery_date or datetime.strptime(required_date_text, "%Y-%m-%d")
+            master.allocations = json.dumps(master_alloc)
+            master.updated_at = datetime.utcnow()
+            changed = True
+
+    if changed:
+        db.commit()
+
+
 @router.get("/orders", response_model=List[PurchaseOrderResponse])
 def list_purchase_orders(
     branch_id: Optional[str] = None,
@@ -2148,6 +2783,9 @@ def list_purchase_orders(
     current_user: User = Depends(get_current_active_user),
 ):
     """List purchase orders with branch, supplier, status, and search filters."""
+    if status_filter == POStatus.APPROVED:
+        _reconcile_open_auto_vendor_pos(db, current_user)
+
     query = db.query(PurchaseOrder)
     if current_user.company_id:
         query = query.filter(PurchaseOrder.company_id == current_user.company_id)
@@ -2424,6 +3062,7 @@ def open_supplier_whatsapp(
         supplier_id=supplier.id,
         items_summary=items_summary,
         allocations_by_outlet=allocations_by_outlet,
+        required_date=po.expected_delivery_date,
     )
 
     # Encode message for wa.me URL
@@ -5475,15 +6114,25 @@ def confirm_smart_requirement_draft(
 
     total_est_amt = Decimal("0.0000")
     for itm in confirmed_items:
-        cost = (itm.item.cost_price if itm.item else Decimal("0.0000")) or Decimal("0.0000")
+        db_item = itm.item or db.query(Item).filter(Item.id == itm.item_id).first()
+        if not db_item:
+            raise NotFoundException(f"Inventory Item '{itm.item_id}' not found.")
+
+        effective_source, resolved_supplier_id, _ = resolve_outlet_item_supply_source(db, db_item)
+        supplier_id = resolved_supplier_id if effective_source == "DIRECT_VENDOR" else None
+        cost = (
+            get_configured_supplier_item_price(db, db_item, supplier_id)
+            if effective_source == "DIRECT_VENDOR" and supplier_id
+            else (db_item.cost_price or Decimal("0.0000"))
+        )
         total_est_amt += itm.final_order_qty * cost
 
         pr_item = PurchaseRequestItem(
             request_id=pr.id,
             item_id=itm.item_id,
-            supplier_id=itm.supplier_id or (itm.item.supplier_id if itm.item else None),
-            unit=(itm.item.unit.symbol if (itm.item and itm.item.unit) else None),
-            supply_source=(itm.item.supply_source if itm.item else None) or "CENTRAL_STORE",
+            supplier_id=supplier_id,
+            unit=db_item.unit.symbol if db_item.unit else None,
+            supply_source=effective_source,
             requested_qty=itm.final_order_qty,
             estimated_price=cost,
             notes=itm.notes or itm.reason,

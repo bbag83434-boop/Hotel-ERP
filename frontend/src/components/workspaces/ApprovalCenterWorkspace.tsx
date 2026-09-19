@@ -50,8 +50,18 @@ const sourceLabel = (value: any) => {
 
 const isOpenVendorPO = (po: any) => {
   if (String(po?.status || '').toUpperCase() !== 'APPROVED') return false;
+
   const allocation = parseJson(po?.allocations);
-  return allocation?.consolidation_open === true;
+  if (allocation?.consolidation_open === true) return true;
+
+  // Backward-safe fallback for an approved auto-generated Vendor PO whose
+  // consolidation flag was not persisted correctly. A PO is still open until
+  // WhatsApp is opened/sent; SENT_MANUALLY POs are already excluded above.
+  const isAutoVendorPO =
+    allocation?.auto_generated_vendor_po === true ||
+    String(po?.po_number || '').toUpperCase().includes('/MULTI/');
+
+  return isAutoVendorPO && !po?.whatsapp_opened_at;
 };
 
 interface ApprovalItem {
@@ -595,7 +605,11 @@ export default function ApprovalCenterWorkspace() {
               <button onClick={() => setViewPO(null)} aria-label="Close"><XCircle className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-5">
+                <div><div className="text-xs text-gray-500">Company</div><div className="font-semibold">CB RESTAURANT MANAGEMENT</div></div>
+                <div><div className="text-xs text-gray-500">PO No</div><div className="font-semibold font-mono">{viewPO.po_number}</div></div>
+                <div><div className="text-xs text-gray-500">Outlet</div><div className="font-semibold">{viewPO.branch_name || '—'}</div></div>
+                <div><div className="text-xs text-gray-500">Required Date</div><div className="font-semibold">{viewPO.expected_delivery_date ? new Date(viewPO.expected_delivery_date).toLocaleDateString('en-GB') : '—'}</div></div>
                 <div><div className="text-xs text-gray-500">Vendor</div><div className="font-semibold">{viewPO.supplier_name}</div></div>
                 <div><div className="text-xs text-gray-500">PO Total</div><div className="font-bold">{money(viewPO.net_amount ?? viewPO.total_amount)}</div></div>
                 <div><div className="text-xs text-gray-500">Status</div><div className="font-semibold">READY TO SEND</div></div>
@@ -608,7 +622,18 @@ export default function ApprovalCenterWorkspace() {
                   <tbody className="divide-y">
                     {currentPOItems.map((item: any, idx: number) => {
                       const allocations = Array.isArray(item?.allocations) ? item.allocations : [];
-                      const allocationText = allocations.map((a: any) => `${a.branch_name || 'Outlet'} → ${a.quantity ?? a.qty ?? 0} ${item.unit_symbol || ''}`).join(', ');
+                      const allocationMap = new Map<string, number>();
+                      allocations.forEach((a: any) => {
+                        const outletName = String(a?.branch_name || 'Outlet');
+                        const qty = Number(a?.quantity ?? a?.qty ?? 0);
+                        allocationMap.set(
+                          outletName,
+                          (allocationMap.get(outletName) || 0) + (Number.isFinite(qty) ? qty : 0)
+                        );
+                      });
+                      const allocationText = Array.from(allocationMap.entries())
+                        .map(([outletName, qty]) => `${outletName} → ${qty} ${item.unit_symbol || ''}`)
+                        .join(', ');
                       return (
                         <tr key={`${item.item_id || item.item_name}-${idx}`}>
                           <td className="px-3 py-2 font-medium">{item.item_name || 'Item'}</td>
