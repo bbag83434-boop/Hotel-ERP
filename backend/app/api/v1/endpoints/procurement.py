@@ -221,6 +221,37 @@ def check_user_outlet_access(user: User, branch_id: str, db: Session):
 REQUISITION_TYPES = {"PURCHASE", "MAIN_KITCHEN", "CENTRAL_STORE"}
 
 
+def next_central_store_po_number(db: Session, company_id: str, required_date: Optional[datetime]) -> str:
+    """Return the next Central Store purchase-order number for the company/year.
+
+    Format: DD/CS/YY/01
+    Historical PO numbers are never rewritten.
+    """
+    target_date = required_date or datetime.utcnow()
+    day = target_date.strftime("%d")
+    year = target_date.strftime("%y")
+
+    existing_numbers = db.query(PurchaseOrder.po_number).filter(
+        PurchaseOrder.company_id == company_id,
+        PurchaseOrder.po_number.ilike(f"%/CS/{year}/%"),
+    ).all()
+
+    max_serial = 0
+    for row in existing_numbers:
+        value = row[0] if row else None
+        if not value:
+            continue
+        match = re.search(r"/CS/\d{2}/(\d{1,})$", str(value), re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            max_serial = max(max_serial, int(match.group(1)))
+        except ValueError:
+            continue
+
+    return f"{day}/CS/{year}/{max_serial + 1:02d}"
+
+
 def next_vendor_multi_po_number(db: Session, company_id: str, required_date: Optional[datetime]) -> str:
     """Return the next company/year running consolidated Vendor PO number.
 
@@ -2085,13 +2116,24 @@ def consolidate_outlet_orders(
         required_date = s_data.get("required_date") or datetime.utcnow()
         po_status = POStatus.PENDING_APPROVAL if payload.auto_submit else POStatus.DRAFT
 
-        # For the auto-generated Vendor PO flow, numbering is the required-date
-        # based consolidated format requested by the business.
-        po_num = (
-            next_vendor_multi_po_number(db, company_id, required_date)
-            if is_vendor_consolidation
-            else f"PO-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(supplier.id) + str(datetime.utcnow()))) % 10000:04d}"
+        # Vendor auto-consolidation keeps the existing MULTI numbering.
+        # Central Store auto-POs use the dedicated CS running number.
+        participating_requests = [
+            request
+            for request in requests
+            if request.id in s_data["participating_requests"]
+        ]
+        is_central_store_po = bool(participating_requests) and all(
+            str(request.requisition_type or "").upper() == "CENTRAL_STORE"
+            for request in participating_requests
         )
+
+        if is_vendor_consolidation:
+            po_num = next_vendor_multi_po_number(db, company_id, required_date)
+        elif is_central_store_po:
+            po_num = next_central_store_po_number(db, company_id, required_date)
+        else:
+            po_num = f"PO-{datetime.utcnow().strftime('%Y%m%d%H%M')}-{abs(hash(str(supplier.id) + str(datetime.utcnow()))) % 10000:04d}"
 
         # Calculate totals for the newly approved request batch.
         new_total_amt = Decimal("0.0000")
@@ -2108,6 +2150,7 @@ def consolidate_outlet_orders(
             "required_date": required_date_text,
             "consolidation_open": bool(is_vendor_consolidation),
             "auto_generated_vendor_po": bool(is_vendor_consolidation),
+            "auto_generated_central_store_po": bool(is_central_store_po),
             "outlets": s_data["outlet_breakdown"],
             "participating_request_ids": list(s_data["participating_requests"]),
             "items_summary": [
@@ -6571,31 +6614,15 @@ def supplier_performance(
 def resolve_outlet_item_supply_source(db: Session, item: Item) -> Tuple[str, Optional[str], str]:
     """Resolve effective routing for a normal outlet Purchase Requirement.
 
-    An ACTIVE SupplierItem mapping is the strongest outlet-routing signal.
-    Therefore an item with a configured Vendor-Item mapping is DIRECT_VENDOR
-    even if an older Item Master row still says CENTRAL_STORE. If no active
-    mapping exists, the explicit Item Master supply_source is respected.
+    Item Master supply_source is the authoritative outlet-routing signal.
+    SupplierItem mappings are used to resolve the vendor and purchase rate,
+    but they do not override the Item Master supply source.
     """
     if item is None:
         return "CENTRAL_STORE", None, "NOT_CONFIGURED"
 
-    mapped = None
-    try:
-        mapped = db.query(SupplierItem).filter(
-            SupplierItem.company_id == item.company_id,
-            SupplierItem.item_id == item.id,
-            SupplierItem.is_active == True,  # noqa: E712
-        ).order_by(
-            SupplierItem.is_preferred.desc(),
-            SupplierItem.updated_at.desc(),
-        ).first()
-    except Exception:
-        mapped = None
-
-    if mapped and mapped.supplier_id:
-        return "DIRECT_VENDOR", mapped.supplier_id, "VENDOR_ITEM_MASTER"
-
     item_source = (item.supply_source or "CENTRAL_STORE").upper()
+
     if item_source == "DIRECT_VENDOR":
         supplier_id, vendor_source = resolve_default_item_vendor(db, item)
         return "DIRECT_VENDOR", supplier_id, vendor_source

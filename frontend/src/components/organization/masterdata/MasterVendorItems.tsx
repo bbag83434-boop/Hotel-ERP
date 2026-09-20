@@ -36,6 +36,18 @@ const emptyMappingForm: SupplierItemCreateInput = {
   is_active: true,
 };
 
+type BulkMappingRow = {
+  item_id: string;
+  purchase_price: number;
+  purchase_unit_id: string;
+  conversion_rate: number;
+  lead_time_days: number;
+  is_preferred: boolean;
+  selected: boolean;
+  status?: 'pending' | 'created' | 'skipped' | 'failed';
+  message?: string;
+};
+
 export const MasterVendorItems: React.FC = () => {
   const [mappings, setMappings] = useState<SupplierItem[]>([]);
   const [vendors, setVendors] = useState<Supplier[]>([]);
@@ -57,6 +69,11 @@ export const MasterVendorItems: React.FC = () => {
   const [editForm, setEditForm] = useState<SupplierItemCreateInput>({ ...emptyMappingForm });
 
   const [deleteTarget, setDeleteTarget] = useState<SupplierItem | null>(null);
+
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkVendorId, setBulkVendorId] = useState('');
+  const [bulkRows, setBulkRows] = useState<BulkMappingRow[]>([]);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -106,6 +123,145 @@ export const MasterVendorItems: React.FC = () => {
 
     return matchesSearch && matchesVendor && matchesItem;
   });
+
+  const groupedFiltered = filtered.reduce<Record<string, { vendorId: string; vendorName: string; mappings: SupplierItem[] }>>(
+    (groups, mapping) => {
+      const vendor = vendors.find((v) => v.id === mapping.supplier_id);
+      const vendorId = mapping.supplier_id || 'unknown';
+      if (!groups[vendorId]) {
+        groups[vendorId] = {
+          vendorId,
+          vendorName: mapping.supplier_name || vendor?.name || 'Unknown Vendor',
+          mappings: [],
+        };
+      }
+      groups[vendorId].mappings.push(mapping);
+      return groups;
+    },
+    {},
+  );
+
+  const openBulkMapping = () => {
+    const defaultVendor = vendors[0]?.id || '';
+    setBulkVendorId(defaultVendor);
+    setBulkRows(
+      items
+        .filter((item) => item.is_active !== false)
+        .map((item) => ({
+          item_id: item.id,
+          purchase_price: 0,
+          purchase_unit_id: '',
+          conversion_rate: 1,
+          lead_time_days: 1,
+          is_preferred: false,
+          selected: false,
+          status: 'pending' as const,
+        })),
+    );
+    setShowBulk(true);
+  };
+
+  const updateBulkRow = (itemId: string, patch: Partial<BulkMappingRow>) => {
+    setBulkRows((prev) =>
+      prev.map((row) => (row.item_id === itemId ? { ...row, ...patch, status: 'pending', message: undefined } : row)),
+    );
+  };
+
+  const setAllBulkSelected = (selected: boolean) => {
+    setBulkRows((prev) => prev.map((row) => ({ ...row, selected })));
+  };
+
+  const selectedBulkRows = bulkRows.filter((row) => row.selected);
+
+  const saveBulkMappings = async () => {
+    if (!bulkVendorId) {
+      setFeedback({ type: 'error', message: 'Please select a vendor before saving bulk mappings.' });
+      return;
+    }
+
+    if (selectedBulkRows.length === 0) {
+      setFeedback({ type: 'error', message: 'Select at least one item to create a vendor mapping.' });
+      return;
+    }
+
+    const invalidRows = selectedBulkRows.filter(
+      (row) => !Number.isFinite(Number(row.purchase_price)) || Number(row.purchase_price) <= 0,
+    );
+    if (invalidRows.length > 0) {
+      setFeedback({ type: 'error', message: 'Every selected item must have a purchase rate greater than 0.' });
+      return;
+    }
+
+    setBulkSaving(true);
+
+    let created = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const row of selectedBulkRows) {
+      const existing = mappings.find(
+        (mapping) => mapping.supplier_id === bulkVendorId && mapping.item_id === row.item_id,
+      );
+
+      if (existing) {
+        skipped += 1;
+        setBulkRows((prev) =>
+          prev.map((itemRow) =>
+            itemRow.item_id === row.item_id
+              ? { ...itemRow, status: 'skipped', message: 'Mapping already exists.' }
+              : itemRow,
+          ),
+        );
+        continue;
+      }
+
+      try {
+        await procurementApi.createVendorItem({
+          supplier_id: bulkVendorId,
+          item_id: row.item_id,
+          purchase_unit_id: row.purchase_unit_id || undefined,
+          purchase_price: Number(row.purchase_price),
+          conversion_rate: Number(row.conversion_rate || 1),
+          lead_time_days: Number(row.lead_time_days || 1),
+          is_preferred: Boolean(row.is_preferred),
+          is_active: true,
+        });
+
+        created += 1;
+        setBulkRows((prev) =>
+          prev.map((itemRow) =>
+            itemRow.item_id === row.item_id
+              ? { ...itemRow, status: 'created', message: 'Created successfully.' }
+              : itemRow,
+          ),
+        );
+      } catch (err: any) {
+        failed += 1;
+        setBulkRows((prev) =>
+          prev.map((itemRow) =>
+            itemRow.item_id === row.item_id
+              ? { ...itemRow, status: 'failed', message: ErrDetail(err) }
+              : itemRow,
+          ),
+        );
+      }
+    }
+
+    await loadAll();
+    setBulkSaving(false);
+
+    if (failed === 0) {
+      setFeedback({
+        type: 'success',
+        message: `Bulk mapping complete: ${created} created${skipped ? `, ${skipped} already existed` : ''}.`,
+      });
+    } else {
+      setFeedback({
+        type: 'error',
+        message: `Bulk mapping finished: ${created} created, ${skipped} skipped, ${failed} failed. Review failed rows.`,
+      });
+    }
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -226,78 +382,88 @@ export const MasterVendorItems: React.FC = () => {
       <FeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} />
 
       {/* Control Toolbar */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2.5 flex-1">
-          <div className="relative flex-1 min-w-[200px] max-w-xs">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
-            <input
-              type="text"
-              placeholder="Search by vendor, item, code..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
-            />
+      <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-3 sm:p-4 shadow-sm">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-2.5">
+            <div className="relative flex-1 min-w-0">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
+              <input
+                type="text"
+                placeholder="Search by vendor, item, code..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 text-xs rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex items-center gap-2">
+              <select
+                value={selectedVendorFilter}
+                onChange={(e) => setSelectedVendorFilter(e.target.value)}
+                className="w-full lg:w-auto lg:min-w-[165px] px-3 py-2 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
+              >
+                <option value="ALL">All Vendors ({vendors.length})</option>
+                {vendors.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedItemFilter}
+                onChange={(e) => setSelectedItemFilter(e.target.value)}
+                className="w-full lg:w-auto lg:min-w-[165px] px-3 py-2 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
+              >
+                <option value="ALL">All Items ({items.length})</option>
+                {items.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <Filter className="w-3.5 h-3.5 text-[#707070]" />
-            <select
-              value={selectedVendorFilter}
-              onChange={(e) => setSelectedVendorFilter(e.target.value)}
-              className="px-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C] max-w-[180px]"
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
+            <button
+              onClick={loadAll}
+              disabled={loading}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm disabled:opacity-60"
             >
-              <option value="ALL">All Vendors ({vendors.length})</option>
-              {vendors.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
+              <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
+              <span>Sync</span>
+            </button>
 
-            <select
-              value={selectedItemFilter}
-              onChange={(e) => setSelectedItemFilter(e.target.value)}
-              className="px-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C] max-w-[180px]"
+            <button
+              onClick={openBulkMapping}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-semibold shadow-sm transition-all hover:bg-[#2A2A2A] active:scale-[0.99]"
             >
-              <option value="ALL">All Items ({items.length})</option>
-              {items.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
-                </option>
-              ))}
-            </select>
+              <Package className="w-3.5 h-3.5" />
+              <span>Bulk Map Items</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setCreateForm({
+                  ...emptyMappingForm,
+                  supplier_id: vendors[0]?.id || '',
+                  item_id: items[0]?.id || '',
+                });
+                setShowCreate(true);
+              }}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#C79A3B] to-[#B8862D] text-white text-xs font-semibold shadow-md shadow-[#C79A3B]/20 transition-all hover:brightness-105 active:scale-[0.99]"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Map Vendor Item & Rate</span>
+            </button>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={loadAll}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm disabled:opacity-60"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
-            <span>Sync</span>
-          </button>
-          <button
-            onClick={() => {
-              setCreateForm({
-                ...emptyMappingForm,
-                supplier_id: vendors[0]?.id || '',
-                item_id: items[0]?.id || '',
-              });
-              setShowCreate(true);
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#C79A3B] to-[#B8862D] text-white text-xs font-semibold shadow-md shadow-[#C79A3B]/20 transition-all hover:brightness-105 active:scale-95"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Map Vendor Item & Rate</span>
-          </button>
         </div>
       </div>
 
-      {/* Horizontal ERP list of Vendor-Item Mappings */}
+      {/* Professional grouped Vendor → Items register */}
       {loading ? (
-        <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3">
+        <div className="rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3 shadow-sm">
           <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
           <span>Loading Vendor ↔ Item Rate Mappings...</span>
         </div>
@@ -311,149 +477,514 @@ export const MasterVendorItems: React.FC = () => {
           icon={<DollarSign className="w-6 h-6" />}
         />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white shadow-sm">
-          <div className="min-w-[1120px]">
-            <div className="grid grid-cols-[1.35fr_1.5fr_1.05fr_1.2fr_1fr_1.15fr_1.1fr] items-center gap-3 px-4 py-3 bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[10px] uppercase tracking-[0.08em] font-bold text-[#707070]">
-              <div>Vendor</div>
-              <div>Item</div>
-              <div>Vendor Rate</div>
-              <div>Purchase / Conversion</div>
-              <div>Lead Time</div>
-              <div>Status</div>
-              <div className="text-right">Actions</div>
+        <div className="space-y-3">
+          {Object.values(groupedFiltered).map((group) => {
+            const activeCount = group.mappings.filter((m) => m.is_active).length;
+            const preferredCount = group.mappings.filter((m) => m.is_preferred).length;
+
+            return (
+              <section
+                key={group.vendorId}
+                className="overflow-hidden rounded-2xl border border-[rgba(45,45,45,0.09)] bg-white shadow-sm"
+              >
+                {/* Vendor header */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 bg-gradient-to-r from-[#FAF8F5] to-white border-b border-[rgba(45,45,45,0.08)]">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 shrink-0 rounded-xl bg-[#1C1C1C] flex items-center justify-center">
+                      <Truck className="w-4 h-4 text-[#F1E4C5]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[10px] uppercase tracking-[0.12em] font-bold text-[#8A8A8A]">
+                        Vendor
+                      </div>
+                      <div className="text-sm font-extrabold text-[#1C1C1C] truncate" title={group.vendorName}>
+                        {group.vendorName}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                    <span className="px-2.5 py-1 rounded-full bg-white border border-[rgba(45,45,45,0.1)] font-semibold text-[#555]">
+                      {group.mappings.length} {group.mappings.length === 1 ? 'Item' : 'Items'}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full bg-[#E7F6EC] border border-[#B7DEC4] font-semibold text-[#277A45]">
+                      {activeCount} Active
+                    </span>
+                    {preferredCount > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#F1E4C5] border border-[#B8862D]/25 font-semibold text-[#8A641D]">
+                        <Star className="w-3 h-3 fill-[#B8862D]" />
+                        {preferredCount} Preferred
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Desktop item register */}
+                <div className="hidden md:block">
+                  <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(100px,0.8fr)_minmax(120px,1fr)_minmax(80px,0.7fr)_minmax(145px,1.15fr)_minmax(145px,1.2fr)] items-center gap-3 px-4 py-2.5 bg-[#FCFBF9] border-b border-[rgba(45,45,45,0.06)] text-[9px] uppercase tracking-[0.08em] font-bold text-[#8A8A8A]">
+                    <div>Master Item</div>
+                    <div>Rate</div>
+                    <div>Purchase / Conversion</div>
+                    <div>Lead</div>
+                    <div>Status</div>
+                    <div className="text-right">Actions</div>
+                  </div>
+
+                  <div className="divide-y divide-[rgba(45,45,45,0.07)]">
+                    {group.mappings.map((m) => {
+                      const item = items.find((i) => i.id === m.item_id);
+                      const iName = m.item_name || item?.name || 'Unknown Item';
+                      const iCode = m.item_code || item?.code || '';
+                      const pUnit = m.purchase_unit_symbol || m.base_unit_symbol || 'UNIT';
+                      const isActive = m.is_active;
+
+                      return (
+                        <div
+                          key={m.id}
+                          className={`grid grid-cols-[minmax(0,1.6fr)_minmax(100px,0.8fr)_minmax(120px,1fr)_minmax(80px,0.7fr)_minmax(145px,1.15fr)_minmax(145px,1.2fr)] items-center gap-3 px-4 py-3 transition-colors ${
+                            isActive ? 'bg-white hover:bg-[#FAF8F5]/65' : 'bg-[#FAF8F5] opacity-70'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 shrink-0 rounded-lg bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] flex items-center justify-center">
+                                <Package className="w-3.5 h-3.5 text-[#C79A3B]" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-xs text-[#1C1C1C] truncate" title={iName}>{iName}</div>
+                                <div className="mt-0.5 flex items-center gap-2 text-[9px] text-[#777]">
+                                  {iCode && <span className="font-mono">[{iCode}]</span>}
+                                  {m.supplier_item_code && <span className="font-mono truncate">SKU: {m.supplier_item_code}</span>}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="font-extrabold text-sm text-[#1C1C1C]">
+                              ₹{Number(m.purchase_price || 0).toFixed(2)}
+                            </div>
+                            <div className="text-[9px] text-[#8A8A8A]">per {pUnit}</div>
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="font-semibold text-xs text-[#1C1C1C]">{pUnit}</div>
+                            <div className="mt-0.5 text-[9px] text-[#777]">
+                              1 {pUnit} = {Number(m.conversion_rate || 1)} Base
+                            </div>
+                          </div>
+
+                          <div>
+                            <span className="text-xs font-semibold text-[#1C1C1C] whitespace-nowrap">
+                              {m.lead_time_days || 1} days
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <StatusPill active={isActive} />
+                            {m.is_preferred && (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-extrabold px-2 py-1 rounded-full bg-[#F1E4C5] text-[#8A641D] border border-[#B8862D]/25">
+                                <Star className="w-2.5 h-2.5 fill-[#B8862D]" />
+                                Preferred
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-end gap-1.5">
+                            <ToggleSwitch
+                              active={isActive}
+                              onChange={() => toggleActive(m)}
+                              title={isActive ? 'Deactivate Rate Mapping' : 'Activate Rate Mapping'}
+                            />
+                            <button
+                              onClick={() => togglePreferred(m)}
+                              title={m.is_preferred ? 'Remove Preferred Vendor status' : 'Set as Preferred Vendor'}
+                              className={`p-1.5 rounded-lg border transition-colors ${
+                                m.is_preferred
+                                  ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/40'
+                                  : 'bg-white text-[#707070] border-[rgba(45,45,45,0.12)] hover:text-[#B8862D]'
+                              }`}
+                            >
+                              <Star className={`w-3.5 h-3.5 ${m.is_preferred ? 'fill-[#B8862D]' : ''}`} />
+                            </button>
+                            <EditBtn
+                              onClick={() => {
+                                setEditing(m);
+                                setEditForm({
+                                  supplier_id: m.supplier_id,
+                                  item_id: m.item_id,
+                                  supplier_item_code: m.supplier_item_code || '',
+                                  supplier_item_name: m.supplier_item_name || '',
+                                  purchase_unit_id: m.purchase_unit_id || '',
+                                  purchase_price: Number(m.purchase_price || 0),
+                                  conversion_rate: Number(m.conversion_rate || 1),
+                                  lead_time_days: Number(m.lead_time_days || 1),
+                                  is_preferred: Boolean(m.is_preferred),
+                                  is_active: Boolean(m.is_active),
+                                });
+                              }}
+                            />
+                            <DeleteBtn label="Remove" onClick={() => setDeleteTarget(m)} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Mobile vendor group */}
+                <div className="md:hidden p-2.5 space-y-2">
+                  {group.mappings.map((m) => {
+                    const item = items.find((i) => i.id === m.item_id);
+                    const iName = m.item_name || item?.name || 'Unknown Item';
+                    const iCode = m.item_code || item?.code || '';
+                    const pUnit = m.purchase_unit_symbol || m.base_unit_symbol || 'UNIT';
+                    const isActive = m.is_active;
+
+                    return (
+                      <div
+                        key={m.id}
+                        className={`rounded-xl border border-[rgba(45,45,45,0.08)] p-3 ${
+                          isActive ? 'bg-white' : 'bg-[#FAF8F5] opacity-70'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2.5">
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <div className="w-8 h-8 shrink-0 rounded-lg bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] flex items-center justify-center">
+                              <Package className="w-3.5 h-3.5 text-[#C79A3B]" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-sm text-[#1C1C1C] truncate">{iName}</div>
+                              <div className="mt-0.5 text-[9px] text-[#777]">
+                                {iCode && <span className="font-mono">[{iCode}]</span>}
+                                {m.supplier_item_code && <span className="ml-2 font-mono">SKU: {m.supplier_item_code}</span>}
+                              </div>
+                            </div>
+                          </div>
+                          <StatusPill active={isActive} />
+                        </div>
+
+                        <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+                          <div className="rounded-lg bg-[#FAF8F5] px-2 py-2">
+                            <div className="text-[8px] uppercase tracking-wide text-[#8A8A8A]">Rate</div>
+                            <div className="mt-0.5 text-xs font-extrabold text-[#1C1C1C]">₹{Number(m.purchase_price || 0).toFixed(2)}</div>
+                            <div className="text-[8px] text-[#8A8A8A]">/{pUnit}</div>
+                          </div>
+                          <div className="rounded-lg bg-[#FAF8F5] px-2 py-2">
+                            <div className="text-[8px] uppercase tracking-wide text-[#8A8A8A]">Purchase</div>
+                            <div className="mt-0.5 text-[10px] font-bold text-[#1C1C1C]">{pUnit}</div>
+                            <div className="text-[8px] text-[#8A8A8A]">× {Number(m.conversion_rate || 1)} base</div>
+                          </div>
+                          <div className="rounded-lg bg-[#FAF8F5] px-2 py-2">
+                            <div className="text-[8px] uppercase tracking-wide text-[#8A8A8A]">Lead</div>
+                            <div className="mt-0.5 text-[10px] font-bold text-[#1C1C1C]">{m.lead_time_days || 1} days</div>
+                          </div>
+                        </div>
+
+                        <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-[rgba(45,45,45,0.08)] pt-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <ToggleSwitch
+                              active={isActive}
+                              onChange={() => toggleActive(m)}
+                              title={isActive ? 'Deactivate Rate Mapping' : 'Activate Rate Mapping'}
+                            />
+                            <button
+                              onClick={() => togglePreferred(m)}
+                              className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[9px] font-semibold ${
+                                m.is_preferred
+                                  ? 'bg-[#F1E4C5] text-[#8A641D] border-[#B8862D]/30'
+                                  : 'bg-white text-[#707070] border-[rgba(45,45,45,0.12)]'
+                              }`}
+                            >
+                              <Star className={`w-3 h-3 ${m.is_preferred ? 'fill-[#B8862D]' : ''}`} />
+                              Preferred
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <EditBtn
+                              onClick={() => {
+                                setEditing(m);
+                                setEditForm({
+                                  supplier_id: m.supplier_id,
+                                  item_id: m.item_id,
+                                  supplier_item_code: m.supplier_item_code || '',
+                                  supplier_item_name: m.supplier_item_name || '',
+                                  purchase_unit_id: m.purchase_unit_id || '',
+                                  purchase_price: Number(m.purchase_price || 0),
+                                  conversion_rate: Number(m.conversion_rate || 1),
+                                  lead_time_days: Number(m.lead_time_days || 1),
+                                  is_preferred: Boolean(m.is_preferred),
+                                  is_active: Boolean(m.is_active),
+                                });
+                              }}
+                            />
+                            <DeleteBtn label="Remove" onClick={() => setDeleteTarget(m)} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Bulk Mapping Modal */}
+      {showBulk && (
+        <Modal
+          title="Bulk Map Vendor Items & Rates"
+          subtitle="Select one vendor, then configure multiple master items in one professional setup screen."
+          onClose={() => !bulkSaving && setShowBulk(false)}
+        >
+          <div className="space-y-3 text-xs">
+            <Field label="Select Vendor / Supplier" required>
+              <select
+                required
+                value={bulkVendorId}
+                onChange={(e) => setBulkVendorId(e.target.value)}
+                disabled={bulkSaving}
+                className={inputCls}
+              >
+                <option value="" disabled>Choose existing vendor</option>
+                {vendors
+                  .filter((v) => (v as any).is_active !== false && (v as any).isActive !== false)
+                  .map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} [{v.code}]
+                    </option>
+                  ))}
+              </select>
+            </Field>
+
+            <div className="rounded-xl border border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] px-3 py-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <div className="font-bold text-[#1C1C1C]">Item selection</div>
+                  <div className="text-[10px] text-[#707070]">
+                    Configure rate and purchasing details row-by-row. Existing mappings are skipped safely.
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAllBulkSelected(true)}
+                    disabled={bulkSaving}
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] text-[10px] font-semibold"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllBulkSelected(false)}
+                    disabled={bulkSaving}
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] text-[10px] font-semibold"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="divide-y divide-[rgba(45,45,45,0.07)]">
-              {filtered.map((m) => {
-                const vendor = vendors.find((v) => v.id === m.supplier_id);
-                const item = items.find((i) => i.id === m.item_id);
-                const vName = m.supplier_name || vendor?.name || 'Unknown Vendor';
-                const iName = m.item_name || item?.name || 'Unknown Item';
-                const iCode = m.item_code || item?.code || '';
-                const pUnit = m.purchase_unit_symbol || m.base_unit_symbol || 'UNIT';
-                const isActive = m.is_active;
+            <div className="max-h-[48vh] overflow-auto rounded-xl border border-[rgba(45,45,45,0.08)] bg-white">
+              <div className="hidden lg:grid sticky top-0 z-10 grid-cols-[36px_minmax(170px,1.4fr)_105px_130px_105px_105px_85px] gap-2 px-3 py-2.5 bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[9px] uppercase tracking-wide font-bold text-[#707070]">
+                <div></div>
+                <div>Master Item</div>
+                <div>Rate</div>
+                <div>Purchase Unit</div>
+                <div>Conversion</div>
+                <div>Lead Days</div>
+                <div>Preferred</div>
+              </div>
 
-                return (
-                  <div
-                    key={m.id}
-                    className={`grid grid-cols-[1.35fr_1.5fr_1.05fr_1.2fr_1fr_1.15fr_1.1fr] items-center gap-3 px-4 py-3.5 text-xs transition-colors ${
-                      isActive
-                        ? 'bg-white hover:bg-[#FAF8F5]/70'
-                        : 'bg-[#FAF8F5] opacity-75'
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <Truck className="w-3.5 h-3.5 shrink-0 text-[#C79A3B]" />
-                        <span className="font-bold text-[#1C1C1C] truncate" title={vName}>
-                          {vName}
-                        </span>
+              <div className="divide-y divide-[rgba(45,45,45,0.07)]">
+                {bulkRows.map((row) => {
+                  const item = items.find((i) => i.id === row.item_id);
+                  const existing = mappings.some(
+                    (mapping) => mapping.supplier_id === bulkVendorId && mapping.item_id === row.item_id,
+                  );
+
+                  return (
+                    <div
+                      key={row.item_id}
+                      className={`p-3 ${row.status === 'created' ? 'bg-[#F3FAF5]' : row.status === 'failed' ? 'bg-[#FFF6F5]' : 'bg-white'}`}
+                    >
+                      <div className="hidden lg:grid grid-cols-[36px_minmax(170px,1.4fr)_105px_130px_105px_105px_85px] items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={row.selected}
+                          onChange={(e) => updateBulkRow(row.item_id, { selected: e.target.checked })}
+                          disabled={bulkSaving || existing || row.status === 'created'}
+                          className="h-4 w-4 accent-[#C79A3B]"
+                        />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-[#1C1C1C] truncate">{item?.name || 'Unknown Item'}</div>
+                          <div className="text-[9px] text-[#707070] font-mono">
+                            {item?.code || ''} · {item?.unit_symbol || 'UNIT'}
+                          </div>
+                          {existing && <div className="text-[9px] text-[#B8862D] font-semibold mt-0.5">Already mapped</div>}
+                        </div>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={row.purchase_price}
+                          onChange={(e) => updateBulkRow(row.item_id, { purchase_price: parseFloat(e.target.value) || 0 })}
+                          disabled={bulkSaving || existing || row.status === 'created'}
+                          className={inputCls}
+                        />
+                        <select
+                          value={row.purchase_unit_id}
+                          onChange={(e) => updateBulkRow(row.item_id, { purchase_unit_id: e.target.value })}
+                          disabled={bulkSaving || existing || row.status === 'created'}
+                          className={inputCls}
+                        >
+                          <option value="">Base Unit</option>
+                          {units.map((u) => <option key={u.id} value={u.id}>{u.symbol}</option>)}
+                        </select>
+                        <input
+                          type="number"
+                          min="0.0001"
+                          step="0.0001"
+                          value={row.conversion_rate}
+                          onChange={(e) => updateBulkRow(row.item_id, { conversion_rate: parseFloat(e.target.value) || 1 })}
+                          disabled={bulkSaving || existing || row.status === 'created'}
+                          className={inputCls}
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          value={row.lead_time_days}
+                          onChange={(e) => updateBulkRow(row.item_id, { lead_time_days: parseInt(e.target.value, 10) || 1 })}
+                          disabled={bulkSaving || existing || row.status === 'created'}
+                          className={inputCls}
+                        />
+                        <div className="flex justify-center">
+                          <ToggleSwitch
+                            active={row.is_preferred}
+                            onChange={() => updateBulkRow(row.item_id, { is_preferred: !row.is_preferred })}
+                            title="Set as preferred vendor"
+                          />
+                        </div>
                       </div>
-                      {m.supplier_item_code && (
-                        <div className="mt-1 pl-5 text-[10px] font-mono text-[#707070] truncate">
-                          SKU: <span className="font-bold text-[#1C1C1C]">{m.supplier_item_code}</span>
+
+                      <div className="lg:hidden">
+                        <div className="flex items-start gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={row.selected}
+                            onChange={(e) => updateBulkRow(row.item_id, { selected: e.target.checked })}
+                            disabled={bulkSaving || existing || row.status === 'created'}
+                            className="mt-1 h-4 w-4 accent-[#C79A3B]"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-[#1C1C1C] truncate">{item?.name || 'Unknown Item'}</div>
+                            <div className="text-[9px] text-[#707070] font-mono">
+                              {item?.code || ''} · {item?.unit_symbol || 'UNIT'}
+                            </div>
+                            {existing && <div className="text-[9px] text-[#B8862D] font-semibold mt-0.5">Already mapped</div>}
+                          </div>
+                          {row.status && row.status !== 'pending' && (
+                            <span className={`text-[9px] font-bold px-1.5 py-1 rounded ${
+                              row.status === 'created' ? 'bg-[#E7F6EC] text-[#277A45]' :
+                              row.status === 'skipped' ? 'bg-[#F1E4C5] text-[#8A641D]' :
+                              'bg-[#FDE9E7] text-[#A13B32]'
+                            }`}>
+                              {row.status}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <div className="col-span-2 sm:col-span-1">
+                            <label className="block mb-1 text-[9px] font-semibold text-[#707070]">Rate</label>
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              value={row.purchase_price}
+                              onChange={(e) => updateBulkRow(row.item_id, { purchase_price: parseFloat(e.target.value) || 0 })}
+                              disabled={bulkSaving || existing || row.status === 'created'}
+                              className={inputCls}
+                            />
+                          </div>
+                          <div>
+                            <label className="block mb-1 text-[9px] font-semibold text-[#707070]">Purchase Unit</label>
+                            <select
+                              value={row.purchase_unit_id}
+                              onChange={(e) => updateBulkRow(row.item_id, { purchase_unit_id: e.target.value })}
+                              disabled={bulkSaving || existing || row.status === 'created'}
+                              className={inputCls}
+                            >
+                              <option value="">Base Unit</option>
+                              {units.map((u) => <option key={u.id} value={u.id}>{u.symbol}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block mb-1 text-[9px] font-semibold text-[#707070]">Conversion</label>
+                            <input
+                              type="number"
+                              min="0.0001"
+                              step="0.0001"
+                              value={row.conversion_rate}
+                              onChange={(e) => updateBulkRow(row.item_id, { conversion_rate: parseFloat(e.target.value) || 1 })}
+                              disabled={bulkSaving || existing || row.status === 'created'}
+                              className={inputCls}
+                            />
+                          </div>
+                          <div>
+                            <label className="block mb-1 text-[9px] font-semibold text-[#707070]">Lead Days</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={row.lead_time_days}
+                              onChange={(e) => updateBulkRow(row.item_id, { lead_time_days: parseInt(e.target.value, 10) || 1 })}
+                              disabled={bulkSaving || existing || row.status === 'created'}
+                              className={inputCls}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className="text-[10px] font-semibold text-[#1C1C1C]">Preferred Vendor</span>
+                          <ToggleSwitch
+                            active={row.is_preferred}
+                            onChange={() => updateBulkRow(row.item_id, { is_preferred: !row.is_preferred })}
+                            title="Set as preferred vendor"
+                          />
+                        </div>
+                      </div>
+
+                      {row.message && row.status !== 'pending' && (
+                        <div className={`mt-2 text-[9px] ${row.status === 'failed' ? 'text-[#A13B32]' : 'text-[#707070]'}`}>
+                          {row.message}
                         </div>
                       )}
                     </div>
+                  );
+                })}
+              </div>
+            </div>
 
-                    <div className="min-w-0">
-                      <div className="font-semibold text-[#1C1C1C] truncate" title={iName}>
-                        {iName}
-                      </div>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[#707070]">
-                        {iCode && <span className="font-mono">[{iCode}]</span>}
-                        {m.supplier_item_name && (
-                          <span className="truncate" title={m.supplier_item_name}>
-                            · {m.supplier_item_name}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <span className="font-extrabold text-sm text-[#1C1C1C]">
-                        ₹{Number(m.purchase_price || 0).toFixed(2)}
-                      </span>
-                      <span className="block text-[10px] text-[#707070]">per {pUnit}</span>
-                    </div>
-
-                    <div className="text-[11px] text-[#707070]">
-                      <div className="font-semibold text-[#1C1C1C]">
-                        {pUnit}
-                      </div>
-                      <div className="mt-0.5 text-[10px]">
-                        1 {pUnit} = {Number(m.conversion_rate || 1)} Base
-                      </div>
-                    </div>
-
-                    <div>
-                      <span className="font-semibold text-[#1C1C1C]">
-                        {m.lead_time_days || 1} days
-                      </span>
-                    </div>
-
-                    <div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <StatusPill active={isActive} />
-                        {m.is_preferred && (
-                          <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30">
-                            <Star className="w-2.5 h-2.5 fill-[#B8862D]" />
-                            Preferred
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-1.5">
-                      <ToggleSwitch
-                        active={isActive}
-                        onChange={() => toggleActive(m)}
-                        title={isActive ? 'Deactivate Rate Mapping' : 'Activate Rate Mapping'}
-                      />
-
-                      <button
-                        onClick={() => togglePreferred(m)}
-                        title={m.is_preferred ? 'Remove Preferred Vendor status' : 'Set as Preferred Vendor'}
-                        className={`p-1.5 rounded-lg border text-xs transition-colors ${
-                          m.is_preferred
-                            ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/40'
-                            : 'bg-white text-[#707070] border-[rgba(45,45,45,0.12)] hover:text-[#B8862D]'
-                        }`}
-                      >
-                        <Star className={`w-3.5 h-3.5 ${m.is_preferred ? 'fill-[#B8862D]' : ''}`} />
-                      </button>
-
-                      <EditBtn
-                        onClick={() => {
-                          setEditing(m);
-                          setEditForm({
-                            supplier_id: m.supplier_id,
-                            item_id: m.item_id,
-                            supplier_item_code: m.supplier_item_code || '',
-                            supplier_item_name: m.supplier_item_name || '',
-                            purchase_unit_id: m.purchase_unit_id || '',
-                            purchase_price: Number(m.purchase_price || 0),
-                            conversion_rate: Number(m.conversion_rate || 1),
-                            lead_time_days: Number(m.lead_time_days || 1),
-                            is_preferred: Boolean(m.is_preferred),
-                            is_active: Boolean(m.is_active),
-                          });
-                        }}
-                      />
-
-                      <DeleteBtn
-                        label="Remove"
-                        onClick={() => {
-                          setDeleteTarget(m);
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-[rgba(45,45,45,0.08)]">
+              <div className="text-[10px] text-[#707070]">
+                <span className="font-bold text-[#1C1C1C]">{selectedBulkRows.length}</span> item(s) selected
+              </div>
+              <div className="flex gap-2">
+                <CancelBtn onClick={() => setShowBulk(false)} />
+                <button
+                  type="button"
+                  disabled={bulkSaving}
+                  onClick={saveBulkMappings}
+                  className="inline-flex items-center justify-center rounded-xl bg-[#C79A3B] px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {bulkSaving ? 'Saving...' : `Save ${selectedBulkRows.length} Mapping${selectedBulkRows.length === 1 ? '' : 's'}`}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Create Modal */}
@@ -463,7 +994,7 @@ export const MasterVendorItems: React.FC = () => {
           subtitle="Link an existing master item to a vendor with a negotiated purchase price"
           onClose={() => setShowCreate(false)}
         >
-          <form onSubmit={handleCreate} className="space-y-3 text-xs">
+          <form onSubmit={handleCreate} className="space-y-3 text-xs max-h-[68vh] overflow-y-auto pr-1">
             <Field label="Select Vendor / Supplier" required>
               <select
                 required
@@ -601,7 +1132,7 @@ export const MasterVendorItems: React.FC = () => {
           subtitle={`Vendor: ${editing.supplier_name || 'Vendor'} · Item: ${editing.item_name || 'Item'}`}
           onClose={() => setEditing(null)}
         >
-          <form onSubmit={handleUpdate} className="space-y-3 text-xs">
+          <form onSubmit={handleUpdate} className="space-y-3 text-xs max-h-[68vh] overflow-y-auto pr-1">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Negotiated Vendor Rate (₹)" required>
                 <input

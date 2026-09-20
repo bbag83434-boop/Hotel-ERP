@@ -204,28 +204,34 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
     }
   };
 
-  // Handle Item Selection in Need Form (Auto-determine vendor from Setup mapping)
+  // Handle Item Selection in Outlet Purchase Requirement.
+  // Item Master supply_source is the ONLY routing authority for Outlet Requirements.
+  // Vendor-Item mappings are consulted only when the Item Master says DIRECT_VENDOR.
   const handleSelectPRItem = (index: number, itemId: string) => {
     const itemObj = inventoryItems.find((i) => i.id === itemId);
-    // Vendor-Item Master is authoritative for outlet routing.
-    // If an active Vendor-Item mapping exists, this line is DIRECT_VENDOR
-    // even when the legacy Item Master still says CENTRAL_STORE.
-    const mapping = vendorItems
-      .filter((m) => m.item_id === itemId && m.is_active)
-      .sort((a, b) => Number(Boolean(b.is_preferred)) - Number(Boolean(a.is_preferred)))[0];
-    const matchedSupplier = mapping
-      ? suppliers.find((s) => s.id === mapping.supplier_id)
-      : suppliers.find((s) => s.id === itemObj?.supplier_id);
+    const supplySource = String(itemObj?.supply_source || 'CENTRAL_STORE').toUpperCase();
+    const isDirectVendor = supplySource === 'DIRECT_VENDOR';
 
-    const supplySource = mapping?.supplier_id
-      ? 'DIRECT_VENDOR'
-      : (itemObj?.supply_source || 'CENTRAL_STORE');
+    const mapping = isDirectVendor
+      ? vendorItems
+          .filter((m) => m.item_id === itemId && m.is_active)
+          .sort(
+            (a, b) =>
+              Number(Boolean(b.is_preferred)) - Number(Boolean(a.is_preferred))
+          )[0]
+      : undefined;
 
-    const price = mapping?.purchase_price != null
-      ? Number(mapping.purchase_price)
-      : itemObj?.cost_price
-      ? Number(itemObj.cost_price)
-      : 0;
+    const matchedSupplier = isDirectVendor
+      ? mapping
+        ? suppliers.find((s) => s.id === mapping.supplier_id)
+        : suppliers.find((s) => s.id === itemObj?.supplier_id)
+      : undefined;
+
+    const price = isDirectVendor
+      ? mapping?.purchase_price != null
+        ? Number(mapping.purchase_price)
+        : Number(itemObj?.cost_price || 0)
+      : Number(itemObj?.cost_price || 0);
 
     const updated = [...newPRLines];
     updated[index] = {
@@ -233,8 +239,12 @@ export const PurchaseWorkspace: React.FC<PurchaseWorkspaceProps> = ({ onNavigate
       item_id: itemId,
       unit: itemObj?.unit?.symbol || itemObj?.unit_symbol || '',
       supply_source: supplySource,
-      supplier_id: mapping?.supplier_id || itemObj?.supplier_id || undefined,
-      supplier_name: mapping?.supplier_name || matchedSupplier?.name || undefined,
+      supplier_id: isDirectVendor
+        ? mapping?.supplier_id || itemObj?.supplier_id || undefined
+        : undefined,
+      supplier_name: isDirectVendor
+        ? mapping?.supplier_name || matchedSupplier?.name || undefined
+        : undefined,
       estimated_price: price,
     };
     setNewPRLines(updated);
