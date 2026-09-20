@@ -46,13 +46,24 @@ const normalizeUnitToken = (value?: string): string =>
     .toLowerCase()
     .replace(/\s+/g, "");
 
+const normalizePositiveQuantity = (value: unknown, fallback = 1): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const STANDARD_UNIT_CONVERSIONS: Record<string, number> = {
   "kg>g": 1000,
+  "kg>gm": 1000,
   "g>kg": 0.001,
+  "gm>kg": 0.001,
   "kg>gram": 1000,
+  "gm>gram": 1,
   "gram>kg": 0.001,
+  "gram>gm": 1,
   "kg>grams": 1000,
+  "gm>grams": 1,
   "grams>kg": 0.001,
+  "grams>gm": 1,
   "g>mg": 1000,
   "mg>g": 0.001,
   "l>ml": 1000,
@@ -86,7 +97,9 @@ const normalizeRecipe = (r: any): Recipe => ({
   finishedItemName: r.finishedItemName ?? r.finished_item_name,
   finishedItemCode: r.finishedItemCode ?? r.finished_item_code,
   finishedUnitSymbol: r.finishedUnitSymbol ?? r.finished_unit_symbol,
-  yieldQty: r.yieldQty ?? r.yield_qty,
+  // Keep the saved backend yield as the single source for the edit/costing form.
+  // Do not silently turn a valid saved yield into 1.
+  yieldQty: normalizePositiveQuantity(r.yieldQty ?? r.yield_qty, 1),
   preparationMinutes: r.preparationMinutes ?? r.preparation_minutes,
   isCurrent: r.isCurrent ?? r.is_current,
   isActive: r.isActive ?? r.is_active,
@@ -241,11 +254,19 @@ export default function RecipeManager({
       ),
     [items],
   );
+  // Recipe ingredients can come from any active stock-bearing item type
+  // that is valid as an input: raw material, semi-finished, or packaging.
+  // Finished goods and assets are intentionally excluded.
   const raw = useMemo(
     () =>
-      items.filter(
-        (i) => i.type === "RAW_MATERIAL" || i.type === "SEMI_FINISHED",
-      ),
+      items.filter((i) => {
+        const itemType = String(i.type || "").trim().toUpperCase();
+        return (
+          itemType === "RAW_MATERIAL" ||
+          itemType === "SEMI_FINISHED" ||
+          itemType === "PACKAGING"
+        );
+      }),
     [items],
   );
   const activeRecipes = useMemo(
@@ -300,24 +321,33 @@ export default function RecipeManager({
 
   const openEdit = async (r: Recipe) => {
     try {
-      await Promise.all([
+      const [fullRecipe] = await Promise.all([
+        productionApi.getRecipe(r.id),
         ensureItemsLoaded(),
         ensureUnitsLoaded(),
         ensureUnitConversionsLoaded(),
       ]);
 
-      setEditingId(r.id);
+      // Always use the detail response for edit mode. The list endpoint may
+      // omit/transform fields, while GET /recipes/{id} is the authoritative
+      // persisted recipe including yield_qty.
+      const recipe = normalizeRecipe(fullRecipe);
+
+      setEditingId(recipe.id);
       setForm({
-        name: r.name || "",
-        code: r.code || "",
-        finished_item_id: r.finishedItemId || "",
-        description: r.description || "",
-        yield_qty: Number(r.yieldQty || 1),
-        preparation_minutes: Number(r.preparationMinutes || 0),
-        instructions: r.instructions || "",
+        name: recipe.name || "",
+        code: recipe.code || "",
+        finished_item_id: recipe.finishedItemId || "",
+        description: recipe.description || "",
+        yield_qty: normalizePositiveQuantity(
+          recipe.yieldQty ?? (recipe as any).yield_qty,
+          1,
+        ),
+        preparation_minutes: Number(recipe.preparationMinutes || 0),
+        instructions: recipe.instructions || "",
       });
       setIngs(
-        (r.ingredients || []).map((i) => ({
+        (recipe.ingredients || []).map((i) => ({
           raw_item_id: i.rawItemId,
           unit_id: i.unitId || "",
           quantity: Number(i.quantity || 1),
@@ -355,6 +385,13 @@ export default function RecipeManager({
     try {
       const payload = {
         ...form,
+        // Send the numeric yield explicitly so the backend always receives
+        // the value currently shown in ONE BATCH MAKES.
+        yield_qty: normalizePositiveQuantity(form.yield_qty, 1),
+        // Keep the API payload explicit. The backend contract is snake_case;
+        // yieldQty is included only as a compatibility alias for any older
+        // recipe endpoint still expecting camelCase.
+        yieldQty: normalizePositiveQuantity(form.yield_qty, 1),
         name: form.name.trim(),
         code: form.code.trim().toUpperCase(),
         description: form.description.trim() || undefined,
@@ -591,7 +628,7 @@ export default function RecipeManager({
       totalCost += breakdown.ingredientCost;
     });
 
-    const yieldQty = Number(form.yield_qty) || 1;
+    const yieldQty = normalizePositiveQuantity(form.yield_qty, 1);
     const cpu = hasUnpricedConversion
       ? null
       : totalCost / yieldQty;
@@ -1235,7 +1272,7 @@ export default function RecipeManager({
                         <option value="">Select Ingredient...</option>
                         {raw.map((i) => (
                           <option key={i.id} value={i.id}>
-                            {i.name}
+                            {i.name} {i.code ? `(${i.code})` : ""}
                           </option>
                         ))}
                       </select>
