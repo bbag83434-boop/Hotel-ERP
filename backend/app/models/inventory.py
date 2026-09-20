@@ -762,3 +762,158 @@ class OutletStockLedger(Base):
         ),
     )
 
+
+
+# ---------------------------------------------------------------------------
+# CENTRAL STORE BRANCH-WISE STOCK
+# ---------------------------------------------------------------------------
+# Central Store stock is branch-scoped and intentionally independent from
+# warehouse stock and outlet stock. No warehouse is required for this flow.
+
+class CentralStoreStockBalance(Base):
+    __tablename__ = "central_store_stock_balances"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column("branchId", String(36), ForeignKey("branches.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = Column("itemId", String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    quantity = Column(Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    min_stock_level = Column("minStockLevel", Numeric(14, 4), nullable=True)
+    reorder_qty = Column("reorderQty", Numeric(14, 4), nullable=True)
+    updated_at = Column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    companyId = synonym("company_id")
+    branchId = synonym("branch_id")
+    itemId = synonym("item_id")
+    minStockLevel = synonym("min_stock_level")
+    reorderQty = synonym("reorder_qty")
+    updatedAt = synonym("updated_at")
+
+    item = relationship("Item")
+    branch = relationship("Branch")
+
+    @property
+    def avg_unit_cost(self):
+        return Decimal("0.0000")
+
+    @property
+    def avgUnitCost(self):
+        return Decimal("0.0000")
+
+    __table_args__ = (
+        Index("idx_cs_stock_company_branch_item", "companyId", "branchId", "itemId", unique=True),
+    )
+
+
+class CentralStoreStockLedger(Base):
+    __tablename__ = "central_store_stock_ledgers"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column("branchId", String(36), ForeignKey("branches.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = Column("itemId", String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    unit_id = Column("unitId", String(36), ForeignKey("units.id", ondelete="SET NULL"), nullable=True)
+    batch_number = Column("batchNumber", String(100), nullable=True)
+    movement_type = Column("movementType", String(50), nullable=False)
+    change_qty = Column("changeQty", Numeric(14, 4), nullable=False)
+    balance_qty = Column("balanceQty", Numeric(14, 4), nullable=False)
+    unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=True)
+    total_cost = Column("totalCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=True)
+    reference_type = Column("referenceType", String(100), nullable=False)
+    reference_id = Column("referenceId", String(36), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_id = Column("createdById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column("createdAt", DateTime, default=datetime.utcnow, nullable=False)
+
+    companyId = synonym("company_id")
+    branchId = synonym("branch_id")
+    itemId = synonym("item_id")
+    unitId = synonym("unit_id")
+    batchNumber = synonym("batch_number")
+    movementType = synonym("movement_type")
+    changeQty = synonym("change_qty")
+    balanceQty = synonym("balance_qty")
+    unitCost = synonym("unit_cost")
+    totalCost = synonym("total_cost")
+    referenceType = synonym("reference_type")
+    referenceId = synonym("reference_id")
+    createdById = synonym("created_by_id")
+    createdAt = synonym("created_at")
+
+    item = relationship("Item")
+    branch = relationship("Branch")
+    unit = relationship("Unit", foreign_keys=[unit_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+    __table_args__ = (
+        Index("idx_cs_ledger_company_branch_item_date", "companyId", "branchId", "itemId", "createdAt"),
+        Index("idx_cs_ledger_reference", "referenceType", "referenceId"),
+    )
+
+
+class CentralStoreStockCount(Base):
+    __tablename__ = "central_store_stock_counts"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column("branchId", String(36), ForeignKey("branches.id", ondelete="CASCADE"), nullable=False, index=True)
+    count_number = Column("countNumber", String(50), nullable=False, index=True)
+    count_date = Column("countDate", DateTime, nullable=False)
+    status = Column(String(30), default="DRAFT", nullable=False, index=True)
+    created_by_id = Column("createdById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id = Column("approvedById", String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column("approvedAt", DateTime, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column("createdAt", DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    companyId = synonym("company_id")
+    branchId = synonym("branch_id")
+    countNumber = synonym("count_number")
+    countDate = synonym("count_date")
+    createdById = synonym("created_by_id")
+    approvedById = synonym("approved_by_id")
+    approvedAt = synonym("approved_at")
+    createdAt = synonym("created_at")
+    updatedAt = synonym("updated_at")
+
+    branch = relationship("Branch")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
+    items = relationship("CentralStoreStockCountItem", back_populates="stock_count", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_cs_count_company_number", "companyId", "countNumber", unique=True),
+        Index("idx_cs_count_company_branch_date", "companyId", "branchId", "countDate"),
+    )
+
+
+class CentralStoreStockCountItem(Base):
+    __tablename__ = "central_store_stock_count_items"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    stock_count_id = Column("stockCountId", String(36), ForeignKey("central_store_stock_counts.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = Column("itemId", String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    system_qty = Column("systemQty", Numeric(14, 4), nullable=False)
+    physical_qty = Column("physicalQty", Numeric(14, 4), nullable=False)
+    variance_qty = Column("varianceQty", Numeric(14, 4), nullable=False)
+    unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    variance_value = Column("varianceValue", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    batch_number = Column("batchNumber", String(100), nullable=True)
+    remarks = Column(Text, nullable=True)
+
+    stockCountId = synonym("stock_count_id")
+    itemId = synonym("item_id")
+    systemQty = synonym("system_qty")
+    physicalQty = synonym("physical_qty")
+    varianceQty = synonym("variance_qty")
+    unitCost = synonym("unit_cost")
+    varianceValue = synonym("variance_value")
+    batchNumber = synonym("batch_number")
+
+    stock_count = relationship("CentralStoreStockCount", back_populates="items")
+    item = relationship("Item")
+
+    __table_args__ = (
+        Index("idx_cs_count_item_count_item", "stockCountId", "itemId", unique=True),
+    )

@@ -413,6 +413,62 @@ class StockCountResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
+
+# -------------------------------------------------------------
+# Central Store Branch-Wise Physical Stock Count Schemas
+# -------------------------------------------------------------
+class CentralStoreStockCountItemCreate(BaseModel):
+    item_id: str
+    physical_qty: Decimal = Field(..., ge=Decimal("0.0000"))
+    unit_cost: Optional[Decimal] = None
+    batch_number: Optional[str] = None
+    remarks: Optional[str] = None
+
+class CentralStoreStockCountItemResponse(BaseModel):
+    id: str
+    stock_count_id: str
+    item_id: str
+    system_qty: Decimal
+    physical_qty: Decimal
+    variance_qty: Decimal
+    unit_cost: Decimal
+    variance_value: Decimal
+    batch_number: Optional[str] = None
+    remarks: Optional[str] = None
+    item_name: Optional[str] = None
+    item_code: Optional[str] = None
+    unit_symbol: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+class CentralStoreStockCountCreate(BaseModel):
+    count_date: Optional[datetime] = None
+    count_number: Optional[str] = None
+    notes: Optional[str] = None
+
+class CentralStoreStockCountSubmit(BaseModel):
+    items: List[CentralStoreStockCountItemCreate]
+    notes: Optional[str] = None
+
+class CentralStoreStockCountResponse(BaseModel):
+    id: str
+    company_id: str
+    branch_id: str
+    count_number: str
+    count_date: datetime
+    status: str
+    created_by_id: Optional[str] = None
+    approved_by_id: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    items: List[CentralStoreStockCountItemResponse] = []
+    total_variance_value: Decimal = Decimal("0.0000")
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
 # -------------------------------------------------------------
 # Direct Stock Adjustment Schemas
 # -------------------------------------------------------------

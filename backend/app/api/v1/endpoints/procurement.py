@@ -7010,6 +7010,8 @@ def approve_central_store_dispatch(
         "status": transfer.status,
     }
 
+
+@router.get("/central-store/receiving")
 def list_central_store_receiving(
     branch_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -7065,6 +7067,8 @@ def list_central_store_receiving(
         })
     return result
 
+
+@router.post("/central-store/transfers/{transfer_id}/receive")
 def receive_central_store_transfer(
     transfer_id: str = Path(...),
     payload: Dict[str, Any] = Body(...),

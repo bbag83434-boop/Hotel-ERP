@@ -29,6 +29,10 @@ from app.models.inventory import (
     TransferStatus,
     StockMovementType,
     StockCountStatus,
+    CentralStoreStockBalance,
+    CentralStoreStockLedger,
+    CentralStoreStockCount,
+    CentralStoreStockCountItem,
 )
 from app.schemas.inventory import (
     CategoryCreate,
@@ -77,6 +81,10 @@ from app.schemas.inventory import (
     CategoryValuationItem,
     ItemValuationItem,
     InventoryValuationResponse,
+    CentralStoreStockCountCreate,
+    CentralStoreStockCountSubmit,
+    CentralStoreStockCountResponse,
+    CentralStoreStockCountItemResponse,
 )
 
 router = APIRouter()
@@ -4468,3 +4476,385 @@ def get_inventory_valuation(
 
 
 
+
+
+# =============================================================
+# CENTRAL STORE BRANCH-WISE STOCK (NO WAREHOUSE)
+# =============================================================
+
+def _central_store_branch_for_user(
+    current_user: User,
+    db: Session,
+    branch_id: Optional[str] = None,
+) -> Branch:
+    """Resolve and authorize the Central Store branch for branch-based stock."""
+    target_id = branch_id
+    if not target_id:
+        assigned_ids = list(_user_branch_ids(current_user))
+        if len(assigned_ids) == 1:
+            target_id = assigned_ids[0]
+
+    if not target_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Central Store branch scope is required.",
+        )
+
+    branch = db.query(Branch).filter(
+        Branch.id == target_id,
+        Branch.company_id == current_user.company_id,
+        Branch.is_active == True,
+    ).first()
+    if not branch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Central Store branch not found")
+
+    # Non-management users must be assigned to the selected Central Store branch.
+    if not _is_inventory_manager(current_user) and target_id not in _user_branch_ids(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Central Store branch is outside your scope.")
+
+    branch_name = (getattr(branch, "name", "") or "").strip().upper()
+    branch_code = (getattr(branch, "code", "") or "").strip().upper()
+    if not (("CENTRAL" in branch_name and "STORE" in branch_name) or branch_code.startswith("CS") or branch_code.startswith("BB-C")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected branch is not configured as Central Store.")
+
+    return branch
+
+
+def _central_store_stock_response_payload(branch: Branch, db: Session) -> Dict[str, Any]:
+    rows = (
+        db.query(CentralStoreStockBalance, Item, Unit)
+        .join(Item, Item.id == CentralStoreStockBalance.item_id)
+        .outerjoin(Unit, Unit.id == Item.unit_id)
+        .filter(
+            CentralStoreStockBalance.company_id == branch.company_id,
+            CentralStoreStockBalance.branch_id == branch.id,
+            Item.company_id == branch.company_id,
+            Item.is_active == True,
+        )
+        .order_by(Item.name.asc())
+        .all()
+    )
+
+    items = []
+    total_value = Decimal("0.0000")
+    low_stock = 0
+    for bal, item_obj, unit_obj in rows:
+        quantity = Decimal(str(bal.quantity or 0))
+        unit_cost = Decimal(str(item_obj.cost_price or 0))
+        value = (quantity * unit_cost).quantize(Decimal("0.0001"))
+        min_level = Decimal(str(bal.min_stock_level if bal.min_stock_level is not None else item_obj.min_stock_level or 0))
+        is_low = min_level > 0 and quantity <= min_level
+        if is_low:
+            low_stock += 1
+        total_value += value
+        items.append({
+            "id": bal.id,
+            "item_id": bal.item_id,
+            "item_name": item_obj.name,
+            "item_code": item_obj.code,
+            "unit_symbol": unit_obj.symbol if unit_obj else None,
+            "quantity": quantity,
+            "unit_cost": unit_cost,
+            "total_value": value,
+            "min_stock_level": min_level,
+            "reorder_qty": Decimal(str(bal.reorder_qty if bal.reorder_qty is not None else item_obj.reorder_qty or 0)),
+            "is_low_stock": is_low,
+            "updated_at": bal.updated_at,
+        })
+
+    return {
+        "branch_id": branch.id,
+        "branch_name": branch.name,
+        "total_valuation": total_value,
+        "total_items": len(items),
+        "low_stock_items_count": low_stock,
+        "items": items,
+    }
+
+
+def _central_store_count_response(sc: CentralStoreStockCount, db: Session) -> CentralStoreStockCountResponse:
+    total_variance = Decimal("0.0000")
+    result_items = []
+    for line in sc.items:
+        item_obj = db.query(Item).filter(Item.id == line.item_id).first()
+        unit_obj = db.query(Unit).filter(Unit.id == item_obj.unit_id).first() if item_obj else None
+        variance_value = Decimal(str(line.variance_value or 0))
+        total_variance += variance_value
+        result_items.append(
+            CentralStoreStockCountItemResponse(
+                id=line.id,
+                stock_count_id=line.stock_count_id,
+                item_id=line.item_id,
+                system_qty=Decimal(str(line.system_qty or 0)),
+                physical_qty=Decimal(str(line.physical_qty or 0)),
+                variance_qty=Decimal(str(line.variance_qty or 0)),
+                unit_cost=Decimal(str(line.unit_cost or 0)),
+                variance_value=variance_value,
+                batch_number=line.batch_number,
+                remarks=line.remarks,
+                item_name=item_obj.name if item_obj else None,
+                item_code=item_obj.code if item_obj else None,
+                unit_symbol=unit_obj.symbol if unit_obj else None,
+            )
+        )
+
+    return CentralStoreStockCountResponse(
+        id=sc.id,
+        company_id=sc.company_id,
+        branch_id=sc.branch_id,
+        count_number=sc.count_number,
+        count_date=sc.count_date,
+        status=sc.status,
+        created_by_id=sc.created_by_id,
+        approved_by_id=sc.approved_by_id,
+        approved_at=sc.approved_at,
+        notes=sc.notes,
+        items=result_items,
+        total_variance_value=total_variance,
+        created_at=sc.created_at,
+        updated_at=sc.updated_at,
+    )
+
+
+@router.get("/central-store-stock")
+def get_central_store_stock(
+    branch_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    branch = _central_store_branch_for_user(current_user, db, branch_id)
+    return _central_store_stock_response_payload(branch, db)
+
+
+@router.get("/central-store-stock-counts", response_model=List[CentralStoreStockCountResponse])
+def get_central_store_stock_counts(
+    branch_id: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    branch = _central_store_branch_for_user(current_user, db, branch_id)
+    query = db.query(CentralStoreStockCount).filter(
+        CentralStoreStockCount.company_id == current_user.company_id,
+        CentralStoreStockCount.branch_id == branch.id,
+    )
+    if status_filter:
+        query = query.filter(CentralStoreStockCount.status == status_filter)
+    counts = query.order_by(CentralStoreStockCount.created_at.desc()).all()
+    return [_central_store_count_response(sc, db) for sc in counts]
+
+
+@router.post("/central-store-stock-counts", response_model=CentralStoreStockCountResponse, status_code=status.HTTP_201_CREATED)
+def create_central_store_stock_count(
+    count_in: CentralStoreStockCountCreate,
+    branch_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    branch = _central_store_branch_for_user(current_user, db, branch_id)
+    count_date = count_in.count_date or datetime.now(timezone.utc)
+    if count_date.tzinfo is None:
+        count_date = count_date.replace(tzinfo=timezone.utc)
+    else:
+        count_date = count_date.astimezone(timezone.utc)
+    period_start, period_end = _current_stock_count_period(count_date)
+    if count_date < period_start or count_date > period_end:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock count date must be inside the current 1–15 or 16–month-end period.")
+
+    existing = db.query(CentralStoreStockCount).filter(
+        CentralStoreStockCount.company_id == current_user.company_id,
+        CentralStoreStockCount.branch_id == branch.id,
+        CentralStoreStockCount.count_date >= period_start,
+        CentralStoreStockCount.count_date <= period_end,
+        CentralStoreStockCount.status.in_(["DRAFT", "IN_PROGRESS"]),
+    ).order_by(CentralStoreStockCount.created_at.desc()).first()
+    if existing:
+        return _central_store_count_response(existing, db)
+
+    cnt_num = count_in.count_number or f"CS-CNT-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    sc = CentralStoreStockCount(
+        company_id=current_user.company_id,
+        branch_id=branch.id,
+        count_number=cnt_num,
+        count_date=count_date,
+        status="DRAFT",
+        created_by_id=current_user.id,
+        notes=count_in.notes,
+    )
+    db.add(sc)
+    db.flush()
+
+    # Snapshot every active Item Master item so the user can count the full Central Store list.
+    items = db.query(Item).filter(
+        Item.company_id == current_user.company_id,
+        Item.is_active == True,
+    ).order_by(Item.name.asc()).all()
+    for item_obj in items:
+        bal = db.query(CentralStoreStockBalance).filter(
+            CentralStoreStockBalance.company_id == current_user.company_id,
+            CentralStoreStockBalance.branch_id == branch.id,
+            CentralStoreStockBalance.item_id == item_obj.id,
+        ).first()
+        system_qty = Decimal(str(bal.quantity if bal else 0))
+        db.add(
+            CentralStoreStockCountItem(
+                stock_count_id=sc.id,
+                item_id=item_obj.id,
+                system_qty=system_qty,
+                physical_qty=system_qty,
+                variance_qty=Decimal("0.0000"),
+                unit_cost=Decimal(str(item_obj.cost_price or 0)),
+                variance_value=Decimal("0.0000"),
+            )
+        )
+
+    db.commit()
+    db.refresh(sc)
+    return _central_store_count_response(sc, db)
+
+
+@router.put("/central-store-stock-counts/{count_id}/submit", response_model=CentralStoreStockCountResponse)
+def submit_central_store_stock_count(
+    count_id: str,
+    submit_in: CentralStoreStockCountSubmit,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    sc = db.query(CentralStoreStockCount).filter(
+        CentralStoreStockCount.id == count_id,
+        CentralStoreStockCount.company_id == current_user.company_id,
+    ).with_for_update().first()
+    if not sc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Central Store stock count not found")
+    _central_store_branch_for_user(current_user, db, sc.branch_id)
+    if sc.status not in {"DRAFT", "IN_PROGRESS"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stock count cannot be submitted from status '{sc.status}'.")
+
+    submitted = {line.item_id: line for line in submit_in.items}
+    if not submitted:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one item is required before submission.")
+
+    for line in sc.items:
+        incoming = submitted.get(line.item_id)
+        if incoming is None:
+            continue
+        physical_qty = Decimal(str(incoming.physical_qty))
+        if physical_qty < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Physical quantity cannot be negative.")
+        unit_cost = Decimal(str(incoming.unit_cost if incoming.unit_cost is not None else line.unit_cost or 0))
+        variance_qty = physical_qty - Decimal(str(line.system_qty or 0))
+        line.physical_qty = physical_qty
+        line.variance_qty = variance_qty
+        line.unit_cost = unit_cost
+        line.variance_value = (variance_qty * unit_cost).quantize(Decimal("0.0001"))
+        line.batch_number = incoming.batch_number
+        line.remarks = incoming.remarks
+
+    sc.status = "SUBMITTED"
+    if submit_in.notes:
+        sc.notes = (sc.notes or "") + f" | {submit_in.notes}"
+    db.commit()
+    db.refresh(sc)
+    return _central_store_count_response(sc, db)
+
+
+@router.post("/central-store-stock-counts/{count_id}/approve", response_model=CentralStoreStockCountResponse)
+def approve_central_store_stock_count(
+    count_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if not _is_inventory_manager(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only authorised management users can approve Central Store stock counts.")
+
+    sc = db.query(CentralStoreStockCount).filter(
+        CentralStoreStockCount.id == count_id,
+        CentralStoreStockCount.company_id == current_user.company_id,
+    ).with_for_update().first()
+    if not sc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Central Store stock count not found")
+    branch = _central_store_branch_for_user(current_user, db, sc.branch_id)
+    if sc.status != "SUBMITTED":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Only SUBMITTED stock counts can be approved. Current status: {sc.status}")
+
+    for line in sc.items:
+        physical_qty = Decimal(str(line.physical_qty or 0))
+        system_qty = Decimal(str(line.system_qty or 0))
+        variance_qty = physical_qty - system_qty
+        unit_cost = Decimal(str(line.unit_cost or 0))
+        balance = db.query(CentralStoreStockBalance).filter(
+            CentralStoreStockBalance.company_id == sc.company_id,
+            CentralStoreStockBalance.branch_id == sc.branch_id,
+            CentralStoreStockBalance.item_id == line.item_id,
+        ).with_for_update().first()
+        if not balance:
+            item_obj = db.query(Item).filter(Item.id == line.item_id, Item.company_id == sc.company_id).first()
+            balance = CentralStoreStockBalance(
+                company_id=sc.company_id,
+                branch_id=sc.branch_id,
+                item_id=line.item_id,
+                quantity=Decimal("0.0000"),
+                min_stock_level=item_obj.min_stock_level if item_obj else None,
+                reorder_qty=item_obj.reorder_qty if item_obj else None,
+            )
+            db.add(balance)
+            db.flush()
+
+        balance.quantity = physical_qty
+        balance.updated_at = datetime.utcnow()
+
+        if variance_qty != 0:
+            db.add(
+                CentralStoreStockLedger(
+                    company_id=sc.company_id,
+                    branch_id=sc.branch_id,
+                    item_id=line.item_id,
+                    unit_id=db.query(Item).filter(Item.id == line.item_id).first().unit_id,
+                    movement_type="ADJUSTMENT",
+                    change_qty=variance_qty,
+                    balance_qty=physical_qty,
+                    unit_cost=unit_cost,
+                    total_cost=(variance_qty * unit_cost).quantize(Decimal("0.0001")),
+                    reference_type="CENTRAL_STORE_STOCK_COUNT",
+                    reference_id=sc.id,
+                    batch_number=line.batch_number,
+                    notes=f"Central Store Physical Count Approval #{sc.count_number}",
+                    created_by_id=current_user.id,
+                )
+            )
+
+    sc.status = "APPROVED"
+    sc.approved_by_id = current_user.id
+    sc.approved_at = datetime.utcnow()
+    if payload.get("notes"):
+        sc.notes = (sc.notes or "") + f" | APPROVED: {payload.get('notes')}"
+    db.commit()
+    db.refresh(sc)
+    return _central_store_count_response(sc, db)
+
+
+@router.post("/central-store-stock-counts/{count_id}/reject", response_model=CentralStoreStockCountResponse)
+def reject_central_store_stock_count(
+    count_id: str,
+    payload: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if not _is_inventory_manager(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only authorised management users can reject Central Store stock counts.")
+    sc = db.query(CentralStoreStockCount).filter(
+        CentralStoreStockCount.id == count_id,
+        CentralStoreStockCount.company_id == current_user.company_id,
+    ).with_for_update().first()
+    if not sc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Central Store stock count not found")
+    _central_store_branch_for_user(current_user, db, sc.branch_id)
+    if sc.status != "SUBMITTED":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Only SUBMITTED stock counts can be rejected. Current status: {sc.status}")
+    reason = str(payload.get("reason") or "Rejected by management; recount required.").strip()
+    sc.status = "CANCELLED"
+    sc.notes = (sc.notes or "") + f" | REJECTED: {reason}"
+    db.commit()
+    db.refresh(sc)
+    return _central_store_count_response(sc, db)
