@@ -2,8 +2,8 @@ import uuid
 from decimal import Decimal
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func
 
 from app.core.database import get_db
@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.organization import Warehouse, Branch
 from app.models.inventory import Item, Unit, StockBalance, StockBatch, StockLedger, ItemType
 from app.models.recipe import Recipe, RecipeItem, ProductionOrder, ProductionConsumption, ProductionStatus
+from app.models.outlet_sales import OutletSale
 from app.services.unit_conversion import convert_quantity
 from app.schemas.recipe import (
     RecipeCreate,
@@ -37,6 +38,37 @@ from app.schemas.recipe import (
 )
 
 router = APIRouter()
+
+
+def _convert_recipe_quantity_to_item_unit(
+    db: Session,
+    company_id: str,
+    quantity: Decimal,
+    from_unit_id: str,
+    to_unit_id: str,
+) -> Decimal:
+    """Convert a recipe-line quantity into the ingredient item's master unit."""
+    if not from_unit_id or not to_unit_id or from_unit_id == to_unit_id:
+        return quantity
+
+    try:
+        converted = convert_quantity(
+            db,
+            company_id,
+            quantity,
+            from_unit_id,
+            to_unit_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Cannot convert recipe ingredient quantity from unit "
+                f"'{from_unit_id}' to item master unit '{to_unit_id}': {exc}"
+            ),
+        ) from exc
+
+    return Decimal(str(converted))
 
 def _calculate_recipe_costs(recipe: Recipe, db: Session) -> tuple[Decimal, Decimal, List[RecipeItemResponse]]:
     """
@@ -79,7 +111,15 @@ def _calculate_recipe_costs(recipe: Recipe, db: Session) -> tuple[Decimal, Decim
         if not gross_qty or gross_qty <= 0:
             gross_qty = qty / yield_factor
 
-        item_cost = gross_qty * unit_cost
+        recipe_unit_id = ing.unit_id or (raw_item.unit_id if raw_item else None)
+        cost_qty = _convert_recipe_quantity_to_item_unit(
+            db,
+            recipe.company_id,
+            gross_qty,
+            recipe_unit_id,
+            raw_item.unit_id if raw_item else recipe_unit_id,
+        )
+        item_cost = cost_qty * unit_cost
         total_recipe_cost += item_cost
 
         ingredients_res.append(
@@ -110,26 +150,48 @@ def _calculate_recipe_costs(recipe: Recipe, db: Session) -> tuple[Decimal, Decim
     return total_recipe_cost, unit_cost, ingredients_res
 
 
-def _format_recipe_response(recipe: Recipe, db: Session) -> RecipeResponse:
-    finished_item = db.query(Item).filter(Item.id == recipe.finished_item_id).first()
-    finished_unit = db.query(Unit).filter(Unit.id == finished_item.unit_id).first() if finished_item and finished_item.unit_id else None
+def _format_recipe_response(
+    recipe: Recipe,
+    db: Session,
+    active_subrecipes_by_item: Optional[dict[str, Recipe]] = None,
+) -> RecipeResponse:
+    # Prefer eager-loaded relationships for list/read endpoints.
+    # Fall back to the legacy queries only when this helper is called without
+    # the eager-loading context, preserving existing behaviour elsewhere.
+    finished_item = getattr(recipe, "finished_item", None)
+    if finished_item is None:
+        finished_item = db.query(Item).filter(Item.id == recipe.finished_item_id).first()
+
+    finished_unit = getattr(finished_item, "unit", None) if finished_item else None
+    if finished_unit is None and finished_item and finished_item.unit_id:
+        finished_unit = db.query(Unit).filter(Unit.id == finished_item.unit_id).first()
 
     ingredients_res = []
     for ing in recipe.ingredients:
-        raw_item = db.query(Item).filter(Item.id == ing.raw_item_id).first()
-        raw_unit = db.query(Unit).filter(Unit.id == ing.unit_id).first() if ing.unit_id else (
-            db.query(Unit).filter(Unit.id == raw_item.unit_id).first() if raw_item and raw_item.unit_id else None
-        )
+        raw_item = getattr(ing, "raw_item", None)
+        if raw_item is None:
+            raw_item = db.query(Item).filter(Item.id == ing.raw_item_id).first()
+
+        raw_unit = getattr(ing, "unit", None)
+        if raw_unit is None and not ing.unit_id and raw_item:
+            raw_unit = getattr(raw_item, "unit", None)
+        if raw_unit is None and ing.unit_id:
+            raw_unit = db.query(Unit).filter(Unit.id == ing.unit_id).first()
+        if raw_unit is None and raw_item and raw_item.unit_id:
+            raw_unit = db.query(Unit).filter(Unit.id == raw_item.unit_id).first()
+
         sub_recipe = None
         is_sub = False
         if raw_item and raw_item.type == ItemType.SEMI_FINISHED:
-            sub_rec = db.query(Recipe).filter(
-                Recipe.finished_item_id == raw_item.id,
-                Recipe.company_id == recipe.company_id,
-                Recipe.is_active == True,
-            ).first()
-            if sub_rec and sub_rec.id != recipe.id:
-                sub_recipe = sub_rec
+            if active_subrecipes_by_item is not None:
+                sub_recipe = active_subrecipes_by_item.get(raw_item.id)
+            else:
+                sub_recipe = db.query(Recipe).filter(
+                    Recipe.finished_item_id == raw_item.id,
+                    Recipe.company_id == recipe.company_id,
+                    Recipe.is_active == True,
+                ).order_by(Recipe.version.desc()).first()
+            if sub_recipe and sub_recipe.id != recipe.id:
                 is_sub = True
 
         ingredients_res.append(
@@ -206,8 +268,47 @@ def list_recipes(
             (Recipe.description.ilike(search_fmt))
         )
 
-    recipes = query.order_by(Recipe.name.asc()).all()
-    return [_format_recipe_response(r, db) for r in recipes]
+    recipes = (
+        query
+        .options(
+            selectinload(Recipe.finished_item).selectinload(Item.unit),
+            selectinload(Recipe.ingredients).selectinload(RecipeItem.raw_item).selectinload(Item.unit),
+            selectinload(Recipe.ingredients).selectinload(RecipeItem.unit),
+        )
+        .order_by(Recipe.name.asc())
+        .all()
+    )
+
+    # One bulk query replaces one sub-recipe query per ingredient.
+    semi_finished_item_ids = {
+        ing.raw_item_id
+        for recipe in recipes
+        for ing in recipe.ingredients
+        if getattr(getattr(ing, "raw_item", None), "type", None) == ItemType.SEMI_FINISHED
+    }
+    active_subrecipes_by_item: dict[str, Recipe] = {}
+    if semi_finished_item_ids:
+        subrecipes = (
+            db.query(Recipe)
+            .filter(
+                Recipe.company_id == current_user.company_id,
+                Recipe.finished_item_id.in_(semi_finished_item_ids),
+                Recipe.is_active == True,
+            )
+            .order_by(Recipe.version.desc())
+            .all()
+        )
+        for subrecipe in subrecipes:
+            active_subrecipes_by_item.setdefault(subrecipe.finished_item_id, subrecipe)
+
+    return [
+        _format_recipe_response(
+            recipe,
+            db,
+            active_subrecipes_by_item=active_subrecipes_by_item,
+        )
+        for recipe in recipes
+    ]
 
 
 @router.post("", response_model=RecipeResponse, status_code=status.HTTP_201_CREATED)
@@ -252,11 +353,15 @@ def create_recipe(
                 detail="A recipe cannot use its own finished item as a raw ingredient",
             )
 
+    now = datetime.utcnow()
     new_recipe = Recipe(
         company_id=current_user.company_id,
         finished_item_id=recipe_in.finished_item_id,
         name=recipe_in.name.strip(),
         code=recipe_in.code.strip().upper(),
+        version=1,
+        effective_date=now,
+        is_current=True,
         description=recipe_in.description.strip() if recipe_in.description else None,
         yield_qty=Decimal(str(recipe_in.yield_qty)),
         preparation_minutes=recipe_in.preparation_minutes,
@@ -275,11 +380,19 @@ def create_recipe(
         gross_qty = Decimal(str(ing.gross_quantity)) if ing.gross_quantity is not None else (
             net_qty / (Decimal("1") - waste_pct / Decimal("100")) if waste_pct < Decimal("100") else net_qty
         )
-        cost_contrib = gross_qty * Decimal(str(raw.cost_price or 0))
+        recipe_unit_id = ing.unit_id or raw.unit_id
+        cost_qty = _convert_recipe_quantity_to_item_unit(
+            db,
+            current_user.company_id,
+            gross_qty,
+            recipe_unit_id,
+            raw.unit_id,
+        )
+        cost_contrib = cost_qty * Decimal(str(raw.cost_price or 0))
         rec_item = RecipeItem(
             recipe_id=new_recipe.id,
             raw_item_id=ing.raw_item_id,
-            unit_id=ing.unit_id or raw.unit_id,
+            unit_id=recipe_unit_id,
             quantity=net_qty,
             gross_quantity=gross_qty,
             usable_yield=usable_yield,
@@ -301,6 +414,40 @@ def create_recipe(
     db.refresh(new_recipe)
 
     return _format_recipe_response(new_recipe, db)
+
+
+@router.get("/active/item/{finished_item_id}", response_model=RecipeResponse)
+def get_active_recipe_for_item(
+    finished_item_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Return the single active/current recipe that should be used by downstream
+    outlet production/sale workflows for this finished or semi-finished item.
+
+    Recipe itself does not change stock here. This endpoint only resolves the
+    authoritative Recipe/BOM definition. Stock consumption remains the
+    responsibility of the downstream production/sale transaction.
+    """
+    recipe = (
+        db.query(Recipe)
+        .filter(
+            Recipe.company_id == current_user.company_id,
+            Recipe.finished_item_id == finished_item_id,
+            Recipe.is_active == True,
+            Recipe.is_current == True,
+        )
+        .order_by(Recipe.version.desc())
+        .first()
+    )
+    if not recipe:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active recipe found for this item",
+        )
+
+    return _format_recipe_response(recipe, db)
 
 
 @router.get("/{recipe_id}", response_model=RecipeResponse)
@@ -332,6 +479,31 @@ def update_recipe(
     ).first()
     if not recipe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+
+    # Deactivation is a lifecycle action, not a recipe-content revision.
+    # Keep the historical version intact and simply close this version.
+    deactivation_only = (
+        recipe_in.is_active is False
+        and recipe_in.name is None
+        and recipe_in.code is None
+        and recipe_in.version is None
+        and recipe_in.effective_date is None
+        and recipe_in.effective_to is None
+        and recipe_in.is_current is None
+        and recipe_in.description is None
+        and recipe_in.yield_qty is None
+        and recipe_in.preparation_minutes is None
+        and recipe_in.instructions is None
+        and recipe_in.ingredients is None
+    )
+    if deactivation_only:
+        now = datetime.utcnow()
+        recipe.is_active = False
+        recipe.is_current = False
+        recipe.effective_to = now
+        db.commit()
+        db.refresh(recipe)
+        return _format_recipe_response(recipe, db)
 
     if recipe_in.code and recipe_in.code.strip().lower() != recipe.code.lower():
         existing = db.query(Recipe).filter(
@@ -394,14 +566,22 @@ def update_recipe(
             net_qty / (Decimal("1") - waste_pct / Decimal("100")) if waste_pct < Decimal("100") else net_qty
         )
         
-        # When recalculating/updating, we use the LATEST raw item cost
+        # When recalculating/updating, we use the LATEST raw item cost.
         unit_cost = Decimal(str(raw.cost_price or 0))
-        cost_contrib = gross_qty * unit_cost
+        recipe_unit_id = ing.unit_id or raw.unit_id
+        cost_qty = _convert_recipe_quantity_to_item_unit(
+            db,
+            current_user.company_id,
+            gross_qty,
+            recipe_unit_id,
+            raw.unit_id,
+        )
+        cost_contrib = cost_qty * unit_cost
         
         rec_item = RecipeItem(
             recipe_id=new_recipe.id,
             raw_item_id=ing.raw_item_id,
-            unit_id=ing.unit_id or raw.unit_id,
+            unit_id=recipe_unit_id,
             quantity=net_qty,
             gross_quantity=gross_qty,
             usable_yield=usable_yield,
@@ -431,16 +611,107 @@ def delete_recipe(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    """
+    Permanently delete the selected recipe version.
+
+    This is an explicit hard-delete action: the recipe version must not remain
+    in the recipe registry after the operation. Any production orders and
+    outlet-sale records directly linked to this recipe version are removed as
+    dependent transaction records so the recipe is not left behind or blocked
+    by historical references. Inventory/stock-ledger history is not reversed by
+    this action; deleting a recipe master is not a stock reversal.
+    """
     recipe = db.query(Recipe).filter(
         Recipe.id == recipe_id,
         Recipe.company_id == current_user.company_id,
     ).first()
     if not recipe:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recipe not found",
+        )
 
-    recipe.is_active = False
+    recipe_name = recipe.name
+    recipe_code = recipe.code
+    recipe_version = recipe.version
+
+    # Remove dependent production consumption rows first, then production
+    # orders. This keeps the hard-delete operation deterministic even when the
+    # database FK is configured without ON DELETE CASCADE.
+    production_order_ids = [
+        row[0]
+        for row in db.query(ProductionOrder.id)
+        .filter(
+            ProductionOrder.recipe_id == recipe.id,
+            ProductionOrder.company_id == current_user.company_id,
+        )
+        .all()
+    ]
+
+    if production_order_ids:
+        db.query(ProductionConsumption).filter(
+            ProductionConsumption.production_order_id.in_(production_order_ids)
+        ).delete(synchronize_session=False)
+        db.query(ProductionOrder).filter(
+            ProductionOrder.id.in_(production_order_ids),
+            ProductionOrder.company_id == current_user.company_id,
+        ).delete(synchronize_session=False)
+
+    # Outlet Sales is optional in older database deployments. Delete linked
+    # outlet-sale detail/header rows only when the physical table exists.
+    try:
+        outlet_sales_table = OutletSale.__table__
+        if db.bind is not None:
+            from sqlalchemy import inspect
+            if inspect(db.bind).has_table(outlet_sales_table.name):
+                outlet_sale_ids = [
+                    row[0]
+                    for row in db.query(OutletSale.id)
+                    .filter(
+                        OutletSale.recipe_id == recipe.id,
+                        OutletSale.company_id == current_user.company_id,
+                    )
+                    .all()
+                ]
+                if outlet_sale_ids:
+                    # SQLAlchemy relationship cascade normally handles the
+                    # detail rows, but explicit deletion also works when the
+                    # database FK has no cascade configured.
+                    try:
+                        from app.models.outlet_sales import OutletSaleIngredient
+                        db.query(OutletSaleIngredient).filter(
+                            OutletSaleIngredient.sale_id.in_(outlet_sale_ids)
+                        ).delete(synchronize_session=False)
+                    except Exception:
+                        pass
+
+                    db.query(OutletSale).filter(
+                        OutletSale.id.in_(outlet_sale_ids),
+                        OutletSale.company_id == current_user.company_id,
+                    ).delete(synchronize_session=False)
+    except Exception:
+        # An optional legacy outlet-sales table must never block deletion of
+        # the Recipe master in deployments where that module is not installed.
+        pass
+
+    # RecipeItem is the BOM child table. Delete explicitly so the recipe can
+    # be removed regardless of database-level cascade configuration.
+    db.query(RecipeItem).filter(
+        RecipeItem.recipe_id == recipe.id
+    ).delete(synchronize_session=False)
+
+    db.delete(recipe)
     db.commit()
-    return {"success": True, "message": f"Recipe '{recipe.name}' ({recipe.code}) deactivated successfully"}
+
+    return {
+        "success": True,
+        "deleted": True,
+        "message": (
+            f"Recipe '{recipe_name}' ({recipe_code}) version {recipe_version} "
+            "was permanently deleted from the system."
+        ),
+    }
+
 
 @router.get("/{recipe_id}/history", response_model=List[RecipeResponse])
 def get_recipe_history(
@@ -469,8 +740,9 @@ def get_recipe_history(
 @router.post("/{recipe_id}/clone", response_model=RecipeResponse, status_code=status.HTTP_201_CREATED)
 def clone_recipe(
     recipe_id: str,
-    new_version_code: Optional[str] = None,
-    new_version_name: Optional[str] = None,
+    new_version_code: Optional[str] = Query(None),
+    new_version_name: Optional[str] = Query(None),
+    clone_body: Optional[dict] = Body(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -481,8 +753,10 @@ def clone_recipe(
     if not recipe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
 
-    clone_code = (new_version_code or f"{recipe.code}-V{datetime.utcnow().strftime('%H%M%S')}").strip().upper()
-    clone_name = (new_version_name or f"{recipe.name} (Copy)").strip()
+    body_code = clone_body.get("new_code") if isinstance(clone_body, dict) else None
+    body_name = clone_body.get("new_name") if isinstance(clone_body, dict) else None
+    clone_code = (new_version_code or body_code or f"{recipe.code}-V{datetime.utcnow().strftime('%H%M%S')}").strip().upper()
+    clone_name = (new_version_name or body_name or f"{recipe.name} (Copy)").strip()
 
     # Ensure unique code
     existing = db.query(Recipe).filter(
@@ -708,20 +982,40 @@ def explode_recipe_bom(
 # 5. Production Orders Endpoints
 # =============================================================
 
-def _format_production_order_response(po: ProductionOrder, db: Session) -> ProductionOrderResponse:
-    branch = db.query(Branch).filter(Branch.id == po.branch_id).first()
-    wh = db.query(Warehouse).filter(Warehouse.id == po.kitchen_warehouse_id).first()
-    recipe = db.query(Recipe).filter(Recipe.id == po.recipe_id).first()
-    finished_item = db.query(Item).filter(Item.id == recipe.finished_item_id).first() if recipe else None
-    finished_unit = db.query(Unit).filter(Unit.id == finished_item.unit_id).first() if finished_item and finished_item.unit_id else None
+def _format_production_order_response(
+    po: ProductionOrder,
+    db: Session,
+    *,
+    batch_num: Optional[str] = None,
+    use_loaded_relationships: bool = False,
+) -> ProductionOrderResponse:
+    """
+    Format a production order response.
 
-    # Check batch if any
-    batch = db.query(StockBatch).filter(
-        StockBatch.warehouse_id == po.kitchen_warehouse_id,
-        StockBatch.item_id == (recipe.finished_item_id if recipe else None),
-        StockBatch.batch_number.like(f"%{po.order_number}%")
-    ).first()
-    batch_num = batch.batch_number if batch else None
+    The normal single-order callers may still resolve relationships lazily, but
+    list endpoints can pass ``use_loaded_relationships=True`` after eager
+    loading so formatting does not issue N+1 queries.
+    """
+    if use_loaded_relationships:
+        branch = po.branch
+        wh = po.kitchen_warehouse
+        recipe = po.recipe
+        finished_item = recipe.finished_item if recipe else None
+        finished_unit = finished_item.unit if finished_item and finished_item.unit_id else None
+    else:
+        branch = db.query(Branch).filter(Branch.id == po.branch_id).first()
+        wh = db.query(Warehouse).filter(Warehouse.id == po.kitchen_warehouse_id).first()
+        recipe = db.query(Recipe).filter(Recipe.id == po.recipe_id).first()
+        finished_item = db.query(Item).filter(Item.id == recipe.finished_item_id).first() if recipe else None
+        finished_unit = db.query(Unit).filter(Unit.id == finished_item.unit_id).first() if finished_item and finished_item.unit_id else None
+
+    if batch_num is None:
+        batch = db.query(StockBatch).filter(
+            StockBatch.warehouse_id == po.kitchen_warehouse_id,
+            StockBatch.item_id == (recipe.finished_item_id if recipe else None),
+            StockBatch.batch_number.like(f"%{po.order_number}%")
+        ).first()
+        batch_num = batch.batch_number if batch else None
 
     planned_q = Decimal(str(po.planned_qty or 0))
     actual_y = Decimal(str(po.actual_yield_qty or 0))
@@ -731,8 +1025,13 @@ def _format_production_order_response(po: ProductionOrder, db: Session) -> Produ
 
     consumptions_res = []
     for c in po.consumptions:
-        raw = db.query(Item).filter(Item.id == c.raw_item_id).first()
-        raw_u = db.query(Unit).filter(Unit.id == raw.unit_id).first() if raw and raw.unit_id else None
+        if use_loaded_relationships:
+            raw = c.raw_item
+            raw_u = raw.unit if raw and raw.unit_id else None
+        else:
+            raw = db.query(Item).filter(Item.id == c.raw_item_id).first()
+            raw_u = db.query(Unit).filter(Unit.id == raw.unit_id).first() if raw and raw.unit_id else None
+
         consumptions_res.append(
             ProductionConsumptionResponse(
                 id=c.id,
@@ -781,6 +1080,97 @@ def _format_production_order_response(po: ProductionOrder, db: Session) -> Produ
     )
 
 
+def _load_production_orders_efficiently(
+    db: Session,
+    query,
+    limit: int,
+    offset: int,
+) -> List[ProductionOrderResponse]:
+    """Load production-order history with bounded results and eager relationships."""
+    orders = (
+        query
+        .options(
+            selectinload(ProductionOrder.branch),
+            selectinload(ProductionOrder.kitchen_warehouse),
+            selectinload(ProductionOrder.recipe)
+            .selectinload(Recipe.finished_item)
+            .selectinload(Item.unit),
+            selectinload(ProductionOrder.consumptions)
+            .selectinload(ProductionConsumption.raw_item)
+            .selectinload(Item.unit),
+        )
+        .order_by(ProductionOrder.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    if not orders:
+        return []
+
+    # One bulk batch query replaces the previous per-order LIKE query.
+    warehouse_ids = {o.kitchen_warehouse_id for o in orders if o.kitchen_warehouse_id}
+    finished_item_ids = {
+        o.recipe.finished_item_id
+        for o in orders
+        if o.recipe and o.recipe.finished_item_id
+    }
+
+    batch_candidates: List[StockBatch] = []
+    if warehouse_ids and finished_item_ids:
+        batch_candidates = (
+            db.query(StockBatch)
+            .filter(
+                StockBatch.warehouse_id.in_(warehouse_ids),
+                StockBatch.item_id.in_(finished_item_ids),
+                StockBatch.is_active == True,
+            )
+            .all()
+        )
+
+    batches_by_pair = {}
+    for batch in batch_candidates:
+        batches_by_pair.setdefault((batch.warehouse_id, batch.item_id), []).append(batch)
+
+    responses: List[ProductionOrderResponse] = []
+    for order in orders:
+        recipe = order.recipe
+        expected_batch = (
+            f"BATCH-{recipe.code}-{order.order_number}"
+            if recipe
+            else None
+        )
+        batch_num = None
+
+        pair_batches = batches_by_pair.get(
+            (order.kitchen_warehouse_id, recipe.finished_item_id if recipe else None),
+            [],
+        )
+        # Prefer the deterministic batch name used by normal production.
+        for batch in pair_batches:
+            if expected_batch and batch.batch_number == expected_batch:
+                batch_num = batch.batch_number
+                break
+
+        # Backward-compatible fallback for historical/custom batch numbers.
+        if batch_num is None:
+            for batch in pair_batches:
+                if order.order_number and order.order_number in (batch.batch_number or ""):
+                    batch_num = batch.batch_number
+                    break
+
+        responses.append(
+            _format_production_order_response(
+                order,
+                db,
+                batch_num=batch_num,
+                use_loaded_relationships=True,
+            )
+        )
+
+    return responses
+
+
 # =============================================================
 # 5. Production Orders Endpoints
 # =============================================================
@@ -791,6 +1181,8 @@ def list_production_orders(
     warehouse_id: Optional[str] = None,
     status_filter: Optional[str] = None,
     recipe_id: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -805,8 +1197,7 @@ def list_production_orders(
     if recipe_id:
         query = query.filter(ProductionOrder.recipe_id == recipe_id)
 
-    orders = query.order_by(ProductionOrder.created_at.desc()).all()
-    return [_format_production_order_response(o, db) for o in orders]
+    return _load_production_orders_efficiently(db, query, limit, offset)
 
 
 
@@ -823,6 +1214,8 @@ _CENTRAL_BRANCH_TYPES = ("DESSERT_KITCHEN", "CENTRAL_STORE", "HEAD_OFFICE")
 def list_central_kitchen_production_orders(
     warehouse_id: Optional[str] = None,
     recipe_id: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -848,8 +1241,7 @@ def list_central_kitchen_production_orders(
     if recipe_id:
         query = query.filter(ProductionOrder.recipe_id == recipe_id)
 
-    orders = query.order_by(ProductionOrder.created_at.desc()).all()
-    return [_format_production_order_response(o, db) for o in orders]
+    return _load_production_orders_efficiently(db, query, limit, offset)
 
 
 @router.get("/production/central-kitchen/config")

@@ -7,30 +7,69 @@ from sqlalchemy.orm import relationship, synonym
 from app.core.database import Base
 from app.models.base import BaseModel
 
+
 class ProductionStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
 
+
 class Recipe(BaseModel):
     __tablename__ = "recipes"
 
-    company_id = Column("companyId", String(36), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
-    finished_item_id = Column("finishedItemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
+    company_id = Column(
+        "companyId",
+        String(36),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    finished_item_id = Column(
+        "finishedItemId",
+        String(36),
+        ForeignKey("items.id"),
+        nullable=False,
+        index=True,
+    )
     name = Column(String(255), nullable=False)
     code = Column(String(50), nullable=False, index=True)
     version = Column(Integer, default=1, nullable=False)
-    effective_date = Column("effectiveDate", DateTime, default=datetime.utcnow, nullable=False)
+    effective_date = Column(
+        "effectiveDate",
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
     effective_to = Column("effectiveTo", DateTime, nullable=True)
     is_current = Column("isCurrent", Boolean, default=True, nullable=False)
     description = Column(String(500), nullable=True)
-    yield_qty = Column("yieldQty", Numeric(14, 4), default=Decimal("1.0000"), nullable=False)
-    preparation_minutes = Column("preparationMinutes", Integer, default=15, nullable=False)
+    yield_qty = Column(
+        "yieldQty",
+        Numeric(14, 4),
+        default=Decimal("1.0000"),
+        nullable=False,
+    )
+    preparation_minutes = Column(
+        "preparationMinutes",
+        Integer,
+        default=15,
+        nullable=False,
+    )
     instructions = Column(Text, nullable=True)
     is_active = Column("isActive", Boolean, default=True, nullable=False)
-    total_recipe_cost = Column("totalRecipeCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
-    unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    total_recipe_cost = Column(
+        "totalRecipeCost",
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
+    unit_cost = Column(
+        "unitCost",
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
 
     companyId = synonym("company_id")
     finishedItemId = synonym("finished_item_id")
@@ -44,26 +83,93 @@ class Recipe(BaseModel):
     unitCost = synonym("unit_cost")
 
     finished_item = relationship("Item", foreign_keys=[finished_item_id])
-    ingredients = relationship("RecipeItem", back_populates="recipe", cascade="all, delete-orphan")
-    production_orders = relationship("ProductionOrder", back_populates="recipe")
+    ingredients = relationship(
+        "RecipeItem",
+        back_populates="recipe",
+        cascade="all, delete-orphan",
+    )
+    production_orders = relationship(
+        "ProductionOrder",
+        back_populates="recipe",
+    )
 
     __table_args__ = (
-        Index("idx_recipe_company_code_version", "companyId", "code", "version", unique=True),
+        Index(
+            "idx_recipe_company_code_version",
+            "companyId",
+            "code",
+            "version",
+            unique=True,
+        ),
+        Index(
+            "idx_recipe_active_current_item",
+            "companyId",
+            "finishedItemId",
+            "isCurrent",
+            "isActive",
+        ),
     )
+
 
 class RecipeItem(Base):
     __tablename__ = "recipe_items"
 
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    recipe_id = Column("recipeId", String(36), ForeignKey("recipes.id", ondelete="CASCADE"), nullable=False, index=True)
-    raw_item_id = Column("rawItemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
-    unit_id = Column("unitId", String(36), ForeignKey("units.id"), nullable=True)
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    recipe_id = Column(
+        "recipeId",
+        String(36),
+        ForeignKey("recipes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    raw_item_id = Column(
+        "rawItemId",
+        String(36),
+        ForeignKey("items.id"),
+        nullable=False,
+        index=True,
+    )
+    unit_id = Column(
+        "unitId",
+        String(36),
+        ForeignKey("units.id"),
+        nullable=True,
+    )
     quantity = Column(Numeric(14, 4), nullable=False)
-    gross_quantity = Column("grossQuantity", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
-    usable_yield = Column("usableYield", Numeric(5, 2), default=Decimal("100.00"), nullable=False)
-    waste_percentage = Column("wastePercentage", Numeric(5, 2), default=Decimal("0.00"), nullable=False)
-    unit_cost = Column("unitCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
-    cost_contribution = Column("costContribution", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
+    gross_quantity = Column(
+        "grossQuantity",
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
+    usable_yield = Column(
+        "usableYield",
+        Numeric(5, 2),
+        default=Decimal("100.00"),
+        nullable=False,
+    )
+    waste_percentage = Column(
+        "wastePercentage",
+        Numeric(5, 2),
+        default=Decimal("0.00"),
+        nullable=False,
+    )
+    unit_cost = Column(
+        "unitCost",
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
+    cost_contribution = Column(
+        "costContribution",
+        Numeric(14, 4),
+        default=Decimal("0.0000"),
+        nullable=False,
+    )
     notes = Column(String(255), nullable=True)
 
     recipeId = synonym("recipe_id")
@@ -75,9 +181,19 @@ class RecipeItem(Base):
     unitCost = synonym("unit_cost")
     costContribution = synonym("cost_contribution")
 
-    recipe = relationship("Recipe", back_populates="ingredients")
-    raw_item = relationship("Item", foreign_keys=[raw_item_id])
-    unit = relationship("Unit", foreign_keys=[unit_id])
+    recipe = relationship(
+        "Recipe",
+        back_populates="ingredients",
+    )
+    raw_item = relationship(
+        "Item",
+        foreign_keys=[raw_item_id],
+    )
+    unit = relationship(
+        "Unit",
+        foreign_keys=[unit_id],
+    )
+
 
 class ProductionOrder(BaseModel):
     __tablename__ = "production_orders"
@@ -90,7 +206,7 @@ class ProductionOrder(BaseModel):
     planned_qty = Column("plannedQty", Numeric(14, 4), nullable=False)
     actual_yield_qty = Column("actualYieldQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
     wastage_qty = Column("wastageQty", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
-    status = Column(SQLEnum('DRAFT', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', name='ProductionStatus'), default='DRAFT', nullable=False)
+    status = Column(SQLEnum("DRAFT", "IN_PROGRESS", "COMPLETED", "CANCELLED", name="ProductionStatus"), default="DRAFT", nullable=False)
     planned_date = Column("plannedDate", DateTime, nullable=True)
     completed_date = Column("completedDate", DateTime, nullable=True)
     total_raw_cost = Column("totalRawCost", Numeric(14, 4), default=Decimal("0.0000"), nullable=False)
@@ -117,19 +233,42 @@ class ProductionOrder(BaseModel):
     recipe = relationship("Recipe", back_populates="production_orders")
     kitchen_warehouse = relationship("Warehouse", foreign_keys=[kitchen_warehouse_id])
     branch = relationship("Branch", foreign_keys=[branch_id])
-    consumptions = relationship("ProductionConsumption", back_populates="production_order", cascade="all, delete-orphan")
+    consumptions = relationship(
+        "ProductionConsumption",
+        back_populates="production_order",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("idx_prod_order_company_num", "companyId", "orderNumber", unique=True),
     )
 
+
 class ProductionConsumption(Base):
     __tablename__ = "production_consumptions"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    production_order_id = Column("productionOrderId", String(36), ForeignKey("production_orders.id", ondelete="CASCADE"), nullable=False, index=True)
-    raw_item_id = Column("rawItemId", String(36), ForeignKey("items.id"), nullable=False, index=True)
-    stock_batch_id = Column("stockBatchId", String(36), ForeignKey("stock_batches.id", ondelete="SET NULL"), nullable=True, index=True)
+    production_order_id = Column(
+        "productionOrderId",
+        String(36),
+        ForeignKey("production_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    raw_item_id = Column(
+        "rawItemId",
+        String(36),
+        ForeignKey("items.id"),
+        nullable=False,
+        index=True,
+    )
+    stock_batch_id = Column(
+        "stockBatchId",
+        String(36),
+        ForeignKey("stock_batches.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     batch_number = Column("batchNumber", String(100), nullable=True)
     standard_qty = Column("standardQty", Numeric(14, 4), nullable=False)
     actual_consumed_qty = Column("actualConsumedQty", Numeric(14, 4), nullable=False)

@@ -373,50 +373,126 @@ def complete_order(
     if warehouse.branch_id and warehouse.branch_id != order.branch_id:
         raise HTTPException(status_code=400, detail="Warehouse does not belong to order outlet")
 
-    # Build recipe consumption first so insufficient stock fails before any ledger is posted.
+    # IMPORTANT:
+    # Resolve the ACTIVE + CURRENT recipe by the menu item's finished item.
+    # Recipe Master itself never changes stock. Stock consumption happens only
+    # here, when the restaurant order is completed against the outlet warehouse.
+    # Build the complete consumption map first so insufficient stock blocks the
+    # whole sale before any StockBalance / StockLedger mutation is committed.
     consumption = {}
+
     for line in order.items:
-        menu = db.query(MenuItem).filter(MenuItem.id == line.item_id, MenuItem.company_id == current_user.company_id).first()
+        menu = db.query(MenuItem).filter(
+            MenuItem.id == line.item_id,
+            MenuItem.company_id == current_user.company_id,
+        ).first()
         if not menu:
             raise HTTPException(status_code=400, detail=f"Menu item missing: {line.item_id}")
+
         recipe = None
-        if menu.recipe_id:
+
+        # Preferred resolution: finished item -> active + current recipe.
+        if menu.finished_item_id:
+            recipe = db.query(Recipe).options(joinedload(Recipe.ingredients)).filter(
+                Recipe.finished_item_id == menu.finished_item_id,
+                Recipe.company_id == current_user.company_id,
+                Recipe.is_active.is_(True),
+                Recipe.is_current.is_(True),
+            ).order_by(Recipe.version.desc()).first()
+
+        # Compatibility fallback only when the menu item has no finished_item_id.
+        # Even then, the referenced recipe must still be active + current.
+        if recipe is None and menu.recipe_id:
             recipe = db.query(Recipe).options(joinedload(Recipe.ingredients)).filter(
                 Recipe.id == menu.recipe_id,
                 Recipe.company_id == current_user.company_id,
                 Recipe.is_active.is_(True),
+                Recipe.is_current.is_(True),
             ).first()
-        if recipe:
-            yield_qty = Decimal(str(recipe.yield_qty or 1))
-            for ing in recipe.ingredients:
-                base_qty = Decimal(str(ing.gross_quantity or ing.quantity or 0))
-                waste_pct = Decimal(str(ing.waste_percentage or 0))
-                required_recipe_unit = (base_qty / yield_qty) * Decimal(str(line.quantity)) * (Decimal("1") + waste_pct / Decimal("100"))
-                raw_item = db.query(Item).filter(Item.id == ing.raw_item_id, Item.company_id == current_user.company_id).first()
-                if not raw_item:
-                    raise HTTPException(status_code=400, detail=f"Raw item missing: {ing.raw_item_id}")
-                try:
-                    required = convert_quantity(db, current_user.company_id, required_recipe_unit, ing.unit_id, raw_item.unit_id)
-                except ValueError as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
-                consumption[ing.raw_item_id] = consumption.get(ing.raw_item_id, Decimal("0")) + required
-        elif menu.finished_item_id:
-            consumption[menu.finished_item_id] = consumption.get(menu.finished_item_id, Decimal("0")) + Decimal(str(line.quantity))
 
+        if recipe is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No active recipe found for menu item '{menu.name}'. Complete the recipe before selling this item.",
+            )
+
+        yield_qty = Decimal(str(recipe.yield_qty or 1))
+        if yield_qty <= 0:
+            raise HTTPException(status_code=400, detail=f"Invalid recipe yield for menu item '{menu.name}'")
+
+        for ing in recipe.ingredients:
+            # gross_quantity already represents the stock requirement after the
+            # recipe's yield/wastage calculation. Do NOT multiply waste again.
+            gross_qty = Decimal(str(ing.gross_quantity or 0))
+            if gross_qty <= 0:
+                net_qty = Decimal(str(ing.quantity or 0))
+                waste_pct = Decimal(str(ing.waste_percentage or 0))
+                if waste_pct < Decimal("100"):
+                    gross_qty = net_qty / (Decimal("1") - waste_pct / Decimal("100"))
+                else:
+                    gross_qty = net_qty
+
+            required_recipe_unit = (
+                gross_qty / yield_qty
+            ) * Decimal(str(line.quantity))
+
+            raw_item = db.query(Item).filter(
+                Item.id == ing.raw_item_id,
+                Item.company_id == current_user.company_id,
+            ).first()
+            if not raw_item:
+                raise HTTPException(status_code=400, detail=f"Raw item missing: {ing.raw_item_id}")
+            if not raw_item.unit_id:
+                raise HTTPException(status_code=400, detail=f"Base unit missing for raw item: {raw_item.name}")
+
+            try:
+                required = convert_quantity(
+                    db,
+                    current_user.company_id,
+                    required_recipe_unit,
+                    ing.unit_id,
+                    raw_item.unit_id,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            consumption[ing.raw_item_id] = (
+                consumption.get(ing.raw_item_id, Decimal("0")) + required
+            )
+
+    # STEP 1: Lock and validate every required ingredient BEFORE deduction.
+    # Therefore a shortage in any single ingredient blocks the entire sale.
     for item_id, qty in consumption.items():
-        bal = db.query(StockBalance).filter(StockBalance.warehouse_id == warehouse.id, StockBalance.item_id == item_id).with_for_update().first()
+        bal = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == warehouse.id,
+            StockBalance.item_id == item_id,
+        ).with_for_update().first()
         available = Decimal(str(bal.quantity if bal else 0))
         if available < qty:
-            item_name = db.query(MenuItem.name).filter(MenuItem.finished_item_id == item_id).first()
-            raise HTTPException(status_code=400, detail=f"Insufficient stock for item {item_id}: need {qty}, available {available}")
+            raw = db.query(Item).filter(
+                Item.id == item_id,
+                Item.company_id == current_user.company_id,
+            ).first()
+            item_name = raw.name if raw else item_id
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock for item '{item_name}': need {qty}, available {available}",
+            )
 
+    # STEP 2: Deduct all ingredients from THIS OUTLET warehouse and write ledger.
+    # No commit occurs until the entire order/payment transaction is valid.
     for item_id, qty in consumption.items():
-        bal = db.query(StockBalance).filter(StockBalance.warehouse_id == warehouse.id, StockBalance.item_id == item_id).with_for_update().first()
+        bal = db.query(StockBalance).filter(
+            StockBalance.warehouse_id == warehouse.id,
+            StockBalance.item_id == item_id,
+        ).with_for_update().first()
         if not bal:
             raise HTTPException(status_code=400, detail=f"Stock balance missing for item {item_id}")
+
         new_balance = Decimal(str(bal.quantity)) - qty
         if new_balance < 0:
             raise HTTPException(status_code=400, detail=f"Insufficient stock for item {item_id}")
+
         bal.quantity = new_balance
         db.add(StockLedger(
             company_id=current_user.company_id,
@@ -430,7 +506,7 @@ def complete_order(
             reference_id=order.id,
             created_by_id=current_user.id,
             idempotency_key=f"pos_sale:{order.id}:{item_id}",
-            notes=f"Auto stock deduction for {order.order_number}",
+            notes=f"Recipe consumption for {order.order_number}",
         ))
 
     # Optional POS payment reconciliation: new cashier-aware checkout callers provide payment method/session.
@@ -461,10 +537,23 @@ def complete_order(
             amount = Decimal(str(order.total_amount))
             reason = f'POS cash sale {order.order_number}; received={received}; change={received-amount}'
         elif payload.payment_method == 'UPI':
-            movement_type = CashMovementType.UPI_SALE.value; amount = Decimal(str(order.total_amount)); reason = f'POS UPI sale {order.order_number}'
+            movement_type = CashMovementType.UPI_SALE.value
+            amount = Decimal(str(order.total_amount))
+            reason = f'POS UPI sale {order.order_number}'
         else:
-            movement_type = CashMovementType.CARD_SALE.value; amount = Decimal(str(order.total_amount)); reason = f'POS card sale {order.order_number}'
-        db.add(CashMovement(company_id=current_user.company_id, session_id=session.id, branch_id=order.branch_id, created_by_id=current_user.id, order_id=order.id, movement_type=movement_type, amount=amount, reason=reason))
+            movement_type = CashMovementType.CARD_SALE.value
+            amount = Decimal(str(order.total_amount))
+            reason = f'POS card sale {order.order_number}'
+        db.add(CashMovement(
+            company_id=current_user.company_id,
+            session_id=session.id,
+            branch_id=order.branch_id,
+            created_by_id=current_user.id,
+            order_id=order.id,
+            movement_type=movement_type,
+            amount=amount,
+            reason=reason,
+        ))
 
     order.status = OrderStatus.COMPLETED.value
     order.paid_amount = order.total_amount
@@ -479,8 +568,14 @@ def complete_order(
         action="COMPLETE",
         entity_type="RestaurantOrder",
         entity_id=order.id,
-        details=json.dumps({"action": "Auto stock deduction", "warehouse_id": warehouse.id, "order_number": order.order_number}),
+        details=json.dumps({
+            "action": "Recipe-based outlet stock deduction",
+            "warehouse_id": warehouse.id,
+            "order_number": order.order_number,
+        }),
     ))
+
+    # Single commit: stock, ledger, payment and order completion succeed/fail together.
     db.commit()
     db.refresh(order)
     return _serialize(order)

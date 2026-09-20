@@ -1,7 +1,9 @@
 from decimal import Decimal
-from datetime import datetime, date
+from datetime import datetime
 from typing import Optional, List
+
 from pydantic import BaseModel, Field, ConfigDict
+
 
 # -------------------------------------------------------------
 # Recipe Item / BOM Ingredient Schemas
@@ -9,76 +11,149 @@ from pydantic import BaseModel, Field, ConfigDict
 class RecipeItemBase(BaseModel):
     raw_item_id: str
     unit_id: Optional[str] = None
-    quantity: Decimal = Field(default=Decimal("1.0000"), ge=Decimal("0.0001"))
-    gross_quantity: Optional[Decimal] = None
-    usable_yield: Decimal = Field(default=Decimal("100.00"), ge=Decimal("0.01"), le=Decimal("100.00"))
-    waste_percentage: Decimal = Field(default=Decimal("0.00"), ge=Decimal("0.00"), le=Decimal("99.99"))
+
+    # Net/usable quantity used by the recipe.
+    quantity: Decimal = Field(
+        default=Decimal("1.0000"),
+        ge=Decimal("0.0001"),
+    )
+
+    # Gross quantity required from stock after yield/wastage.
+    gross_quantity: Optional[Decimal] = Field(
+        default=None,
+        ge=Decimal("0"),
+    )
+
+    usable_yield: Decimal = Field(
+        default=Decimal("100.00"),
+        gt=Decimal("0"),
+        le=Decimal("100.00"),
+    )
+
+    waste_percentage: Decimal = Field(
+        default=Decimal("0.00"),
+        ge=Decimal("0.00"),
+        lt=Decimal("100.00"),
+    )
+
     notes: Optional[str] = None
+
 
 class RecipeItemCreate(RecipeItemBase):
     pass
+
 
 class RecipeItemResponse(RecipeItemBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     recipe_id: str
+
     cost_contribution: Decimal = Decimal("0.0000")
+
+    # Resolved display values supplied by the backend formatter.
     item_name: Optional[str] = None
     item_code: Optional[str] = None
     item_type: Optional[str] = None
     unit_symbol: Optional[str] = None
     unit_cost: Decimal = Decimal("0.0000")
+
     is_sub_recipe: bool = False
     sub_recipe_id: Optional[str] = None
+
 
 # -------------------------------------------------------------
 # Recipe Header Schemas
 # -------------------------------------------------------------
 class RecipeBase(BaseModel):
     finished_item_id: str
+
     name: str
     code: str
-    version: int = 1
+
+    # Recipe version/history is part of the Recipe master itself.
+    version: int = Field(default=1, ge=1)
+
     effective_date: Optional[datetime] = None
     effective_to: Optional[datetime] = None
+
+    # Only one current version should be considered active for use.
     is_current: bool = True
+
     description: Optional[str] = None
-    yield_qty: Decimal = Field(default=Decimal("1.0000"), ge=Decimal("0.0001"))
+
+    # Example:
+    # Recipe yield = 1 KG / 100 PCS
+    yield_qty: Decimal = Field(
+        default=Decimal("1.0000"),
+        ge=Decimal("0.0001"),
+    )
+
     preparation_minutes: int = Field(default=15, ge=0)
+
     instructions: Optional[str] = None
+
+    # Recipe activation controls whether it can be selected as the
+    # current recipe by downstream production/sales workflows.
     is_active: bool = True
 
+
 class RecipeCreate(RecipeBase):
-    ingredients: List[RecipeItemCreate] = []
+    ingredients: List[RecipeItemCreate] = Field(default_factory=list)
+
 
 class RecipeUpdate(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
-    version: Optional[int] = None
+
+    # Normally assigned by backend versioning logic.
+    version: Optional[int] = Field(default=None, ge=1)
+
     effective_date: Optional[datetime] = None
     effective_to: Optional[datetime] = None
     is_current: Optional[bool] = None
+
     description: Optional[str] = None
-    yield_qty: Optional[Decimal] = None
-    preparation_minutes: Optional[int] = None
+
+    yield_qty: Optional[Decimal] = Field(
+        default=None,
+        ge=Decimal("0.0001"),
+    )
+
+    preparation_minutes: Optional[int] = Field(default=None, ge=0)
+
     instructions: Optional[str] = None
     is_active: Optional[bool] = None
+
+    # When supplied, the backend creates the new recipe version using
+    # this complete ingredient set. If omitted, backend copies the
+    # previous version's ingredients.
     ingredients: Optional[List[RecipeItemCreate]] = None
+
 
 class RecipeResponse(RecipeBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     company_id: str
+
+    # Resolved Finished Item information for Recipe UI/API consumers.
     finished_item_name: Optional[str] = None
     finished_item_code: Optional[str] = None
     finished_unit_symbol: Optional[str] = None
+
+    # Stored recipe-cost snapshot.
+    # This is the Recipe master cost for this version; downstream
+    # production/sale records should preserve their own historical
+    # consumption/cost snapshot.
     total_recipe_cost: Decimal = Decimal("0.0000")
     unit_cost: Decimal = Decimal("0.0000")
-    ingredients: List[RecipeItemResponse] = []
+
+    ingredients: List[RecipeItemResponse] = Field(default_factory=list)
+
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
 
 # -------------------------------------------------------------
 # Costing & Theoretical Margin Simulation Schemas
@@ -89,85 +164,134 @@ class RecipeCostingBreakdownItem(BaseModel):
     item_code: str
     item_type: str
     unit_symbol: Optional[str] = None
+
     quantity: Decimal
     unit_cost: Decimal
     cost_subtotal: Decimal
+
     is_sub_recipe: bool = False
     sub_recipe_id: Optional[str] = None
+
 
 class RecipeCostingResponse(BaseModel):
     recipe_id: str
     recipe_name: str
     recipe_code: str
     yield_qty: Decimal
+
     finished_item_name: str
     finished_item_code: str
     selling_price: Decimal
+
     ingredient_raw_cost: Decimal
     expected_wastage_percent: Decimal = Decimal("0.00")
     expected_wastage_cost: Decimal = Decimal("0.0000")
     yield_adjustment_cost: Decimal = Decimal("0.0000")
     packaging_cost: Decimal = Decimal("0.0000")
     production_overhead_cost: Decimal = Decimal("0.0000")
+
     total_batch_cost: Decimal
     unit_recipe_cost: Decimal
+
     theoretical_food_cost_percentage: Decimal
     gross_margin_percentage: Decimal
-    ingredients_breakdown: List[RecipeCostingBreakdownItem] = []
+
+    ingredients_breakdown: List[RecipeCostingBreakdownItem] = Field(
+        default_factory=list
+    )
+
 
 # -------------------------------------------------------------
 # Recipe Explosion & Sufficiency Schemas
 # -------------------------------------------------------------
 class RecipeExplodeRequest(BaseModel):
-    target_yield_qty: Decimal = Field(default=Decimal("1.0000"), ge=Decimal("0.0001"))
+    target_yield_qty: Decimal = Field(
+        default=Decimal("1.0000"),
+        ge=Decimal("0.0001"),
+    )
     warehouse_id: Optional[str] = None
+
 
 class RecipeExplodeItem(BaseModel):
     raw_item_id: str
     item_name: str
     item_code: str
     unit_symbol: Optional[str] = None
+
     standard_qty_per_unit_yield: Decimal
     required_qty: Decimal
+
     available_stock: Optional[Decimal] = None
     is_sufficient: bool = True
     shortage_qty: Decimal = Decimal("0.0000")
+
     unit_cost: Decimal = Decimal("0.0000")
     total_cost: Decimal = Decimal("0.0000")
+
     is_sub_recipe: bool = False
+
 
 class RecipeExplodeResponse(BaseModel):
     recipe_id: str
     recipe_name: str
     recipe_code: str
+
     target_yield_qty: Decimal
     multiplier: Decimal
+
     is_all_ingredients_sufficient: bool
+
     total_estimated_raw_cost: Decimal
     estimated_unit_food_cost: Decimal
-    ingredients: List[RecipeExplodeItem] = []
+
+    ingredients: List[RecipeExplodeItem] = Field(default_factory=list)
+
 
 # -------------------------------------------------------------
 # Production Order Schemas
 # -------------------------------------------------------------
 class ProductionConsumptionCreate(BaseModel):
     raw_item_id: str
-    actual_consumed_qty: Decimal = Field(ge=Decimal("0.0000"))
+
+    actual_consumed_qty: Decimal = Field(
+        default=Decimal("0.0000"),
+        ge=Decimal("0.0000"),
+    )
+
 
 class ProductionOrderCreate(BaseModel):
     branch_id: str
     kitchen_warehouse_id: str
     recipe_id: str
-    planned_qty: Decimal = Field(default=Decimal("1.0000"), ge=Decimal("0.0001"))
+
+    planned_qty: Decimal = Field(
+        default=Decimal("1.0000"),
+        ge=Decimal("0.0001"),
+    )
+
     planned_date: Optional[datetime] = None
     notes: Optional[str] = None
 
+
 class ProductionOrderStatusUpdate(BaseModel):
     status: str
-    actual_yield_qty: Optional[Decimal] = None
-    wastage_qty: Optional[Decimal] = None
-    actual_consumptions: Optional[List[ProductionConsumptionCreate]] = None
+
+    actual_yield_qty: Optional[Decimal] = Field(
+        default=None,
+        ge=Decimal("0"),
+    )
+
+    wastage_qty: Optional[Decimal] = Field(
+        default=None,
+        ge=Decimal("0"),
+    )
+
+    actual_consumptions: Optional[
+        List[ProductionConsumptionCreate]
+    ] = None
+
     notes: Optional[str] = None
+
 
 class ProductionConsumptionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -175,137 +299,207 @@ class ProductionConsumptionResponse(BaseModel):
     id: str
     production_order_id: str
     raw_item_id: str
+
     stock_batch_id: Optional[str] = None
     batch_number: Optional[str] = None
+
     raw_item_name: Optional[str] = None
     raw_item_code: Optional[str] = None
     unit_symbol: Optional[str] = None
+
     standard_qty: Decimal
     actual_consumed_qty: Decimal
+
     unit_cost: Decimal = Decimal("0.0000")
     total_cost: Decimal = Decimal("0.0000")
+
 
 class ProductionOrderResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     company_id: str
+
     branch_id: str
     branch_name: Optional[str] = None
+
     kitchen_warehouse_id: str
     warehouse_name: Optional[str] = None
+
     recipe_id: str
     recipe_name: Optional[str] = None
     recipe_code: Optional[str] = None
+
     finished_item_id: Optional[str] = None
     finished_item_name: Optional[str] = None
     finished_item_code: Optional[str] = None
     finished_unit_symbol: Optional[str] = None
+
     order_number: str
     batch_number: Optional[str] = None
+
     planned_qty: Decimal
     actual_yield_qty: Decimal
     wastage_qty: Decimal
+
     status: str
+
     planned_date: Optional[datetime] = None
     completed_date: Optional[datetime] = None
+
     total_raw_cost: Decimal
     unit_food_cost: Decimal
+
     yield_variance_percent: Optional[Decimal] = None
+
     notes: Optional[str] = None
+
     created_by_id: Optional[str] = None
-    consumptions: List[ProductionConsumptionResponse] = []
+
+    consumptions: List[ProductionConsumptionResponse] = Field(
+        default_factory=list
+    )
+
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+
 # -------------------------------------------------------------
-# Part 9: Pre-Production Preview & Shortage Check Schemas
+# Pre-Production Preview & Shortage Check Schemas
 # -------------------------------------------------------------
 class ProductionPreviewRequest(BaseModel):
     recipe_id: str
-    planned_qty: Decimal = Field(default=Decimal("1.0000"), ge=Decimal("0.0001"))
+
+    planned_qty: Decimal = Field(
+        default=Decimal("1.0000"),
+        ge=Decimal("0.0001"),
+    )
+
     kitchen_warehouse_id: str
+
 
 class ProductionPreviewItem(BaseModel):
     raw_item_id: str
     item_name: str
     item_code: str
     unit_symbol: Optional[str] = None
+
     standard_qty_per_unit_yield: Decimal
     required_qty: Decimal
+
     available_qty: Decimal
     is_sufficient: bool
     shortage_qty: Decimal
+
     unit_cost: Decimal
     total_cost: Decimal
-    fifo_batches: List[str] = []
+
+    fifo_batches: List[str] = Field(default_factory=list)
+
 
 class ProductionPreviewResponse(BaseModel):
     recipe_id: str
     recipe_name: str
     recipe_code: str
+
     finished_item_name: str
+
     planned_qty: Decimal
     multiplier: Decimal
+
     all_ingredients_available: bool
+
     total_estimated_raw_cost: Decimal
     estimated_unit_food_cost: Decimal
-    ingredients: List[ProductionPreviewItem] = []
+
+    ingredients: List[ProductionPreviewItem] = Field(
+        default_factory=list
+    )
+
 
 # -------------------------------------------------------------
-# Part 9: Direct Production Order Execution Schema
+# Direct Production Order Execution Schema
 # -------------------------------------------------------------
 class ProductionOrderExecuteRequest(BaseModel):
     branch_id: str
     kitchen_warehouse_id: str
     recipe_id: str
-    planned_qty: Decimal = Field(default=Decimal("1.0000"), ge=Decimal("0.0001"))
-    actual_yield_qty: Optional[Decimal] = None
-    wastage_qty: Optional[Decimal] = Decimal("0.0000")
+
+    planned_qty: Decimal = Field(
+        default=Decimal("1.0000"),
+        ge=Decimal("0.0001"),
+    )
+
+    actual_yield_qty: Optional[Decimal] = Field(
+        default=None,
+        ge=Decimal("0"),
+    )
+
+    wastage_qty: Optional[Decimal] = Field(
+        default=Decimal("0.0000"),
+        ge=Decimal("0"),
+    )
+
     batch_number: Optional[str] = None
     mfg_date: Optional[datetime] = None
     expiry_date: Optional[datetime] = None
     notes: Optional[str] = None
-    custom_consumptions: Optional[List[ProductionConsumptionCreate]] = None
+
+    custom_consumptions: Optional[
+        List[ProductionConsumptionCreate]
+    ] = None
+
     idempotency_key: str
 
+
 # -------------------------------------------------------------
-# Part 9: Production Variance & Cost Analysis Schemas
+# Production Variance & Cost Analysis Schemas
 # -------------------------------------------------------------
 class ProductionVarianceItem(BaseModel):
     raw_item_id: str
     item_name: str
     item_code: str
     unit_symbol: Optional[str] = None
+
     standard_qty: Decimal
     actual_consumed_qty: Decimal
+
     variance_qty: Decimal
     variance_percent: Decimal
+
     unit_cost: Decimal
     standard_cost: Decimal
     actual_cost: Decimal
     cost_variance: Decimal
 
+
 class ProductionVarianceResponse(BaseModel):
     production_order_id: str
     order_number: str
+
     recipe_id: str
     recipe_name: str
     finished_item_name: str
+
     planned_qty: Decimal
     actual_yield_qty: Decimal
     wastage_qty: Decimal
+
     yield_variance_qty: Decimal
     yield_variance_percent: Decimal
+
     total_standard_cost: Decimal
     total_actual_cost: Decimal
     total_cost_variance: Decimal
     unit_food_cost: Decimal
-    ingredient_variances: List[ProductionVarianceItem] = []
+
+    ingredient_variances: List[ProductionVarianceItem] = Field(
+        default_factory=list
+    )
+
 
 # -------------------------------------------------------------
-# Part 9: Production Order Reversal Schema
+# Production Order Reversal Schema
 # -------------------------------------------------------------
 class ProductionOrderReverseRequest(BaseModel):
     reason: str = Field(min_length=3)
-
