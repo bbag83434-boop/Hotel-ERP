@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Package, Plus, RefreshCw, Search, Filter, Layers, DollarSign, AlertTriangle } from 'lucide-react';
+import { Package, Plus, RefreshCw, Search, Filter, Layers, DollarSign, AlertTriangle, Trash2 } from 'lucide-react';
 import { inventoryApi } from '@/api/inventory';
 import { procurementApi } from '@/api/procurement';
 import { Item, Category, Unit, ItemCreateInput } from '@/types/inventory.types';
@@ -65,6 +65,7 @@ export const MasterItems: React.FC = () => {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedType, setSelectedType] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -117,8 +118,12 @@ export const MasterItems: React.FC = () => {
 
     const matchesCategory = selectedCategory === 'ALL' || it.category_id === selectedCategory;
     const matchesType = selectedType === 'ALL' || it.type === selectedType;
+    const matchesStatus =
+      selectedStatus === 'ALL' ||
+      (selectedStatus === 'ACTIVE' && it.is_active) ||
+      (selectedStatus === 'INACTIVE' && !it.is_active);
 
-    return matchesSearch && matchesCategory && matchesType;
+    return matchesSearch && matchesCategory && matchesType && matchesStatus;
   });
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -194,14 +199,23 @@ export const MasterItems: React.FC = () => {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+
     setActionLoading(true);
+    const permanent = !deleteTarget.is_active;
+
     try {
-      const res: any = await inventoryApi.deleteItem(deleteTarget.id);
+      const res: any = await inventoryApi.deleteItem(deleteTarget.id, { permanent });
       const refs = res?.references as string[] | undefined;
-      if (res?.deactivated || (refs && refs.length)) {
+
+      if (res?.permanently_deleted) {
         setFeedback({
           type: 'success',
-          message: `Item "${deleteTarget.name}" deactivated instead of deleted because it is referenced by existing transactions (${refs?.join(' · ') || 'Protected'}).`,
+          message: res?.message || `Inactive item "${deleteTarget.name}" permanently deleted.`,
+        });
+      } else if (res?.deactivated || (refs && refs.length)) {
+        setFeedback({
+          type: 'success',
+          message: `Item "${deleteTarget.name}" deactivated because it is referenced by existing records (${refs?.join(' · ') || 'Protected'}).`,
         });
       } else {
         setFeedback({
@@ -209,16 +223,18 @@ export const MasterItems: React.FC = () => {
           message: res?.message || `Item "${deleteTarget.name}" deleted successfully.`,
         });
       }
+
       setDeleteTarget(null);
       setDeleteReferences([]);
       await loadAll();
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
+
       if (detail && typeof detail === 'object' && detail.references) {
         setDeleteReferences(detail.references);
         setFeedback({
           type: 'error',
-          message: `${detail.message || 'Cannot delete item.'} ${detail.references.join(' · ')}`,
+          message: `${detail.message || 'Cannot permanently delete item.'} ${detail.references.join(' · ')}`,
         });
       } else {
         setFeedback({ type: 'error', message: ErrDetail(err) });
@@ -273,6 +289,15 @@ export const MasterItems: React.FC = () => {
                 </option>
               ))}
             </select>
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE')}
+              className="px-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
+            >
+              <option value="ALL">All Status</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+            </select>
           </div>
         </div>
 
@@ -302,115 +327,206 @@ export const MasterItems: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid of Items */}
+      {/* ERP Horizontal Item Register */}
       {loading ? (
-        <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3">
-          <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
+        <div className="flex min-h-52 flex-col items-center justify-center gap-3 text-xs text-[#707070]">
+          <RefreshCw className="h-6 w-6 animate-spin text-[#C79A3B]" />
           <span>Loading Item Master...</span>
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState
-          message={search || selectedCategory !== 'ALL' ? 'No items match your filter criteria.' : 'No items registered in item master.'}
-          icon={<Package className="w-6 h-6" />}
+          message={
+            search ||
+            selectedCategory !== 'ALL' ||
+            selectedType !== 'ALL' ||
+            selectedStatus !== 'ALL'
+              ? 'No items match your filter criteria.'
+              : 'No items registered in item master.'
+          }
+          icon={<Package className="h-6 w-6" />}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {filtered.map((item) => {
-            const isActive = item.is_active;
-            return (
-              <div
-                key={item.id}
-                className={`p-4 rounded-2xl border transition-all space-y-3 bg-white ${
-                  isActive ? 'border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#C79A3B]/40' : 'border-[#D9534F]/20 opacity-75 bg-[#FAF8F5]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{item.name}</h4>
-                      <StatusPill active={isActive} />
+        <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.09)] bg-white shadow-sm">
+          <div className="min-w-[1080px]">
+            {/* Column Header */}
+            <div className="grid grid-cols-[2fr_1fr_1.25fr_1.35fr_0.9fr_1fr_0.9fr_1.35fr] items-center border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] px-4 py-3 text-[10px] font-bold uppercase tracking-[0.06em] text-[#707070]">
+              <div>Item</div>
+              <div>Category</div>
+              <div>Type</div>
+              <div>Supply</div>
+              <div>Cost</div>
+              <div>Stock / Reorder</div>
+              <div>Status</div>
+              <div className="text-right">Actions</div>
+            </div>
+
+            {/* Rows */}
+            <div className="divide-y divide-[rgba(45,45,45,0.07)]">
+              {filtered.map((item) => {
+                const isActive = item.is_active;
+                const categoryName =
+                  item.category_name ||
+                  categories.find((c) => c.id === item.category_id)?.name ||
+                  'Category';
+                const unitSymbol =
+                  item.unit_symbol ||
+                  units.find((u) => u.id === item.unit_id)?.symbol ||
+                  'UNIT';
+                const supplyLabel =
+                  supplyTypes.find(
+                    (t) => t.value === (item.supply_source || 'CENTRAL_STORE'),
+                  )?.label ||
+                  item.supply_source ||
+                  'Central Store';
+                const vendorName = item.supplier_id
+                  ? suppliers.find((s) => s.id === item.supplier_id)?.name
+                  : '';
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`grid grid-cols-[2fr_1fr_1.25fr_1.35fr_0.9fr_1fr_0.9fr_1.35fr] items-center px-4 py-3.5 transition-colors ${
+                      isActive
+                        ? 'bg-white hover:bg-[#FFFCF7]'
+                        : 'bg-[#FCFAF8] opacity-80 hover:bg-[#FAF6F2]'
+                    }`}
+                  >
+                    {/* Item */}
+                    <div className="min-w-0 pr-4">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-xs font-semibold text-[#1C1C1C]">
+                          {item.name}
+                        </p>
+                        <StatusPill active={isActive} />
+                      </div>
+
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className="font-mono text-[10px] font-semibold text-[#B8862D]">
+                          {item.code}
+                        </span>
+                        {item.barcode && (
+                          <span className="truncate font-mono text-[9px] text-[#8A8A8A]">
+                            {item.barcode}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[11px] font-mono font-bold text-[#B8862D]">[{item.code}]</span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.08)]">
-                        {item.category_name || categories.find((c) => c.id === item.category_id)?.name || 'Category'}
+
+                    {/* Category */}
+                    <div className="min-w-0 pr-3">
+                      <p className="truncate text-[11px] font-medium text-[#454545]">
+                        {categoryName}
+                      </p>
+                    </div>
+
+                    {/* Type */}
+                    <div className="min-w-0 pr-3">
+                      <span className="inline-flex max-w-full truncate rounded-md border border-[rgba(45,45,45,0.09)] bg-[#FAF8F5] px-2 py-1 text-[10px] font-semibold text-[#555]">
+                        {item.type.replace(/_/g, ' ')}
                       </span>
                     </div>
-                  </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FAF8F5] text-[#1C1C1C] border border-[rgba(45,45,45,0.1)]">
-                    {item.unit_symbol || units.find((u) => u.id === item.unit_id)?.symbol || 'UNIT'}
-                  </span>
-                </div>
 
-                <div className="grid grid-cols-3 gap-2 py-2 px-3 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] text-center text-xs">
-                  <div>
-                    <span className="text-[10px] text-[#707070] block">Cost Price</span>
-                    <span className="font-bold text-[#1C1C1C]">₹{Number(item.cost_price || 0).toFixed(2)}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-[#707070] block">Min Stock</span>
-                    <span className="font-bold text-[#D99625]">{Number(item.min_stock_level || 0)}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-[#707070] block">Reorder Qty</span>
-                    <span className="font-bold text-[#2E8B57]">{Number(item.reorder_qty || 0)}</span>
-                  </div>
-                </div>
+                    {/* Supply */}
+                    <div className="min-w-0 pr-3">
+                      <p className="truncate text-[10px] font-semibold text-[#B8862D]">
+                        {supplyLabel}
+                      </p>
+                      {vendorName && (
+                        <p className="mt-0.5 truncate text-[9px] text-[#777]">
+                          {vendorName}
+                        </p>
+                      )}
+                    </div>
 
-                <div className="text-[11px] text-[#707070] flex items-center justify-between">
-                  <span>Type: <span className="font-semibold text-[#1C1C1C]">{item.type.replace('_', ' ')}</span></span>
-                  {item.barcode && <span className="font-mono text-[10px]">Barcode: {item.barcode}</span>}
-                </div>
-                
-                <div className="text-[11px] text-[#707070] flex flex-col gap-0.5">
-                  <span>Supply: <span className="font-semibold text-[#C79A3B]">{supplyTypes.find(t => t.value === (item.supply_source || 'CENTRAL_STORE'))?.label || item.supply_source}</span></span>
-                  {item.supplier_id && (
-                    <span>Vendor: <span className="font-medium text-[#1C1C1C]">{suppliers.find(s => s.id === item.supplier_id)?.name || 'Unknown'}</span></span>
-                  )}
-                </div>
+                    {/* Cost */}
+                    <div className="pr-3">
+                      <p className="text-xs font-bold text-[#1C1C1C]">
+                        ₹{Number(item.cost_price || 0).toFixed(2)}
+                      </p>
+                      <p className="mt-0.5 text-[9px] text-[#8A8A8A]">{unitSymbol}</p>
+                    </div>
 
-                <CardActionRow>
-                  <div className="flex items-center gap-2">
-                    <ToggleSwitch
-                      active={isActive}
-                      onChange={() => toggleActive(item)}
-                      title={isActive ? 'Deactivate Item' : 'Activate Item'}
-                    />
-                    <span className="text-[10px] text-[#707070]">{isActive ? 'Active' : 'Inactive'}</span>
+                    {/* Stock / Reorder */}
+                    <div className="pr-3">
+                      <div className="text-[10px] text-[#707070]">
+                        Min:{' '}
+                        <span className="font-semibold text-[#D99625]">
+                          {Number(item.min_stock_level || 0)}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-[#707070]">
+                        Reorder:{' '}
+                        <span className="font-semibold text-[#2E8B57]">
+                          {Number(item.reorder_qty || 0)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <ToggleSwitch
+                          active={isActive}
+                          onChange={() => toggleActive(item)}
+                          title={isActive ? 'Deactivate Item' : 'Activate Item'}
+                        />
+                        <span
+                          className={`text-[10px] font-semibold ${
+                            isActive ? 'text-[#2E8B57]' : 'text-[#8A8A8A]'
+                          }`}
+                        >
+                          {isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-end gap-1.5">
+                      <EditBtn
+                        onClick={() => {
+                          setEditing(item);
+                          setEditForm({
+                            name: item.name,
+                            code: item.code,
+                            category_id: item.category_id,
+                            unit_id: item.unit_id,
+                            barcode: item.barcode || '',
+                            type: item.type,
+                            description: item.description || '',
+                            cost_price: Number(item.cost_price || 0),
+                            selling_price: Number(item.selling_price || 0),
+                            min_stock_level: Number(item.min_stock_level || 0),
+                            reorder_qty: Number(item.reorder_qty || 0),
+                            is_active: item.is_active,
+                            supply_source: item.supply_source || 'CENTRAL_STORE',
+                            supplier_id: item.supplier_id || '',
+                          });
+                        }}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteTarget(item);
+                          setDeleteReferences([]);
+                        }}
+                        disabled={actionLoading}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold transition-all disabled:opacity-50 ${
+                          isActive
+                            ? 'border-[#D9534F]/25 text-[#D9534F] hover:bg-[#D9534F]/5'
+                            : 'border-[#8B5CF6]/25 text-[#7C3AED] hover:bg-[#8B5CF6]/5'
+                        }`}
+                        title={isActive ? 'Fast Delete' : 'Permanent Delete'}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {isActive ? 'Delete' : 'Permanent'}
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <EditBtn
-                      onClick={() => {
-                        setEditing(item);
-                        setEditForm({
-                          name: item.name,
-                          code: item.code,
-                          category_id: item.category_id,
-                          unit_id: item.unit_id,
-                          barcode: item.barcode || '',
-                          type: item.type,
-                          description: item.description || '',
-                          cost_price: Number(item.cost_price || 0),
-                          selling_price: Number(item.selling_price || 0),
-                          min_stock_level: Number(item.min_stock_level || 0),
-                          reorder_qty: Number(item.reorder_qty || 0),
-                          is_active: item.is_active,
-                          supply_source: item.supply_source || 'CENTRAL_STORE',
-                          supplier_id: item.supplier_id || '',
-                        });
-                      }}
-                    />
-                    <DeleteBtn
-                      onClick={() => {
-                        setDeleteTarget(item);
-                        setDeleteReferences([]);
-                      }}
-                    />
-                  </div>
-                </CardActionRow>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -757,8 +873,12 @@ export const MasterItems: React.FC = () => {
       {/* Delete Confirmation Modal */}
       <ConfirmModal
         open={Boolean(deleteTarget)}
-        title="Delete Item from Master Catalog"
-        message={`Are you sure you want to delete item "${deleteTarget?.name}"? If this item is referenced by stock balances, purchase orders, recipes, or transactions, backend protection will automatically deactivate the item instead of corrupting historical records.`}
+        title={deleteTarget?.is_active ? 'Fast Delete Item' : 'Permanent Delete Inactive Item'}
+        message={
+          deleteTarget?.is_active
+            ? `Fast Delete "${deleteTarget?.name}" now? The active item will be removed from active use; if protected by existing records, it will be kept as Inactive instead of corrupting history.`
+            : `Permanently delete inactive item "${deleteTarget?.name}"? This permanently removes the selected inactive item and its safely removable item-owned records.`
+        }
         details={deleteReferences}
         loading={actionLoading}
         onCancel={() => {

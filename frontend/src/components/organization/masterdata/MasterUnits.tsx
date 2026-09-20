@@ -15,7 +15,6 @@ import {
   EmptyState,
   ConfirmModal,
   ToggleSwitch,
-  CardActionRow,
   EditBtn,
   DeleteBtn,
   ErrDetail,
@@ -197,9 +196,9 @@ export const MasterUnits: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid of Units */}
+      {/* ERP Horizontal Unit List */}
       {loading ? (
-        <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3">
+        <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3 rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white shadow-sm">
           <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
           <span>Loading Units of Measurement...</span>
         </div>
@@ -209,64 +208,89 @@ export const MasterUnits: React.FC = () => {
           icon={<Scale className="w-6 h-6" />}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-          {filtered.map((unit) => {
-            const isActive = unit.is_active !== false;
-            return (
-              <div
-                key={unit.id}
-                className={`p-4 rounded-2xl border transition-all space-y-3 bg-white ${
-                  isActive ? 'border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#C79A3B]/40' : 'border-[#D9534F]/20 opacity-75 bg-[#FAF8F5]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] flex items-center justify-center text-[#C79A3B]">
-                      <Scale className="w-4 h-4" />
+        <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white shadow-sm">
+          <div className="min-w-[760px]">
+            <div className="grid grid-cols-[1.5fr_1fr_1fr_260px] items-center gap-4 px-4 py-3 bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[10px] font-bold uppercase tracking-[0.08em] text-[#707070]">
+              <div>Unit</div>
+              <div>Symbol</div>
+              <div>Status</div>
+              <div className="text-right">Actions</div>
+            </div>
+
+            <div className="divide-y divide-[rgba(45,45,45,0.07)]">
+              {filtered.map((unit) => {
+                const isActive = unit.is_active !== false;
+
+                return (
+                  <div
+                    key={unit.id}
+                    className={`grid grid-cols-[1.5fr_1fr_1fr_260px] items-center gap-4 px-4 py-3.5 transition-colors ${
+                      isActive
+                        ? 'hover:bg-[#FAF8F5]/70'
+                        : 'bg-[#FAF8F5] opacity-75'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 shrink-0 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] flex items-center justify-center text-[#C79A3B]">
+                          <Scale className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-sm text-[#1C1C1C] font-['Outfit'] truncate">
+                            {unit.name}
+                          </div>
+                          <div className="text-[10px] text-[#707070] mt-0.5">
+                            Unit of Measurement
+                          </div>
+                        </div>
+                      </div>
                     </div>
+
                     <div>
-                      <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{unit.name}</h4>
-                      <p className="text-xs font-mono font-bold text-[#B8862D]">{unit.symbol}</p>
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] text-xs font-mono font-bold text-[#B8862D]">
+                        {unit.symbol}
+                      </span>
+                    </div>
+
+                    <div>
+                      <StatusPill active={isActive} />
+                    </div>
+
+                    <div className="flex items-center justify-end gap-1.5">
+                      <div className="flex items-center gap-2 mr-1">
+                        <ToggleSwitch
+                          active={isActive}
+                          onChange={() => toggleActive(unit)}
+                          title={isActive ? 'Deactivate Unit' : 'Activate Unit'}
+                        />
+                        <span className="text-[10px] text-[#707070]">
+                          {isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+
+                      <EditBtn
+                        onClick={() => {
+                          setEditing(unit);
+                          setEditForm({
+                            name: unit.name,
+                            symbol: unit.symbol,
+                            is_active: isActive,
+                          });
+                        }}
+                      />
+
+                      <DeleteBtn
+                        onClick={() => {
+                          setDeleteTarget(unit);
+                          setDeleteReferences([]);
+                        }}
+                      />
                     </div>
                   </div>
-                  <StatusPill active={isActive} />
-                </div>
-
-                <div className="text-[11px] text-[#707070] bg-[#FAF8F5] px-2.5 py-1 rounded-lg border border-[rgba(45,45,45,0.06)] font-mono">
-                  Symbol: <span className="font-bold text-[#1C1C1C]">{unit.symbol}</span>
-                </div>
-
-                <CardActionRow>
-                  <div className="flex items-center gap-2">
-                    <ToggleSwitch
-                      active={isActive}
-                      onChange={() => toggleActive(unit)}
-                      title={isActive ? 'Deactivate Unit' : 'Activate Unit'}
-                    />
-                    <span className="text-[10px] text-[#707070]">{isActive ? 'Active' : 'Inactive'}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <EditBtn
-                      onClick={() => {
-                        setEditing(unit);
-                        setEditForm({
-                          name: unit.name,
-                          symbol: unit.symbol,
-                          is_active: isActive,
-                        });
-                      }}
-                    />
-                    <DeleteBtn
-                      onClick={() => {
-                        setDeleteTarget(unit);
-                        setDeleteReferences([]);
-                      }}
-                    />
-                  </div>
-                </CardActionRow>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

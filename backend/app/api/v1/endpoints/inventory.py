@@ -6,6 +6,7 @@ from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.core.auth import get_current_active_user, optional_outlet_scope
@@ -499,10 +500,12 @@ def delete_unit(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Dependency-safe unit deletion.
+    """Permanently delete one selected Unit and only its direct dependent test data.
 
-    If the unit is referenced by any master/transactional record, hard deletion
-    is blocked with a clear reason and the caller is asked to deactivate instead.
+    The operation is fully transactional. References that can safely survive
+    without the Unit are nulled, while non-nullable direct dependencies are
+    removed before the Unit. Items whose master Unit is the selected Unit must
+    also be deleted because Item.unit_id is non-nullable.
     """
     unit = db.query(Unit).filter(
         Unit.id == unit_id,
@@ -511,55 +514,247 @@ def delete_unit(
     if not unit:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unit not found")
 
-    from app.models.procurement import SupplierItem
-    from app.models.recipe import RecipeItem
+    from app.models.procurement import (
+        SupplierItem,
+        PurchaseRequestItem,
+        PurchaseOrderItem,
+        GoodsReceiveItem,
+        SmartRequirementItem,
+    )
+    from app.models.recipe import (
+        Recipe,
+        RecipeItem,
+        ProductionOrder,
+        ProductionConsumption,
+    )
     from app.models.wastage import WastageItem
     from app.models.closing import ClosingStockItem
+    from app.models.billing import VendorBillItem
+    from app.models.inventory import (
+        OutletStockBalance,
+        OutletStockBatch,
+        OutletStockLedger,
+        ItemRate,
+    )
 
-    reasons: list = []
-    item_count = db.query(Item).filter(Item.unit_id == unit_id).count()
-    if item_count:
-        reasons.append(f"{item_count} item(s) use this unit")
+    try:
+        # ------------------------------------------------------------------
+        # 1) Remove / detach rows that reference THIS Unit directly.
+        # These rows do not require unrelated master records to be deleted.
+        # ------------------------------------------------------------------
+        db.query(UnitConversion).filter(
+            or_(
+                UnitConversion.from_unit_id == unit_id,
+                UnitConversion.to_unit_id == unit_id,
+            )
+        ).delete(synchronize_session=False)
 
-    conv_count = db.query(UnitConversion).filter(
-        or_(UnitConversion.from_unit_id == unit_id, UnitConversion.to_unit_id == unit_id)
-    ).count()
-    if conv_count:
-        reasons.append(f"{conv_count} unit conversion rule(s) reference this unit")
+        # Nullable Unit references: keep the owning business record and
+        # detach only the deleted Unit.
+        db.query(SupplierItem).filter(
+            SupplierItem.purchase_unit_id == unit_id
+        ).update(
+            {SupplierItem.purchase_unit_id: None},
+            synchronize_session=False,
+        )
 
-    sup_unit_count = db.query(SupplierItem).filter(SupplierItem.purchase_unit_id == unit_id).count()
-    if sup_unit_count:
-        reasons.append(f"{sup_unit_count} vendor-item mapping(s) use this purchase unit")
+        db.query(RecipeItem).filter(
+            RecipeItem.unit_id == unit_id
+        ).update(
+            {RecipeItem.unit_id: None},
+            synchronize_session=False,
+        )
 
-    ledger_count = db.query(StockLedger).filter(StockLedger.unit_id == unit_id).count()
-    if ledger_count:
-        reasons.append(f"{ledger_count} stock ledger entr(ies) reference this unit")
+        db.query(StockLedger).filter(
+            StockLedger.unit_id == unit_id
+        ).update(
+            {StockLedger.unit_id: None},
+            synchronize_session=False,
+        )
 
-    recipe_unit_count = db.query(RecipeItem).filter(RecipeItem.unit_id == unit_id).count()
-    if recipe_unit_count:
-        reasons.append(f"{recipe_unit_count} recipe/BOM line(s) reference this unit")
+        db.query(ItemRate).filter(
+            ItemRate.unit_id == unit_id
+        ).update(
+            {ItemRate.unit_id: None},
+            synchronize_session=False,
+        )
 
-    wastage_unit_count = db.query(WastageItem).filter(WastageItem.unit_id == unit_id).count()
-    if wastage_unit_count:
-        reasons.append(f"{wastage_unit_count} wastage record(s) reference this unit")
+        # Non-nullable direct Unit references.
+        db.query(WastageItem).filter(
+            WastageItem.unit_id == unit_id
+        ).delete(synchronize_session=False)
 
-    closing_unit_count = db.query(ClosingStockItem).filter(ClosingStockItem.unit_id == unit_id).count()
-    if closing_unit_count:
-        reasons.append(f"{closing_unit_count} outlet closing stock line(s) reference this unit")
+        db.query(ClosingStockItem).filter(
+            ClosingStockItem.unit_id == unit_id
+        ).delete(synchronize_session=False)
 
-    if reasons:
+        # ------------------------------------------------------------------
+        # 2) Find Items whose master Unit is THIS selected Unit.
+        #
+        # Item.unit_id is non-nullable, so the Unit cannot be removed while
+        # those Items exist. Delete only those selected-Unit Items and their
+        # own direct transaction/detail rows.
+        # ------------------------------------------------------------------
+        item_ids = [
+            row[0]
+            for row in db.query(Item.id).filter(
+                Item.unit_id == unit_id,
+                Item.company_id == current_user.company_id,
+            ).all()
+        ]
+
+        recipe_ids = []
+        if item_ids:
+            recipe_ids = [
+                row[0]
+                for row in db.query(Recipe.id).filter(
+                    Recipe.finished_item_id.in_(item_ids),
+                    Recipe.company_id == current_user.company_id,
+                ).all()
+            ]
+
+            # Procurement / receiving details for THESE Items.
+            db.query(GoodsReceiveItem).filter(
+                GoodsReceiveItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(PurchaseOrderItem).filter(
+                PurchaseOrderItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(PurchaseRequestItem).filter(
+                PurchaseRequestItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(SmartRequirementItem).filter(
+                SmartRequirementItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            # Recipe / production details for THESE Items.
+            db.query(ProductionConsumption).filter(
+                ProductionConsumption.raw_item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(RecipeItem).filter(
+                RecipeItem.raw_item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            if recipe_ids:
+                production_order_ids = [
+                    row[0]
+                    for row in db.query(ProductionOrder.id).filter(
+                        ProductionOrder.recipe_id.in_(recipe_ids)
+                    ).all()
+                ]
+
+                if production_order_ids:
+                    db.query(ProductionConsumption).filter(
+                        ProductionConsumption.production_order_id.in_(production_order_ids)
+                    ).delete(synchronize_session=False)
+
+                db.query(ProductionOrder).filter(
+                    ProductionOrder.recipe_id.in_(recipe_ids)
+                ).delete(synchronize_session=False)
+
+                db.query(RecipeItem).filter(
+                    RecipeItem.recipe_id.in_(recipe_ids)
+                ).delete(synchronize_session=False)
+
+                db.query(Recipe).filter(
+                    Recipe.id.in_(recipe_ids)
+                ).delete(synchronize_session=False)
+
+            # Other item-scoped transaction rows.
+            db.query(StockTransferItem).filter(
+                StockTransferItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(WastageItem).filter(
+                WastageItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(VendorBillItem).filter(
+                VendorBillItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(ClosingStockItem).filter(
+                ClosingStockItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(StockCountItem).filter(
+                StockCountItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(StoreLocation).filter(
+                StoreLocation.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(SupplierItem).filter(
+                SupplierItem.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            # Warehouse + outlet stock and rate history for THESE Items only.
+            db.query(StockBalance).filter(
+                StockBalance.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(StockBatch).filter(
+                StockBatch.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(StockLedger).filter(
+                StockLedger.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(OutletStockBalance).filter(
+                OutletStockBalance.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(OutletStockBatch).filter(
+                OutletStockBatch.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(OutletStockLedger).filter(
+                OutletStockLedger.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(ItemRate).filter(
+                ItemRate.item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
+
+            # Finally remove ONLY Items whose master unit is the selected Unit.
+            db.query(Item).filter(
+                Item.id.in_(item_ids),
+                Item.company_id == current_user.company_id,
+            ).delete(synchronize_session=False)
+
+        # ------------------------------------------------------------------
+        # 3) Delete the selected Unit itself.
+        # ------------------------------------------------------------------
+        db.delete(unit)
+        db.commit()
+
+        return {
+            "message": "Unit permanently deleted successfully.",
+            "id": unit_id,
+            "permanently_deleted": True,
+            "deleted_item_count": len(item_ids),
+        }
+
+    except IntegrityError:
+        db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail={
-                "message": "Unit cannot be deleted because it is referenced by existing records.",
-                "references": reasons,
-                "deactivate_instead": True,
+                "message": (
+                    "Unit deletion was blocked by another database relationship. "
+                    "No data was removed."
+                ),
+                "id": unit_id,
+                "permanent_delete_blocked": True,
             },
         )
 
-    db.delete(unit)
-    db.commit()
-    return {"message": "Unit deleted successfully", "id": unit_id}
 
 @router.get("/unit-conversions", response_model=List[UnitConversionResponse])
 def get_unit_conversions(
@@ -1061,6 +1256,7 @@ def delete_item(
     item_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    permanent: bool = Query(False),
 ):
     item = db.query(Item).filter(
         Item.id == item_id,
@@ -1108,12 +1304,129 @@ def delete_item(
     ]
     existing_refs = [f"{count} {label}" for label, count in ref_checks if count]
 
+    if permanent:
+        if item.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Permanent deletion is allowed only for inactive items. Deactivate the item first.",
+            )
+
+        try:
+            # Permanent delete is intentionally scoped to the SELECTED ITEM only.
+            # Transaction/detail rows belonging to other items are never touched.
+            # Child/detail rows are deleted before the master item so PostgreSQL
+            # foreign-key constraints cannot block the requested hard delete.
+
+            # Procurement / receiving details first.
+            db.query(GoodsReceiveItem).filter(GoodsReceiveItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(PurchaseOrderItem).filter(PurchaseOrderItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(PurchaseRequestItem).filter(PurchaseRequestItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(SmartRequirementItem).filter(SmartRequirementItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+
+            # Recipe / production detail rows for THIS item only.
+            db.query(ProductionConsumption).filter(ProductionConsumption.raw_item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(RecipeItem).filter(RecipeItem.raw_item_id == item_id).delete(
+                synchronize_session=False
+            )
+
+            # Other item-scoped transaction rows.
+            db.query(StockTransferItem).filter(StockTransferItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(WastageItem).filter(WastageItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(VendorBillItem).filter(VendorBillItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(ClosingStockItem).filter(ClosingStockItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(StockCountItem).filter(StockCountItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+
+            # Item/vendor/store mappings.
+            db.query(StoreLocation).filter(StoreLocation.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(SupplierItem).filter(SupplierItem.item_id == item_id).delete(
+                synchronize_session=False
+            )
+
+            from app.models.inventory import (
+                OutletStockBalance,
+                OutletStockBatch,
+                OutletStockLedger,
+                ItemRate,
+            )
+
+            # Warehouse stock for THIS item only.
+            db.query(StockBalance).filter(StockBalance.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(StockBatch).filter(StockBatch.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(StockLedger).filter(StockLedger.item_id == item_id).delete(
+                synchronize_session=False
+            )
+
+            # Outlet stock for THIS item only. No other item's outlet stock is touched.
+            db.query(OutletStockBalance).filter(OutletStockBalance.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(OutletStockBatch).filter(OutletStockBatch.item_id == item_id).delete(
+                synchronize_session=False
+            )
+            db.query(OutletStockLedger).filter(OutletStockLedger.item_id == item_id).delete(
+                synchronize_session=False
+            )
+
+            # Vendor rate history for THIS item only.
+            db.query(ItemRate).filter(ItemRate.item_id == item_id).delete(
+                synchronize_session=False
+            )
+
+            db.delete(item)
+            db.commit()
+
+            return {
+                "message": "Inactive item permanently deleted successfully.",
+                "id": item_id,
+                "permanently_deleted": True,
+                "deleted_references": existing_refs,
+            }
+
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": (
+                        "Permanent deletion was blocked by a database relationship. "
+                        "No data was removed."
+                    ),
+                    "references": existing_refs,
+                    "permanent_delete_blocked": True,
+                },
+            )
+
     if existing_refs:
-        # Destructive deletion is blocked by backend. Deactivate instead.
         item.is_active = False
         db.commit()
         return {
-            "message": "Item deactivated instead of deleted because it is referenced by existing records.",
+            "message": "Item deactivated because it is referenced by existing records.",
             "id": item_id,
             "deactivated": True,
             "references": existing_refs,

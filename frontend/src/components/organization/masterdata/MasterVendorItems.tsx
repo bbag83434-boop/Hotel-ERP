@@ -17,7 +17,6 @@ import {
   EmptyState,
   ConfirmModal,
   ToggleSwitch,
-  CardActionRow,
   EditBtn,
   DeleteBtn,
   ErrDetail,
@@ -296,7 +295,7 @@ export const MasterVendorItems: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid of Vendor-Item Mappings */}
+      {/* Horizontal ERP list of Vendor-Item Mappings */}
       {loading ? (
         <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3">
           <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
@@ -312,115 +311,148 @@ export const MasterVendorItems: React.FC = () => {
           icon={<DollarSign className="w-6 h-6" />}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {filtered.map((m) => {
-            const vendor = vendors.find((v) => v.id === m.supplier_id);
-            const item = items.find((i) => i.id === m.item_id);
-            const vName = m.supplier_name || vendor?.name || 'Unknown Vendor';
-            const iName = m.item_name || item?.name || 'Unknown Item';
-            const iCode = m.item_code || item?.code || '';
-            const pUnit = m.purchase_unit_symbol || m.base_unit_symbol || 'UNIT';
-            const isActive = m.is_active;
+        <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.08)] bg-white shadow-sm">
+          <div className="min-w-[1120px]">
+            <div className="grid grid-cols-[1.35fr_1.5fr_1.05fr_1.2fr_1fr_1.15fr_1.1fr] items-center gap-3 px-4 py-3 bg-[#FAF8F5] border-b border-[rgba(45,45,45,0.08)] text-[10px] uppercase tracking-[0.08em] font-bold text-[#707070]">
+              <div>Vendor</div>
+              <div>Item</div>
+              <div>Vendor Rate</div>
+              <div>Purchase / Conversion</div>
+              <div>Lead Time</div>
+              <div>Status</div>
+              <div className="text-right">Actions</div>
+            </div>
 
-            return (
-              <div
-                key={m.id}
-                className={`p-4 rounded-2xl border transition-all space-y-3 bg-white ${
-                  isActive ? 'border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#C79A3B]/40' : 'border-[#D9534F]/20 opacity-75 bg-[#FAF8F5]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <Truck className="w-3.5 h-3.5 text-[#C79A3B]" />
-                      <span className="font-bold text-xs text-[#1C1C1C] truncate max-w-[180px]">{vName}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 pl-5">
-                      <span className="text-xs font-semibold text-[#1C1C1C]">{iName}</span>
-                      {iCode && <span className="text-[10px] font-mono text-[#707070]">[{iCode}]</span>}
-                    </div>
-                  </div>
+            <div className="divide-y divide-[rgba(45,45,45,0.07)]">
+              {filtered.map((m) => {
+                const vendor = vendors.find((v) => v.id === m.supplier_id);
+                const item = items.find((i) => i.id === m.item_id);
+                const vName = m.supplier_name || vendor?.name || 'Unknown Vendor';
+                const iName = m.item_name || item?.name || 'Unknown Item';
+                const iCode = m.item_code || item?.code || '';
+                const pUnit = m.purchase_unit_symbol || m.base_unit_symbol || 'UNIT';
+                const isActive = m.is_active;
 
-                  <div className="flex flex-col items-end gap-1">
-                    <StatusPill active={isActive} />
-                    {m.is_preferred && (
-                      <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30 flex items-center gap-0.5">
-                        <Star className="w-2.5 h-2.5 fill-[#B8862D]" /> Preferred
+                return (
+                  <div
+                    key={m.id}
+                    className={`grid grid-cols-[1.35fr_1.5fr_1.05fr_1.2fr_1fr_1.15fr_1.1fr] items-center gap-3 px-4 py-3.5 text-xs transition-colors ${
+                      isActive
+                        ? 'bg-white hover:bg-[#FAF8F5]/70'
+                        : 'bg-[#FAF8F5] opacity-75'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Truck className="w-3.5 h-3.5 shrink-0 text-[#C79A3B]" />
+                        <span className="font-bold text-[#1C1C1C] truncate" title={vName}>
+                          {vName}
+                        </span>
+                      </div>
+                      {m.supplier_item_code && (
+                        <div className="mt-1 pl-5 text-[10px] font-mono text-[#707070] truncate">
+                          SKU: <span className="font-bold text-[#1C1C1C]">{m.supplier_item_code}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="font-semibold text-[#1C1C1C] truncate" title={iName}>
+                        {iName}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[#707070]">
+                        {iCode && <span className="font-mono">[{iCode}]</span>}
+                        {m.supplier_item_name && (
+                          <span className="truncate" title={m.supplier_item_name}>
+                            · {m.supplier_item_name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="font-extrabold text-sm text-[#1C1C1C]">
+                        ₹{Number(m.purchase_price || 0).toFixed(2)}
                       </span>
-                    )}
-                  </div>
-                </div>
+                      <span className="block text-[10px] text-[#707070]">per {pUnit}</span>
+                    </div>
 
-                <div className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.06)] flex items-center justify-between text-xs">
-                  <div>
-                    <span className="text-[10px] text-[#707070] block">Vendor Rate</span>
-                    <span className="font-extrabold text-sm text-[#1C1C1C]">
-                      ₹{Number(m.purchase_price || 0).toFixed(2)} / {pUnit}
-                    </span>
-                  </div>
+                    <div className="text-[11px] text-[#707070]">
+                      <div className="font-semibold text-[#1C1C1C]">
+                        {pUnit}
+                      </div>
+                      <div className="mt-0.5 text-[10px]">
+                        1 {pUnit} = {Number(m.conversion_rate || 1)} Base
+                      </div>
+                    </div>
 
-                  <div className="text-right text-[11px] text-[#707070]">
-                    <span>Lead time: <span className="font-semibold text-[#1C1C1C]">{m.lead_time_days || 1}d</span></span>
-                    {Number(m.conversion_rate || 1) !== 1 && (
-                      <span className="block text-[10px]">Ratio: 1 {pUnit} = {Number(m.conversion_rate)} Base</span>
-                    )}
-                  </div>
-                </div>
+                    <div>
+                      <span className="font-semibold text-[#1C1C1C]">
+                        {m.lead_time_days || 1} days
+                      </span>
+                    </div>
 
-                {m.supplier_item_code && (
-                  <p className="text-[10px] font-mono text-[#707070]">
-                    Vendor SKU / Code: <span className="font-bold text-[#1C1C1C]">{m.supplier_item_code}</span>
-                  </p>
-                )}
+                    <div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusPill active={isActive} />
+                        {m.is_preferred && (
+                          <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30">
+                            <Star className="w-2.5 h-2.5 fill-[#B8862D]" />
+                            Preferred
+                          </span>
+                        )}
+                      </div>
+                    </div>
 
-                <CardActionRow>
-                  <div className="flex items-center gap-2">
-                    <ToggleSwitch
-                      active={isActive}
-                      onChange={() => toggleActive(m)}
-                      title={isActive ? 'Deactivate Rate Mapping' : 'Activate Rate Mapping'}
-                    />
-                    <button
-                      onClick={() => togglePreferred(m)}
-                      title={m.is_preferred ? 'Remove Preferred Vendor status' : 'Set as Preferred Vendor'}
-                      className={`p-1 rounded-lg border text-xs transition-colors ${
-                        m.is_preferred
-                          ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/40'
-                          : 'bg-white text-[#707070] border-[rgba(45,45,45,0.12)] hover:text-[#B8862D]'
-                      }`}
-                    >
-                      <Star className={`w-3.5 h-3.5 ${m.is_preferred ? 'fill-[#B8862D]' : ''}`} />
-                    </button>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <ToggleSwitch
+                        active={isActive}
+                        onChange={() => toggleActive(m)}
+                        title={isActive ? 'Deactivate Rate Mapping' : 'Activate Rate Mapping'}
+                      />
+
+                      <button
+                        onClick={() => togglePreferred(m)}
+                        title={m.is_preferred ? 'Remove Preferred Vendor status' : 'Set as Preferred Vendor'}
+                        className={`p-1.5 rounded-lg border text-xs transition-colors ${
+                          m.is_preferred
+                            ? 'bg-[#F1E4C5] text-[#B8862D] border-[#B8862D]/40'
+                            : 'bg-white text-[#707070] border-[rgba(45,45,45,0.12)] hover:text-[#B8862D]'
+                        }`}
+                      >
+                        <Star className={`w-3.5 h-3.5 ${m.is_preferred ? 'fill-[#B8862D]' : ''}`} />
+                      </button>
+
+                      <EditBtn
+                        onClick={() => {
+                          setEditing(m);
+                          setEditForm({
+                            supplier_id: m.supplier_id,
+                            item_id: m.item_id,
+                            supplier_item_code: m.supplier_item_code || '',
+                            supplier_item_name: m.supplier_item_name || '',
+                            purchase_unit_id: m.purchase_unit_id || '',
+                            purchase_price: Number(m.purchase_price || 0),
+                            conversion_rate: Number(m.conversion_rate || 1),
+                            lead_time_days: Number(m.lead_time_days || 1),
+                            is_preferred: Boolean(m.is_preferred),
+                            is_active: Boolean(m.is_active),
+                          });
+                        }}
+                      />
+
+                      <DeleteBtn
+                        label="Remove"
+                        onClick={() => {
+                          setDeleteTarget(m);
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <EditBtn
-                      onClick={() => {
-                        setEditing(m);
-                        setEditForm({
-                          supplier_id: m.supplier_id,
-                          item_id: m.item_id,
-                          supplier_item_code: m.supplier_item_code || '',
-                          supplier_item_name: m.supplier_item_name || '',
-                          purchase_unit_id: m.purchase_unit_id || '',
-                          purchase_price: Number(m.purchase_price || 0),
-                          conversion_rate: Number(m.conversion_rate || 1),
-                          lead_time_days: Number(m.lead_time_days || 1),
-                          is_preferred: Boolean(m.is_preferred),
-                          is_active: Boolean(m.is_active),
-                        });
-                      }}
-                    />
-                    <DeleteBtn
-                      label="Remove"
-                      onClick={() => {
-                        setDeleteTarget(m);
-                      }}
-                    />
-                  </div>
-                </CardActionRow>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

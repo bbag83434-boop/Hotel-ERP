@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
+from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.core.auth import get_current_active_user, require_permission, require_outlet_scope
 from app.core.exceptions import (
@@ -658,65 +659,313 @@ def delete_branch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Dependency-safe Outlet (Branch) deletion.
+    """Permanently delete one outlet and only that outlet's operational data.
 
-    Hard deletion is blocked whenever the outlet is referenced by master or
-    transactional records (warehouses, departments, staff, requisitions, POs,
-    GRNs, closings, transfers, production, POS, cashier sessions, menus & more).
-    The caller is then asked to use Active/Inactive instead.
+    Deletion is intentionally scoped to the selected branch and its own
+    warehouses. Master data such as Items, Categories, Units, Vendors and
+    Supplier Rate history is never deleted here. Data belonging to any other
+    branch is never included in the delete predicates.
     """
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise NotFoundException("Branch", branch_id)
 
-    def count_refs(model, attr: str) -> int:
+    try:
+        # Import transactional models inline so this endpoint remains isolated
+        # from the rest of the organization router's import graph.
+        from app.models.procurement import (
+            PurchaseRequest,
+            PurchaseOrder,
+            PurchaseOrderItem,
+            GoodsReceiveNote,
+            GoodsReceiveItem,
+        )
+        from app.models.closing import OutletClosingRecord
+        from app.models.wastage import WastageEntry
+        from app.models.cashier import CashSession
+        from app.models.restaurant import RestaurantOrder, Menu
+        from app.models.recipe import ProductionOrder, ProductionConsumption
+        from app.models.inventory import (
+            StockBalance,
+            StockBatch,
+            StockLedger,
+            StockTransfer,
+            StockTransferItem,
+            StockCount,
+            StockCountItem,
+            OutletStockBalance,
+            OutletStockBatch,
+            OutletStockLedger,
+        )
+        from app.models.outlet_sales import OutletSale, OutletSaleIngredient
+
+        # ------------------------------------------------------------------
+        # 1) Find only warehouses owned by THIS outlet.
+        # ------------------------------------------------------------------
+        warehouse_rows = (
+            db.query(Warehouse.id)
+            .filter(Warehouse.branch_id == branch_id)
+            .all()
+        )
+        warehouse_ids = [row[0] for row in warehouse_rows]
+
+        # ------------------------------------------------------------------
+        # 2) Remove outlet-only configuration links.
+        # ------------------------------------------------------------------
+        db.query(UserBranch).filter(
+            UserBranch.branch_id == branch_id
+        ).delete(synchronize_session=False)
+
+        db.query(Department).filter(
+            Department.branch_id == branch_id
+        ).delete(synchronize_session=False)
+
+        db.query(Staff).filter(
+            Staff.branch_id == branch_id
+        ).delete(synchronize_session=False)
+
+        # Optional branch configuration/draft tables.
         try:
-            if hasattr(model, attr) and getattr(model, attr) is not None:
-                return int(db.query(func.count()).select_from(model).filter(getattr(model, attr) == branch_id).scalar() or 0)
-        except Exception:
-            return 0
-        return 0
+            from app.models.procurement import BranchRequirementConfig, SmartRequirementDraft
+            db.query(BranchRequirementConfig).filter(
+                BranchRequirementConfig.branch_id == branch_id
+            ).delete(synchronize_session=False)
+            db.query(SmartRequirementDraft).filter(
+                SmartRequirementDraft.branch_id == branch_id
+            ).delete(synchronize_session=False)
+        except ImportError:
+            pass
 
-    # Import transactional models inline to keep module import graph stable.
-    from app.models.procurement import PurchaseRequest, PurchaseOrder, GoodsReceiveNote
-    from app.models.closing import OutletClosingRecord
-    from app.models.hr import Staff
-    from app.models.wastage import WastageEntry
-    from app.models.cashier import CashSession
-    from app.models.restaurant import RestaurantOrder, Menu
-    from app.models.recipe import ProductionOrder
-    from app.models.inventory import StockLedger, StockTransfer
+        # ------------------------------------------------------------------
+        # 3) Delete purchase/requisition data belonging to THIS outlet only.
+        # ------------------------------------------------------------------
+        purchase_request_ids = [
+            row[0]
+            for row in db.query(PurchaseRequest.id)
+            .filter(PurchaseRequest.branch_id == branch_id)
+            .all()
+        ]
+        if purchase_request_ids:
+            db.query(PurchaseRequest).filter(
+                PurchaseRequest.id.in_(purchase_request_ids)
+            ).delete(synchronize_session=False)
 
-    check_labels = [
-        ("warehouse(s)", Warehouse, "branch_id"),
-        ("department(s)", Department, "branch_id"),
-        ("staff record(s)", Staff, "branch_id"),
-        ("user-outlet assignment(s)", UserBranch, "branch_id"),
-        ("purchase requisition(s)", PurchaseRequest, "branch_id"),
-        ("purchase order(s)", PurchaseOrder, "branch_id"),
-        ("goods receive note(s)", GoodsReceiveNote, "branch_id"),
-        ("outlet closing record(s)", OutletClosingRecord, "branch_id"),
-        ("wastage entr(ies)", WastageEntry, "branch_id"),
-        ("cashier session(s)", CashSession, "branch_id"),
-        ("POS order(s)", RestaurantOrder, "branch_id"),
-        ("menu(s)", Menu, "branch_id"),
-        ("production order(s)", ProductionOrder, "branch_id"),
-        ("stock ledger entr(ies)", StockLedger, "branch_id"),
-        ("store transfer(s)", StockTransfer, "source_branch_id"),
-    ]
+        purchase_order_ids = [
+            row[0]
+            for row in db.query(PurchaseOrder.id)
+            .filter(PurchaseOrder.branch_id == branch_id)
+            .all()
+        ]
+        if purchase_order_ids:
+            # GRNs tied to these outlet POs are deleted first.
+            grn_ids = [
+                row[0]
+                for row in db.query(GoodsReceiveNote.id)
+                .filter(GoodsReceiveNote.po_id.in_(purchase_order_ids))
+                .all()
+            ]
+            if grn_ids:
+                db.query(GoodsReceiveItem).filter(
+                    GoodsReceiveItem.grn_id.in_(grn_ids)
+                ).delete(synchronize_session=False)
+                db.query(GoodsReceiveNote).filter(
+                    GoodsReceiveNote.id.in_(grn_ids)
+                ).delete(synchronize_session=False)
 
-    reasons = [f"{count_refs(model, attr)} {label}" for label, model, attr in check_labels if count_refs(model, attr)]
+            db.query(PurchaseOrderItem).filter(
+                PurchaseOrderItem.po_id.in_(purchase_order_ids)
+            ).delete(synchronize_session=False)
+            db.query(PurchaseOrder).filter(
+                PurchaseOrder.id.in_(purchase_order_ids)
+            ).delete(synchronize_session=False)
 
-    if reasons:
+        # GRNs created directly against this outlet, even when PO linkage was
+        # absent or already NULL, are also outlet-scoped and can be removed.
+        direct_grn_ids = [
+            row[0]
+            for row in db.query(GoodsReceiveNote.id)
+            .filter(GoodsReceiveNote.branch_id == branch_id)
+            .all()
+        ]
+        if direct_grn_ids:
+            db.query(GoodsReceiveItem).filter(
+                GoodsReceiveItem.grn_id.in_(direct_grn_ids)
+            ).delete(synchronize_session=False)
+            db.query(GoodsReceiveNote).filter(
+                GoodsReceiveNote.id.in_(direct_grn_ids)
+            ).delete(synchronize_session=False)
+
+        # ------------------------------------------------------------------
+        # 4) Delete outlet-specific stock and operational history.
+        # ------------------------------------------------------------------
+        db.query(OutletStockBalance).filter(
+            OutletStockBalance.branch_id == branch_id
+        ).delete(synchronize_session=False)
+        db.query(OutletStockBatch).filter(
+            OutletStockBatch.branch_id == branch_id
+        ).delete(synchronize_session=False)
+        db.query(OutletStockLedger).filter(
+            OutletStockLedger.branch_id == branch_id
+        ).delete(synchronize_session=False)
+
+        db.query(OutletClosingRecord).filter(
+            OutletClosingRecord.branch_id == branch_id
+        ).delete(synchronize_session=False)
+        db.query(WastageEntry).filter(
+            WastageEntry.branch_id == branch_id
+        ).delete(synchronize_session=False)
+        db.query(CashSession).filter(
+            CashSession.branch_id == branch_id
+        ).delete(synchronize_session=False)
+
+        # Outlet sales are optional in this deployment. The model may exist
+        # in the codebase while the physical table is not yet present in the
+        # database. Only query/delete these rows when the table actually exists.
+        from sqlalchemy import inspect
+
+        if inspect(db.bind).has_table("outlet_sales"):
+            outlet_sale_ids = [
+                row[0]
+                for row in db.query(OutletSale.id)
+                .filter(OutletSale.branch_id == branch_id)
+                .all()
+            ]
+            if outlet_sale_ids:
+                db.query(OutletSaleIngredient).filter(
+                    OutletSaleIngredient.sale_id.in_(outlet_sale_ids)
+                ).delete(synchronize_session=False)
+                db.query(OutletSale).filter(
+                    OutletSale.id.in_(outlet_sale_ids)
+                ).delete(synchronize_session=False)
+
+        # Production orders are branch-owned; their consumption rows are child
+        # records and are removed before the header.
+        production_ids = [
+            row[0]
+            for row in db.query(ProductionOrder.id)
+            .filter(ProductionOrder.branch_id == branch_id)
+            .all()
+        ]
+        if production_ids:
+            db.query(ProductionConsumption).filter(
+                ProductionConsumption.production_order_id.in_(production_ids)
+            ).delete(synchronize_session=False)
+            db.query(ProductionOrder).filter(
+                ProductionOrder.id.in_(production_ids)
+            ).delete(synchronize_session=False)
+
+        # POS/menu data is outlet-scoped. Database-level cascades on their
+        # existing child relationships handle their child rows.
+        db.query(Menu).filter(Menu.branch_id == branch_id).delete(
+            synchronize_session=False
+        )
+        db.query(RestaurantOrder).filter(
+            RestaurantOrder.branch_id == branch_id
+        ).delete(synchronize_session=False)
+
+        # ------------------------------------------------------------------
+        # 5) Transfer history involving THIS outlet is removed. This does not
+        # touch another outlet's stock balance; only the transfer records and
+        # their items are removed.
+        # ------------------------------------------------------------------
+        transfer_ids = [
+            row[0]
+            for row in db.query(StockTransfer.id)
+            .filter(
+                (StockTransfer.source_branch_id == branch_id)
+                | (StockTransfer.destination_branch_id == branch_id)
+            )
+            .all()
+        ]
+        if warehouse_ids:
+            warehouse_transfer_ids = [
+                row[0]
+                for row in db.query(StockTransfer.id)
+                .filter(
+                    (StockTransfer.from_warehouse_id.in_(warehouse_ids))
+                    | (StockTransfer.to_warehouse_id.in_(warehouse_ids))
+                )
+                .all()
+            ]
+            transfer_ids = list(dict.fromkeys(transfer_ids + warehouse_transfer_ids))
+
+        if transfer_ids:
+            db.query(StockTransferItem).filter(
+                StockTransferItem.transfer_id.in_(transfer_ids)
+            ).delete(synchronize_session=False)
+            db.query(StockTransfer).filter(
+                StockTransfer.id.in_(transfer_ids)
+            ).delete(synchronize_session=False)
+
+        # ------------------------------------------------------------------
+        # 6) Delete all stock attached to THIS outlet's warehouse(s) only.
+        #    No Stock* row from any other warehouse is touched.
+        # ------------------------------------------------------------------
+        if warehouse_ids:
+            db.query(StoreLocation).filter(
+                StoreLocation.warehouse_id.in_(warehouse_ids)
+            ).delete(synchronize_session=False)
+
+            stock_count_ids = [
+                row[0]
+                for row in db.query(StockCount.id)
+                .filter(StockCount.warehouse_id.in_(warehouse_ids))
+                .all()
+            ]
+            if stock_count_ids:
+                db.query(StockCountItem).filter(
+                    StockCountItem.stock_count_id.in_(stock_count_ids)
+                ).delete(synchronize_session=False)
+                db.query(StockCount).filter(
+                    StockCount.id.in_(stock_count_ids)
+                ).delete(synchronize_session=False)
+
+            # Warehouse-scoped stock only.
+            db.query(StockBalance).filter(
+                StockBalance.warehouse_id.in_(warehouse_ids)
+            ).delete(synchronize_session=False)
+            db.query(StockBatch).filter(
+                StockBatch.warehouse_id.in_(warehouse_ids)
+            ).delete(synchronize_session=False)
+            db.query(StockLedger).filter(
+                StockLedger.warehouse_id.in_(warehouse_ids)
+            ).delete(synchronize_session=False)
+
+            # Remove the outlet's warehouses themselves only after all their
+            # warehouse-specific dependants have been handled.
+            db.query(Warehouse).filter(
+                Warehouse.id.in_(warehouse_ids),
+                Warehouse.branch_id == branch_id,
+            ).delete(synchronize_session=False)
+
+        # ------------------------------------------------------------------
+        # 7) Final hard delete of ONLY the selected branch.
+        # ------------------------------------------------------------------
+        db.delete(branch)
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "Outlet and its own stock/purchase/operational data deleted permanently.",
+            "id": branch_id,
+            "hard_deleted": True,
+            "other_outlet_stock_touched": False,
+        }
+
+    except IntegrityError as exc:
+        db.rollback()
+        detail_text = str(getattr(exc, "orig", exc))
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail={
-                "message": "Outlet cannot be deleted because it is referenced by existing records.",
-                "references": reasons,
-                "deactivate_instead": True,
+                "message": (
+                    "Outlet delete was rolled back because a remaining protected "
+                    "dependency was found. No partial deletion was kept."
+                ),
+                "technical_detail": detail_text,
+                "other_outlet_stock_touched": False,
             },
         )
-
-    db.delete(branch)
-    db.commit()
-    return {"message": "Outlet deleted successfully", "id": branch_id}
+    except Exception:
+        db.rollback()
+        raise

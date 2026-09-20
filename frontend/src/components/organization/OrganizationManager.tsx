@@ -1,123 +1,164 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { organizationApi } from '@/api/organization';
-import {
-  Company,
-  Branch,
-  Warehouse,
-  Department,
-  Staff,
-  OrganizationOverview,
-  BranchDetail,
-} from '@/types/organization.types';
+import { Branch, Company } from '@/types/organization.types';
 import { useOutlet } from '@/context/OutletContext';
+
 import {
+  AlertCircle,
+  ArrowLeft,
   Building2,
-  Warehouse as WarehouseIcon,
-  Users,
-  Briefcase,
+  CheckCircle2,
+  Edit3,
+  Link2,
+  Mail,
+  MapPin,
+  Package,
+  Phone,
   Plus,
   RefreshCw,
-  Search,
-  CheckCircle2,
-  AlertCircle,
-  MapPin,
-  Mail,
-  Phone,
-  DollarSign,
-  ShieldCheck,
-  ChevronRight,
-  Filter,
-  Edit3,
-  Eye,
-  Layers,
-  Compass,
-  Settings,
-  Sparkles,
-  ExternalLink,
-  Truck,
-  Tags,
   Scale,
-  Package,
+  Search,
+  Settings,
+  Tags,
+  Trash2,
+  Truck,
+  X,
 } from 'lucide-react';
+
 import { MasterVendors } from './masterdata/MasterVendors';
 import { MasterCategories } from './masterdata/MasterCategories';
 import { MasterUnits } from './masterdata/MasterUnits';
 import { MasterItems } from './masterdata/MasterItems';
 import { MasterVendorItems } from './masterdata/MasterVendorItems';
-import { ConfirmModal, DeleteBtn } from './masterdata/ui';
+import { DeleteBtn } from './masterdata/ui';
 
-export type OrganizationSubTab =
-  | 'branches'
+type SetupPage =
+  | 'home'
+  | 'outlets'
   | 'vendors'
   | 'categories'
   | 'units'
   | 'items'
-  | 'vendor_items'
-  | 'warehouses'
-  | 'departments'
-  | 'staff';
+  | 'vendor_items';
+
+type Feedback = {
+  type: 'success' | 'error';
+  message: string;
+};
+
+type DeleteStage = 'confirm' | 'deleting' | 'success';
+
+type PageCard = {
+  page: Exclude<SetupPage, 'home'>;
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+const PAGE_CARDS: PageCard[] = [
+  {
+    page: 'outlets',
+    title: 'Outlet Master',
+    description: 'Create, edit, activate, deactivate and permanently delete outlets.',
+    icon: Building2,
+  },
+  {
+    page: 'vendors',
+    title: 'Vendor / Supplier Master',
+    description: 'Manage suppliers used by the procurement workflow.',
+    icon: Truck,
+  },
+  {
+    page: 'categories',
+    title: 'Item Category Master',
+    description: 'Manage item classification used by the master catalog.',
+    icon: Tags,
+  },
+  {
+    page: 'units',
+    title: 'Unit Master',
+    description: 'Manage stock units and conversion rules used by the ERP.',
+    icon: Scale,
+  },
+  {
+    page: 'items',
+    title: 'Item Master',
+    description: 'Manage raw material, semi-finished, finished and other item records.',
+    icon: Package,
+  },
+  {
+    page: 'vendor_items',
+    title: 'Vendor Items & Rates',
+    description: 'Manage vendor-item mappings, purchase rates and preferred suppliers.',
+    icon: Link2,
+  },
+];
+
+const OUTLET_TYPES = [
+  { value: 'RESTAURANT', label: 'Restaurant Outlet' },
+  { value: 'HOTEL', label: 'Hotel' },
+  { value: 'HYBRID', label: 'Hybrid HQ' },
+  { value: 'CENTRAL_STORE', label: 'Central Store' },
+  { value: 'DESSERT_KITCHEN', label: 'Dessert Kitchen' },
+];
+
+const inputClass =
+  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100';
+
+const getTypeLabel = (type?: string) =>
+  OUTLET_TYPES.find((item) => item.value === type)?.label || (type || 'Outlet').replace(/_/g, ' ');
+
+const getTypeClass = (type?: string) => {
+  switch (type) {
+    case 'CENTRAL_STORE':
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'HOTEL':
+      return 'bg-violet-50 text-violet-700 border-violet-200';
+    case 'HYBRID':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'DESSERT_KITCHEN':
+      return 'bg-pink-50 text-pink-700 border-pink-200';
+    default:
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  }
+};
+
+const getCardIconStyle = (page: SetupPage) => {
+  switch (page) {
+    case 'outlets':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'vendors':
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'categories':
+      return 'bg-violet-50 text-violet-700 border-violet-200';
+    case 'units':
+      return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+    case 'items':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    default:
+      return 'bg-orange-50 text-orange-700 border-orange-200';
+  }
+};
 
 export const OrganizationManager: React.FC = () => {
-  const { currentOutlet, activeOutlet, setActiveOutlet, refreshOutlets } = useOutlet();
-  const [subTab, setSubTab] = useState<OrganizationSubTab>('branches');
+  const { activeOutlet, refreshOutlets } = useOutlet();
 
-  // Entity State
-  const [overview, setOverview] = useState<OrganizationOverview | null>(null);
+  const [page, setPage] = useState<SetupPage>('home');
+
   const [company, setCompany] = useState<Company | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Branch Detail Drawer / Inspect State
-  const [selectedBranchDetail, setSelectedBranchDetail] = useState<BranchDetail | null>(null);
-  const [loadingBranchDetail, setLoadingBranchDetail] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Edit Modals State
-  const [editingCompany, setEditingCompany] = useState<boolean>(false);
-  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
-  const [deleteBranchTarget, setDeleteBranchTarget] = useState<Branch | null>(null);
-  const [deleteBranchReferences, setDeleteBranchReferences] = useState<string[]>([]);
+  const [showCreateOutlet, setShowCreateOutlet] = useState(false);
+  const [editingOutlet, setEditingOutlet] = useState<Branch | null>(null);
+  const [savingOutlet, setSavingOutlet] = useState(false);
 
-  // Loading & Feedback State
-  const [loading, setLoading] = useState<boolean>(true);
-  const [actionLoading, setActionLoading] = useState<boolean>(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
-
-  // Form states for Creation
-  const [branchForm, setBranchForm] = useState({ name: '', code: '', type: 'RESTAURANT', email: '', phone: '', address: '' });
-  const [warehouseForm, setWarehouseForm] = useState({ name: '', code: '', branch_id: '', is_central: false });
-  const [deptForm, setDeptForm] = useState({ name: '', code: '', branch_id: '' });
-  const [staffForm, setStaffForm] = useState({
-    employee_code: '',
-    first_name: '',
-    last_name: '',
-    email: '',
-    phone: '',
-    designation: '',
-    department: '',
-    branch_id: '',
-    base_salary: 0,
-    hourly_rate: 0,
-    status: 'ACTIVE',
-  });
-
-  // Company Edit Form State
-  const [companyForm, setCompanyForm] = useState({
-    name: '',
-    code: '',
-    email: '',
-    phone: '',
-    address: '',
-    logo_url: '',
-  });
-
-  // Branch Edit Form State
-  const [branchEditForm, setBranchEditForm] = useState({
+  const [outletForm, setOutletForm] = useState({
     name: '',
     code: '',
     type: 'RESTAURANT',
@@ -127,1042 +168,913 @@ export const OrganizationManager: React.FC = () => {
     is_active: true,
   });
 
-  const loadAllData = useCallback(async () => {
+  const [deleteTarget, setDeleteTarget] = useState<Branch | null>(null);
+  const [deleteStage, setDeleteStage] = useState<DeleteStage>('confirm');
+  const [deleteError, setDeleteError] = useState('');
+
+  const [editingCompany, setEditingCompany] = useState(false);
+  const [companySaving, setCompanySaving] = useState(false);
+  const [companyForm, setCompanyForm] = useState({
+    name: '',
+    code: '',
+    email: '',
+    phone: '',
+    address: '',
+    logo_url: '',
+  });
+
+  const loadSetupData = useCallback(async () => {
     setLoading(true);
-    setFeedback(null);
+
     try {
-      const [overviewData, compData, brData, whData, deptData, staffData] = await Promise.all([
-        organizationApi.getOverview().catch(() => null),
+      const [companyData, branchData] = await Promise.all([
         organizationApi.getCompany().catch(() => null),
         organizationApi.getBranches().catch(() => []),
-        organizationApi.getWarehouses().catch(() => []),
-        organizationApi.getDepartments().catch(() => []),
-        organizationApi.getStaff().catch(() => []),
       ]);
 
-      if (overviewData) setOverview(overviewData);
-      if (compData) {
-        setCompany(compData);
+      if (companyData) {
+        setCompany(companyData);
         setCompanyForm({
-          name: compData.name || '',
-          code: compData.code || '',
-          email: compData.email || '',
-          phone: compData.phone || '',
-          address: compData.address || '',
-          logo_url: compData.logo_url || '',
+          name: companyData.name || '',
+          code: companyData.code || '',
+          email: companyData.email || '',
+          phone: companyData.phone || '',
+          address: companyData.address || '',
+          logo_url: companyData.logo_url || '',
         });
       }
-      setBranches(brData);
-      setWarehouses(whData);
-      setDepartments(deptData);
-      setStaffList(staffData);
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.message || 'Failed to load organization data' });
+
+      setBranches(Array.isArray(branchData) ? branchData : []);
+    } catch (error: any) {
+      setFeedback({
+        type: 'error',
+        message: error?.response?.data?.detail || error?.message || 'Failed to load project setup.',
+      });
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadAllData();
-  }, [loadAllData]);
+    loadSetupData();
+  }, [loadSetupData]);
 
-  // Set default branch for creation forms
-  useEffect(() => {
-    if (branches.length > 0) {
-      const defaultId = currentOutlet?.id || branches[0].id;
-      setWarehouseForm((prev) => ({ ...prev, branch_id: prev.branch_id || defaultId }));
-      setDeptForm((prev) => ({ ...prev, branch_id: prev.branch_id || defaultId }));
-      setStaffForm((prev) => ({ ...prev, branch_id: prev.branch_id || defaultId }));
+  const activeCount = useMemo(
+    () => branches.filter((branch) => branch.is_active).length,
+    [branches],
+  );
+
+  const inactiveCount = branches.length - activeCount;
+
+  const filteredBranches = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return branches;
+
+    return branches.filter(
+      (branch) =>
+        branch.name.toLowerCase().includes(query) ||
+        branch.code.toLowerCase().includes(query) ||
+        String(branch.type || '').toLowerCase().includes(query),
+    );
+  }, [branches, searchQuery]);
+
+  const openPage = (nextPage: Exclude<SetupPage, 'home'>) => {
+    setFeedback(null);
+    setSearchQuery('');
+    setPage(nextPage);
+  };
+
+  const goHome = () => {
+    setFeedback(null);
+    setSearchQuery('');
+    setPage('home');
+  };
+
+  const openCreateOutlet = () => {
+    setOutletForm({
+      name: '',
+      code: '',
+      type: 'RESTAURANT',
+      email: '',
+      phone: '',
+      address: '',
+      is_active: true,
+    });
+    setFeedback(null);
+    setShowCreateOutlet(true);
+  };
+
+  const openEditOutlet = (branch: Branch) => {
+    setOutletForm({
+      name: branch.name || '',
+      code: branch.code || '',
+      type: branch.type || 'RESTAURANT',
+      email: branch.email || '',
+      phone: branch.phone || '',
+      address: branch.address || '',
+      is_active: Boolean(branch.is_active),
+    });
+    setFeedback(null);
+    setEditingOutlet(branch);
+  };
+
+  const closeOutletForm = () => {
+    if (savingOutlet) return;
+    setShowCreateOutlet(false);
+    setEditingOutlet(null);
+  };
+
+  const handleCreateOutlet = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSavingOutlet(true);
+    setFeedback(null);
+
+    try {
+      const name = outletForm.name.trim();
+
+      await organizationApi.createBranch({
+        name,
+        code: outletForm.code.trim().toUpperCase(),
+        type: outletForm.type,
+        email: outletForm.email.trim(),
+        phone: outletForm.phone.trim(),
+        address: outletForm.address.trim(),
+        is_active: outletForm.is_active,
+      });
+
+      closeOutletForm();
+      await loadSetupData();
+      await refreshOutlets();
+
+      setFeedback({
+        type: 'success',
+        message: `Outlet "${name}" created successfully.`,
+      });
+    } catch (error: any) {
+      setFeedback({
+        type: 'error',
+        message: error?.response?.data?.detail || error?.message || 'Failed to create outlet.',
+      });
+    } finally {
+      setSavingOutlet(false);
     }
-  }, [branches, currentOutlet]);
+  };
 
-  const handleUpdateCompany = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setActionLoading(true);
+  const handleUpdateOutlet = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingOutlet) return;
+
+    setSavingOutlet(true);
+    setFeedback(null);
+
+    try {
+      const name = outletForm.name.trim();
+
+      await organizationApi.updateBranch(editingOutlet.id, {
+        name,
+        code: outletForm.code.trim().toUpperCase(),
+        type: outletForm.type,
+        email: outletForm.email.trim(),
+        phone: outletForm.phone.trim(),
+        address: outletForm.address.trim(),
+        is_active: outletForm.is_active,
+      });
+
+      closeOutletForm();
+      await loadSetupData();
+      await refreshOutlets();
+
+      setFeedback({
+        type: 'success',
+        message: `Outlet "${name}" updated successfully.`,
+      });
+    } catch (error: any) {
+      setFeedback({
+        type: 'error',
+        message: error?.response?.data?.detail || error?.message || 'Failed to update outlet.',
+      });
+    } finally {
+      setSavingOutlet(false);
+    }
+  };
+
+  const openDeleteOutlet = (branch: Branch) => {
+    setDeleteTarget(branch);
+    setDeleteStage('confirm');
+    setDeleteError('');
+  };
+
+  const closeDeleteOutlet = () => {
+    if (deleteStage === 'deleting') return;
+    setDeleteTarget(null);
+    setDeleteStage('confirm');
+    setDeleteError('');
+  };
+
+  const handleDeleteOutlet = async () => {
+    if (!deleteTarget) return;
+
+    setDeleteStage('deleting');
+    setDeleteError('');
+
+    try {
+      const deletedName = deleteTarget.name;
+      const response: any = await organizationApi.deleteBranch(deleteTarget.id);
+
+      await loadSetupData();
+      await refreshOutlets();
+
+      setFeedback({
+        type: 'success',
+        message: response?.message || `Outlet "${deletedName}" deleted successfully.`,
+      });
+      setDeleteStage('success');
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+
+      setDeleteError(
+        typeof detail === 'string'
+          ? detail
+          : detail?.message || error?.message || 'Failed to permanently delete the outlet.',
+      );
+      setDeleteStage('confirm');
+    }
+  };
+
+  const handleCompanyUpdate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setCompanySaving(true);
+    setFeedback(null);
+
     try {
       const updated = await organizationApi.updateCompany(companyForm);
       setCompany(updated);
       setEditingCompany(false);
-      setFeedback({ type: 'success', message: 'Company master profile updated successfully.' });
-      await loadAllData();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Failed to update company' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleCreateBranch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setActionLoading(true);
-    try {
-      await organizationApi.createBranch(branchForm);
-      setFeedback({ type: 'success', message: `Branch "${branchForm.name}" created successfully.` });
-      setShowCreateModal(false);
-      setBranchForm({ name: '', code: '', type: 'RESTAURANT', email: '', phone: '', address: '' });
-      await loadAllData();
-      await refreshOutlets();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Branch creation failed' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleEditBranchSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingBranch) return;
-    setActionLoading(true);
-    try {
-      await organizationApi.updateBranch(editingBranch.id, branchEditForm);
-      setFeedback({ type: 'success', message: `Branch "${branchEditForm.name}" updated successfully.` });
-      setEditingBranch(null);
-      await loadAllData();
-      await refreshOutlets();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Branch update failed' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleDeleteBranch = async () => {
-    if (!deleteBranchTarget) return;
-    setActionLoading(true);
-    try {
-      const res: any = await organizationApi.deleteBranch(deleteBranchTarget.id);
-      const refs = res?.references as string[] | undefined;
-      if (refs && refs.length) {
-        setFeedback({
-          type: 'error',
-          message: `Cannot delete branch "${deleteBranchTarget.name}": ${refs.join(' · ')}. Set branch Inactive instead.`,
-        });
-      } else {
-        setFeedback({
-          type: 'success',
-          message: res?.message || `Branch "${deleteBranchTarget.name}" deleted successfully.`,
-        });
-      }
-      setDeleteBranchTarget(null);
-      setDeleteBranchReferences([]);
-      await loadAllData();
-      await refreshOutlets();
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail;
-      if (detail && typeof detail === 'object' && detail.references) {
-        setDeleteBranchReferences(detail.references);
-        setFeedback({
-          type: 'error',
-          message: `${detail.message || 'Cannot delete branch.'} ${detail.references.join(' · ')}`,
-        });
-      } else {
-        setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Failed to delete branch' });
-      }
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleInspectBranch = async (branchId: string) => {
-    setLoadingBranchDetail(true);
-    try {
-      const details = await organizationApi.getBranchDetails(branchId);
-      setSelectedBranchDetail(details);
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'Failed to load branch details' });
-    } finally {
-      setLoadingBranchDetail(false);
-    }
-  };
-
-  const handleCreateWarehouse = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setActionLoading(true);
-    try {
-      await organizationApi.createWarehouse(warehouseForm);
-      setFeedback({ type: 'success', message: `Warehouse "${warehouseForm.name}" created successfully.` });
-      setShowCreateModal(false);
-      setWarehouseForm({ name: '', code: '', branch_id: branches[0]?.id || '', is_central: false });
-      await loadAllData();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Warehouse creation failed' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleCreateDepartment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setActionLoading(true);
-    try {
-      await organizationApi.createDepartment(deptForm);
-      setFeedback({ type: 'success', message: `Department "${deptForm.name}" created successfully.` });
-      setShowCreateModal(false);
-      setDeptForm({ name: '', code: '', branch_id: branches[0]?.id || '' });
-      await loadAllData();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Department creation failed' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleCreateStaff = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setActionLoading(true);
-    try {
-      await organizationApi.createStaff({
-        ...staffForm,
-        base_salary: Number(staffForm.base_salary),
-        hourly_rate: Number(staffForm.hourly_rate),
+      setFeedback({
+        type: 'success',
+        message: 'Company master updated successfully.',
       });
-      setFeedback({ type: 'success', message: `Staff member "${staffForm.first_name} ${staffForm.last_name}" registered.` });
-      setShowCreateModal(false);
-      setStaffForm({
-        employee_code: '',
-        first_name: '',
-        last_name: '',
-        email: '',
-        phone: '',
-        designation: '',
-        department: '',
-        branch_id: branches[0]?.id || '',
-        base_salary: 0,
-        hourly_rate: 0,
-        status: 'ACTIVE',
+    } catch (error: any) {
+      setFeedback({
+        type: 'error',
+        message: error?.response?.data?.detail || error?.message || 'Failed to update company.',
       });
-      await loadAllData();
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || err.message || 'Staff registration failed' });
     } finally {
-      setActionLoading(false);
+      setCompanySaving(false);
     }
   };
 
-  const handleScopeToOutlet = (branch: Branch) => {
-    setActiveOutlet({
-      id: branch.id,
-      code: branch.code,
-      name: branch.name,
-      type: branch.type as any,
-      isActive: branch.is_active,
-    });
-    setFeedback({
-      type: 'success',
-      message: `Active operational workspace scoped to: ${branch.name} [${branch.code}]`,
-    });
+  const renderFeedback = () => {
+    if (!feedback) return null;
+
+    return (
+      <div
+        className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-3 text-sm ${
+          feedback.type === 'success'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            : 'border-rose-200 bg-rose-50 text-rose-800'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          {feedback.type === 'success' ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+          ) : (
+            <AlertCircle className="h-4 w-4 shrink-0" />
+          )}
+          <span>{feedback.message}</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setFeedback(null)}
+          className="rounded-lg p-1 transition hover:bg-black/5"
+          aria-label="Dismiss"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    );
   };
 
-  // Filtered Lists
-  const filteredBranches = branches.filter((b) =>
-    b.name.toLowerCase().includes(searchQuery.toLowerCase()) || b.code.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const renderHome = () => (
+    <div className="min-h-full bg-[#F7F5F1] p-4 md:p-6">
+      <div className="mx-auto max-w-7xl space-y-5">
+        {renderFeedback()}
 
-  const filteredWarehouses = warehouses.filter((w) =>
-    w.name.toLowerCase().includes(searchQuery.toLowerCase()) || w.code.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+        <div className="rounded-3xl border border-[rgba(45,45,45,0.08)] bg-gradient-to-r from-white via-[#FAF8F5] to-white p-6 shadow-sm">
+          <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 text-amber-700">
+                <Settings className="h-6 w-6" />
+              </div>
 
-  const filteredDepartments = departments.filter((d) =>
-    d.name.toLowerCase().includes(searchQuery.toLowerCase()) || d.code.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="font-['Outfit'] text-2xl font-bold text-slate-900">
+                    Project Setup
+                  </h1>
 
-  const filteredStaff = staffList.filter((s) =>
-    `${s.first_name} ${s.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.employee_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.designation.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+                  {company?.code && (
+                    <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] font-bold text-amber-700">
+                      {company.code}
+                    </span>
+                  )}
+                </div>
 
-  return (
-    <div className="space-y-6">
-      {/* Top Company Master Banner */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-white via-[#FAF8F5] to-white border border-[rgba(45,45,45,0.08)] shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-[#F1E4C5] border border-[#B8862D]/30 flex items-center justify-center text-[#B8862D] shadow-sm">
-            <Building2 className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-[#1C1C1C] font-['Outfit']">
-                {company?.name || 'CB Hotel Management'}
-              </h2>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF8F5] text-[#B8862D] font-bold border border-[rgba(45,45,45,0.1)]">
-                {company?.code || 'CB-HOTEL'}
-              </span>
+                <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                  Central place for the ERP master setup. Open each master as an independent workspace.
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-[#707070] mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              {company?.email && (
-                <span className="flex items-center gap-1">
-                  <Mail className="w-3 h-3 text-[#C79A3B]" /> {company.email}
-                </span>
-              )}
-              {company?.phone && (
-                <span className="flex items-center gap-1">
-                  <Phone className="w-3 h-3 text-[#C79A3B]" /> {company.phone}
-                </span>
-              )}
-              {company?.address && (
-                <span className="flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-[#C79A3B]" /> {company.address}
-                </span>
-              )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={loadSetupData}
+                disabled={loading}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 text-amber-600 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEditingCompany(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                <Settings className="h-4 w-4 text-amber-600" />
+                Company Master
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-5 py-4">
+            <h2 className="text-sm font-semibold text-slate-900">Master Workspaces</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Select a master below. Each one opens as a dedicated workspace.
             </p>
           </div>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setEditingCompany(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm active:scale-95"
-          >
-            <Settings className="w-3.5 h-3.5 text-[#C79A3B]" />
-            <span>Edit Company Master</span>
-          </button>
-          <button
-            onClick={loadAllData}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-xs font-semibold text-[#1C1C1C] transition-all shadow-sm active:scale-95 disabled:opacity-60"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#C79A3B] ${loading ? 'animate-spin' : ''}`} />
-            <span>Sync</span>
-          </button>
-          {['branches', 'warehouses', 'departments', 'staff'].includes(subTab) && (
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#C79A3B] to-[#B8862D] text-white text-xs font-semibold shadow-md shadow-[#C79A3B]/20 transition-all hover:brightness-105 active:scale-95"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New {subTab === 'branches' ? 'Branch' : subTab === 'warehouses' ? 'Warehouse' : subTab === 'departments' ? 'Department' : 'Staff'}</span>
-            </button>
-          )}
+          <div className="divide-y divide-slate-100">
+            {PAGE_CARDS.map((card) => {
+              const Icon = card.icon;
+
+              return (
+                <button
+                  key={card.page}
+                  type="button"
+                  onClick={() => openPage(card.page)}
+                  className="group flex w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-slate-50"
+                >
+                  <div
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${getCardIconStyle(card.page)}`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h2 className="truncate text-sm font-semibold text-slate-900">
+                        {card.title}
+                      </h2>
+                      <span className="hidden rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400 sm:inline-flex">
+                        Master
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-1 text-xs text-slate-500">
+                      {card.description}
+                    </p>
+                  </div>
+
+                  <span className="shrink-0 text-sm font-semibold text-slate-300 transition group-hover:translate-x-1 group-hover:text-amber-600">
+                    →
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-cols-1 border-t border-slate-200 bg-slate-50/60 sm:grid-cols-3">
+            <div className="border-b border-slate-200 px-5 py-4 sm:border-b-0 sm:border-r">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Outlets</p>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="font-['Outfit'] text-xl font-bold text-slate-900">{branches.length}</span>
+                <span className="text-[10px] text-emerald-700">{activeCount} active</span>
+              </div>
+            </div>
+
+            <div className="border-b border-slate-200 px-5 py-4 sm:border-b-0 sm:border-r">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Inactive Outlets</p>
+              <div className="mt-1 font-['Outfit'] text-xl font-bold text-slate-700">{inactiveCount}</div>
+            </div>
+
+            <div className="px-5 py-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Master Workspaces</p>
+              <div className="mt-1 font-['Outfit'] text-xl font-bold text-slate-900">{PAGE_CARDS.length}</div>
+            </div>
+          </div>
         </div>
       </div>
+    </div>
+  );
 
-      {/* Feedback Banner */}
-      {feedback && (
-        <div
-          className={`p-3.5 rounded-xl text-xs flex items-center justify-between border animate-in fade-in duration-200 ${
-            feedback.type === 'success'
-              ? 'bg-[#2E8B57]/10 border-[#2E8B57]/30 text-[#2E8B57]'
-              : 'bg-[#D9534F]/10 border-[#D9534F]/30 text-[#D9534F]'
-          }`}
-        >
+  const renderPageHeader = (title: string, description: string, Icon: React.ComponentType<{ className?: string }>) => (
+    <>
+      {renderFeedback()}
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={goHome}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+              aria-label="Back to Project Setup"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700">
+              <Icon className="h-5 w-5" />
+            </div>
+
+            <div>
+              <h1 className="font-['Outfit'] text-lg font-bold text-slate-900">{title}</h1>
+              <p className="mt-0.5 text-xs text-slate-500">{description}</p>
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
-            {feedback.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-            <span className="font-medium">{feedback.message}</span>
+            <button
+              type="button"
+              onClick={loadSetupData}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 text-amber-600 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+
+            {page === 'outlets' && (
+              <button
+                type="button"
+                onClick={openCreateOutlet}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New Outlet
+              </button>
+            )}
           </div>
-          <button onClick={() => setFeedback(null)} className="text-xs font-bold underline opacity-70 hover:opacity-100">
-            Dismiss
-          </button>
         </div>
-      )}
+      </div>
+    </>
+  );
 
-      {/* Overview Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <button
-          onClick={() => { setSubTab('branches'); setSearchQuery(''); }}
-          className={`p-4 rounded-2xl text-left border transition-all ${
-            subTab === 'branches'
-              ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-              : 'bg-white/85 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Total Outlets</span>
-            <Building2 className="w-4 h-4 text-[#C79A3B]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{branches.length}</p>
-          <p className="text-[10px] text-[#2E8B57] mt-1 font-medium flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" />
-            {branches.filter((b) => b.is_active).length} Active Outlets
-          </p>
-        </button>
+  const renderOutletWorkspace = () => (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-amber-300 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Outlets</p>
+          <p className="mt-1 font-['Outfit'] text-2xl font-bold text-slate-900">{branches.length}</p>
+          <p className="mt-1 text-[10px] font-medium text-emerald-700">{activeCount} Active Outlets</p>
+        </div>
 
-        <button
-          onClick={() => { setSubTab('warehouses'); setSearchQuery(''); }}
-          className={`p-4 rounded-2xl text-left border transition-all ${
-            subTab === 'warehouses'
-              ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-              : 'bg-white/85 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Warehouses</span>
-            <WarehouseIcon className="w-4 h-4 text-[#3978B8]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{warehouses.length}</p>
-          <p className="text-[10px] text-[#3978B8] mt-1 font-medium">{warehouses.filter((w) => w.is_central).length} Central Distribution Hubs</p>
-        </button>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Active</p>
+          <p className="mt-1 font-['Outfit'] text-2xl font-bold text-emerald-700">{activeCount}</p>
+          <p className="mt-1 text-[10px] text-slate-500">Operational outlets</p>
+        </div>
 
-        <button
-          onClick={() => { setSubTab('departments'); setSearchQuery(''); }}
-          className={`p-4 rounded-2xl text-left border transition-all ${
-            subTab === 'departments'
-              ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-              : 'bg-white/85 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Departments</span>
-            <Briefcase className="w-4 h-4 text-[#B8862D]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{departments.length}</p>
-          <p className="text-[10px] text-[#707070] mt-1">Cross-Outlet Operations</p>
-        </button>
-
-        <button
-          onClick={() => { setSubTab('staff'); setSearchQuery(''); }}
-          className={`p-4 rounded-2xl text-left border transition-all ${
-            subTab === 'staff'
-              ? 'bg-white border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-              : 'bg-white/85 border-[rgba(45,45,45,0.08)] hover:bg-[#FAF8F5]'
-          }`}
-        >
-          <div className="flex items-center justify-between text-[#707070] mb-1">
-            <span className="text-xs font-semibold">Staff Directory</span>
-            <Users className="w-4 h-4 text-[#2E8B57]" />
-          </div>
-          <p className="text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{staffList.length}</p>
-          <p className="text-[10px] text-[#2E8B57] mt-1 font-medium">{staffList.filter((s) => s.is_active).length} Active Personnel</p>
-        </button>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Inactive</p>
+          <p className="mt-1 font-['Outfit'] text-2xl font-bold text-slate-700">{inactiveCount}</p>
+          <p className="mt-1 text-[10px] text-slate-500">Inactive records</p>
+        </div>
       </div>
 
-      {/* Search and Sub-Tabs Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
-        <div className="flex border-b border-[rgba(45,45,45,0.08)] space-x-3 overflow-x-auto pb-1">
-          {([
-            { id: 'branches', label: '14+ Outlets' },
-            { id: 'vendors', label: 'Vendors / Suppliers' },
-            { id: 'categories', label: 'Item Categories' },
-            { id: 'units', label: 'Units' },
-            { id: 'items', label: 'Item Master' },
-            { id: 'vendor_items', label: 'Vendor Items & Rates' },
-            { id: 'warehouses', label: 'Warehouses' },
-            { id: 'departments', label: 'Departments' },
-            { id: 'staff', label: 'Staff Directory' },
-          ] as const).map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => { setSubTab(tab.id as OrganizationSubTab); setSearchQuery(''); }}
-              className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 whitespace-nowrap ${
-                subTab === tab.id
-                  ? 'border-[#C79A3B] text-[#B8862D]'
-                  : 'border-transparent text-[#707070] hover:text-[#1C1C1C]'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Outlet Directory</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {filteredBranches.length} outlet{filteredBranches.length === 1 ? '' : 's'} shown
+            </p>
+          </div>
 
-        {['branches', 'warehouses', 'departments', 'staff'].includes(subTab) && (
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#707070]" />
+          <div className="relative w-full md:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
-              type="text"
-              placeholder={`Search ${subTab}...`}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full sm:w-64 pl-8 pr-3 py-1.5 text-xs rounded-xl bg-white border border-[rgba(45,45,45,0.12)] focus:outline-none focus:border-[#C79A3B] text-[#1C1C1C]"
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search outlet name, code or type..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition focus:border-amber-400 focus:bg-white"
             />
           </div>
-        )}
-      </div>
-
-      {/* Main Content Area */}
-      {loading ? (
-        <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3">
-          <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
-          <span>Synchronizing live organization data from Neon PostgreSQL...</span>
         </div>
-      ) : (
-        <div>
-          {/* TAB: Branches Matrix */}
-          {subTab === 'branches' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredBranches.map((b) => {
-                const isCurrent = b.id === activeOutlet.id;
-                const branchWarehouses = warehouses.filter((w) => w.branch_id === b.id);
-                const branchDepts = departments.filter((d) => d.branch_id === b.id);
-                const branchStaff = staffList.filter((s) => s.branch_id === b.id);
 
-                return (
-                  <div
-                    key={b.id}
-                    className={`p-5 rounded-2xl border transition-all space-y-3.5 ${
-                      isCurrent
-                        ? 'bg-[#FAF8F5] border-[#C79A3B] shadow-md shadow-[#C79A3B]/10 ring-1 ring-[#C79A3B]'
-                        : 'bg-white border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#C79A3B]/40'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
+        {loading ? (
+          <div className="flex min-h-[320px] flex-col items-center justify-center gap-3">
+            <RefreshCw className="h-6 w-6 animate-spin text-amber-600" />
+            <p className="text-sm font-semibold text-slate-900">Loading outlets...</p>
+            <p className="text-xs text-slate-500">Synchronizing live master data.</p>
+          </div>
+        ) : filteredBranches.length === 0 ? (
+          <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
+            <Building2 className="mb-3 h-10 w-10 text-amber-600" />
+            <p className="text-sm font-semibold text-slate-900">No outlets found</p>
+            <p className="mt-1 text-xs text-slate-500">Create a new outlet or change your search.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <div className="min-w-[860px]">
+              <div className="grid grid-cols-[1.6fr_1fr_1.15fr_1.7fr_1.25fr] items-center border-b border-slate-200 bg-slate-50 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500">
+                <div>Outlet</div>
+                <div>Type</div>
+                <div>Contact</div>
+                <div>Location</div>
+                <div className="text-right">Actions</div>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {filteredBranches.map((branch) => {
+                  const isCurrent = activeOutlet?.id === branch.id;
+
+                  return (
+                    <div
+                      key={branch.id}
+                      className={`grid grid-cols-[1.6fr_1fr_1.15fr_1.7fr_1.25fr] items-center px-5 py-4 transition ${
+                        isCurrent ? 'bg-amber-50/40' : 'bg-white hover:bg-slate-50/70'
+                      }`}
+                    >
+                      <div className="min-w-0 pr-4">
                         <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{b.name}</h4>
+                          <h3 className="truncate text-sm font-semibold text-slate-900">
+                            {branch.name}
+                          </h3>
+
                           {isCurrent && (
-                            <span className="text-[10px] bg-[#F1E4C5] text-[#B8862D] font-extrabold px-1.5 py-0.5 rounded border border-[#B8862D]/30">
+                            <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
                               ACTIVE
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] font-mono text-[#B8862D] mt-0.5">[{b.code}]</p>
-                      </div>
-                      <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                          b.type === 'HEAD_OFFICE' || b.type === 'HYBRID'
-                            ? 'bg-[#F1E4C5] text-[#B8862D] border border-[#B8862D]/30'
-                            : b.type === 'CENTRAL_STORE'
-                            ? 'bg-[#3978B8]/10 text-[#3978B8] border border-[#3978B8]/25'
-                            : b.type === 'DESSERT_KITCHEN'
-                            ? 'bg-[#D99625]/10 text-[#D99625] border border-[#D99625]/25'
-                            : 'bg-[#2E8B57]/10 text-[#2E8B57] border border-[#2E8B57]/25'
-                        }`}
-                      >
-                        {b.type.replace('_', ' ')}
-                      </span>
-                    </div>
 
-                    <div className="grid grid-cols-3 gap-2 py-2 px-3 rounded-xl bg-white/80 border border-[rgba(45,45,45,0.06)] text-center text-xs">
-                      <div>
-                        <span className="text-[10px] text-[#707070] block">Stores</span>
-                        <span className="font-bold text-[#1C1C1C]">{branchWarehouses.length}</span>
+                        <p className="mt-1 font-mono text-[10px] text-amber-700">{branch.code}</p>
                       </div>
-                      <div>
-                        <span className="text-[10px] text-[#707070] block">Depts</span>
-                        <span className="font-bold text-[#1C1C1C]">{branchDepts.length}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-[#707070] block">Staff</span>
-                        <span className="font-bold text-[#2E8B57]">{branchStaff.length}</span>
-                      </div>
-                    </div>
 
-                    <div className="space-y-1.5 text-[11px] text-[#707070]">
-                      {b.address && (
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3 h-3 text-[#C79A3B] shrink-0" />
-                          <span className="truncate">{b.address}</span>
-                        </div>
-                      )}
-                      {b.email && (
-                        <div className="flex items-center gap-1.5">
-                          <Mail className="w-3 h-3 text-[#707070] shrink-0" />
-                          <span className="truncate">{b.email}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-3 border-t border-[rgba(45,45,45,0.06)] flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleInspectBranch(b.id)}
-                          className="px-2.5 py-1 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-[11px] font-semibold text-[#1C1C1C] flex items-center gap-1"
+                      <div>
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${getTypeClass(branch.type)}`}
                         >
-                          <Eye className="w-3 h-3 text-[#C79A3B]" />
-                          <span>Roster</span>
-                        </button>
+                          {getTypeLabel(branch.type)}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1 text-[10px] text-slate-500">
+                        {branch.phone ? (
+                          <div className="flex items-center gap-1.5">
+                            <Phone className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{branch.phone}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">No phone</span>
+                        )}
+
+                        {branch.email ? (
+                          <div className="flex items-center gap-1.5">
+                            <Mail className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{branch.email}</span>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-slate-500">
+                        <MapPin className="h-3 w-3 shrink-0 text-amber-600" />
+                        <span className="truncate">{branch.address || 'Address not set'}</span>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => {
-                            setEditingBranch(b);
-                            setBranchEditForm({
-                              name: b.name,
-                              code: b.code,
-                              type: b.type,
-                              email: b.email || '',
-                              phone: b.phone || '',
-                              address: b.address || '',
-                              is_active: b.is_active,
-                            });
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-white border border-[rgba(45,45,45,0.12)] hover:bg-[#FAF8F5] text-[11px] font-semibold text-[#707070] hover:text-[#1C1C1C] flex items-center gap-1"
+                          type="button"
+                          onClick={() => openEditOutlet(branch)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
                         >
-                          <Edit3 className="w-3 h-3 text-[#707070]" />
-                          <span>Edit</span>
+                          <Edit3 className="h-3.5 w-3.5" />
+                          Edit
                         </button>
-                        <DeleteBtn
-                          onClick={() => {
-                            setDeleteBranchTarget(b);
-                            setDeleteBranchReferences([]);
-                          }}
-                        />
-                      </div>
 
-                      {!isCurrent ? (
-                        <button
-                          onClick={() => handleScopeToOutlet(b)}
-                          className="px-3 py-1 rounded-lg bg-[#FAF8F5] hover:bg-[#F1E4C5] text-[11px] font-bold text-[#B8862D] border border-[#B8862D]/30 transition-all"
-                        >
-                          Scope Here
-                        </button>
-                      ) : (
-                        <span className="text-[10px] text-[#2E8B57] font-semibold">Active Scope</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* TAB: Vendors Master */}
-          {subTab === 'vendors' && <MasterVendors />}
-
-          {/* TAB: Categories Master */}
-          {subTab === 'categories' && <MasterCategories />}
-
-          {/* TAB: Units Master */}
-          {subTab === 'units' && <MasterUnits />}
-
-          {/* TAB: Items Master */}
-          {subTab === 'items' && <MasterItems />}
-
-          {/* TAB: Vendor Items & Rates */}
-          {subTab === 'vendor_items' && <MasterVendorItems />}
-
-          {/* TAB: Warehouses */}
-          {subTab === 'warehouses' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredWarehouses.map((w) => {
-                const parentBranch = branches.find((b) => b.id === w.branch_id);
-                return (
-                  <div
-                    key={w.id}
-                    className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#3978B8]/40 transition-all space-y-3"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{w.name}</h4>
-                        <p className="text-[11px] font-mono text-[#3978B8] mt-0.5">[{w.code}]</p>
-                      </div>
-                      <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                          w.is_central
-                            ? 'bg-[#3978B8]/10 text-[#3978B8] border border-[#3978B8]/30'
-                            : 'bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.12)]'
-                        }`}
-                      >
-                        {w.is_central ? 'CENTRAL STORE' : 'OUTLET STORE'}
-                      </span>
-                    </div>
-
-                    <div className="text-[11px] text-[#707070]">
-                      <span className="font-medium text-[#1C1C1C]">Associated Outlet:</span>{' '}
-                      {parentBranch ? `${parentBranch.name} [${parentBranch.code}]` : 'Enterprise Wide'}
-                    </div>
-
-                    <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] flex items-center justify-between text-[10px] text-[#707070]">
-                      <span className="font-mono truncate max-w-[140px]">UUID: {w.id.slice(0, 8)}...</span>
-                      <span className={`font-semibold ${w.is_active ? 'text-[#2E8B57]' : 'text-[#D9534F]'}`}>
-                        {w.is_active ? 'ACTIVE' : 'INACTIVE'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* TAB: Departments */}
-          {subTab === 'departments' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredDepartments.map((d) => {
-                const parentBranch = branches.find((b) => b.id === d.branch_id);
-                return (
-                  <div
-                    key={d.id}
-                    className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#B8862D]/40 transition-all space-y-3"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{d.name}</h4>
-                        <p className="text-[11px] font-mono text-[#B8862D] mt-0.5">[{d.code}]</p>
-                      </div>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#FAF8F5] text-[#707070] border border-[rgba(45,45,45,0.12)]">
-                        DEPARTMENT
-                      </span>
-                    </div>
-
-                    <div className="text-[11px] text-[#707070]">
-                      <span className="font-medium text-[#1C1C1C]">Assigned Unit:</span>{' '}
-                      {parentBranch ? `${parentBranch.name} [${parentBranch.code}]` : 'All Branches'}
-                    </div>
-
-                    <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] flex items-center justify-between text-[10px] text-[#707070]">
-                      <span className="font-mono truncate max-w-[140px]">UUID: {d.id.slice(0, 8)}...</span>
-                      <span className={`font-semibold ${d.is_active ? 'text-[#2E8B57]' : 'text-[#D9534F]'}`}>
-                        {d.is_active ? 'ACTIVE' : 'INACTIVE'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* TAB: Staff */}
-          {subTab === 'staff' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredStaff.map((s) => {
-                const parentBranch = branches.find((b) => b.id === s.branch_id);
-                return (
-                  <div
-                    key={s.id}
-                    className="p-4 rounded-2xl bg-white border border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#2E8B57]/40 transition-all space-y-3"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">
-                          {s.first_name} {s.last_name}
-                        </h4>
-                        <p className="text-[11px] font-medium text-[#707070]">{s.designation}</p>
-                      </div>
-                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#FAF8F5] text-[#1C1C1C] border border-[rgba(45,45,45,0.12)]">
-                        {s.employee_code}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1 text-[11px] text-[#707070]">
-                      <div>
-                        <span className="font-medium text-[#1C1C1C]">Branch:</span>{' '}
-                        {parentBranch ? `${parentBranch.name}` : 'General Pool'}
-                      </div>
-                      {s.department && (
-                        <div>
-                          <span className="font-medium text-[#1C1C1C]">Dept:</span> {s.department}
-                        </div>
-                      )}
-                      {s.email && (
-                        <div className="truncate">
-                          <span className="font-medium text-[#1C1C1C]">Email:</span> {s.email}
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 pt-1 font-mono text-[11px] text-[#2E8B57] font-semibold">
-                        <span>Base: ${Number(s.base_salary).toFixed(2)}</span>
-                        {Number(s.hourly_rate) > 0 && <span>· ${Number(s.hourly_rate).toFixed(2)}/hr</span>}
+                        <DeleteBtn onClick={() => openDeleteOutlet(branch)} />
                       </div>
                     </div>
-
-                    <div className="pt-2 border-t border-[rgba(45,45,45,0.06)] flex items-center justify-between text-[10px] text-[#707070]">
-                      <span className="font-mono truncate max-w-[140px]">UUID: {s.id.slice(0, 8)}...</span>
-                      <span
-                        className={`font-semibold px-1.5 py-0.5 rounded ${
-                          s.status === 'ACTIVE' ? 'bg-[#2E8B57]/10 text-[#2E8B57]' : 'bg-[#D9534F]/10 text-[#D9534F]'
-                        }`}
-                      >
-                        {s.status}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Slide-over / Modal for Branch Detail & Roster */}
-      {selectedBranchDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl p-6 max-w-2xl w-full shadow-2xl border border-[rgba(45,45,45,0.12)] space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.08)] pb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-base text-[#1C1C1C] font-['Outfit']">
-                    {selectedBranchDetail.name}
-                  </h3>
-                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-[#F1E4C5] text-[#B8862D]">
-                    [{selectedBranchDetail.code}]
-                  </span>
-                </div>
-                <p className="text-xs text-[#707070] mt-0.5">
-                  Type: {selectedBranchDetail.type.replace('_', ' ')} · Address: {selectedBranchDetail.address || 'N/A'}
-                </p>
+                  );
+                })}
               </div>
-              <button
-                onClick={() => setSelectedBranchDetail(null)}
-                className="text-[#707070] hover:text-[#1C1C1C] text-sm font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Sub-sections */}
-            <div className="space-y-4 text-xs">
-              {/* Linked Warehouses */}
-              <div>
-                <h4 className="font-bold text-[#1C1C1C] mb-2 flex items-center gap-1.5">
-                  <WarehouseIcon className="w-3.5 h-3.5 text-[#3978B8]" />
-                  <span>Assigned Warehouses ({selectedBranchDetail.warehouses.length})</span>
-                </h4>
-                {selectedBranchDetail.warehouses.length === 0 ? (
-                  <p className="text-[#707070] italic">No independent warehouses assigned.</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {selectedBranchDetail.warehouses.map((w) => (
-                      <div key={w.id} className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
-                        <div className="font-bold text-[#1C1C1C]">{w.name}</div>
-                        <div className="text-[10px] text-[#3978B8] font-mono">[{w.code}] · {w.is_central ? 'Central Hub' : 'Local Store'}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Operating Departments */}
-              <div>
-                <h4 className="font-bold text-[#1C1C1C] mb-2 flex items-center gap-1.5">
-                  <Briefcase className="w-3.5 h-3.5 text-[#B8862D]" />
-                  <span>Departments ({selectedBranchDetail.departments.length})</span>
-                </h4>
-                {selectedBranchDetail.departments.length === 0 ? (
-                  <p className="text-[#707070] italic">No local departments configured.</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {selectedBranchDetail.departments.map((d) => (
-                      <div key={d.id} className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)]">
-                        <div className="font-bold text-[#1C1C1C]">{d.name}</div>
-                        <div className="text-[10px] text-[#707070] font-mono">[{d.code}]</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Assigned Staff Roster */}
-              <div>
-                <h4 className="font-bold text-[#1C1C1C] mb-2 flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5 text-[#2E8B57]" />
-                  <span>Assigned Personnel ({selectedBranchDetail.staff.length})</span>
-                </h4>
-                {selectedBranchDetail.staff.length === 0 ? (
-                  <p className="text-[#707070] italic">No staff assigned to this branch.</p>
-                ) : (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                    {selectedBranchDetail.staff.map((s) => (
-                      <div key={s.id} className="p-2 rounded-xl bg-white border border-[rgba(45,45,45,0.08)] flex items-center justify-between">
-                        <div>
-                          <span className="font-bold text-[#1C1C1C]">{s.first_name} {s.last_name}</span>
-                          <span className="text-[10px] text-[#707070] ml-2">({s.designation} · {s.department || 'General'})</span>
-                        </div>
-                        <span className="font-mono text-[10px] text-[#2E8B57] font-semibold">${Number(s.base_salary).toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-3 border-t border-[rgba(45,45,45,0.08)]">
-              <button
-                onClick={() => setSelectedBranchDetail(null)}
-                className="px-4 py-2 rounded-xl bg-[#1C1C1C] text-white text-xs font-semibold hover:bg-black"
-              >
-                Close
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+    </div>
+  );
 
-      {/* Edit Company Profile Modal */}
-      {editingCompany && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-[rgba(45,45,45,0.12)] space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.08)] pb-3">
-              <h3 className="font-bold text-base text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
-                <Settings className="w-4 h-4 text-[#C79A3B]" />
-                Edit Company Master Profile
-              </h3>
-              <button
-                onClick={() => setEditingCompany(false)}
-                className="text-[#707070] hover:text-[#1C1C1C] text-sm font-bold"
-              >
-                ✕
-              </button>
-            </div>
+  const renderSelectedWorkspace = () => {
+    switch (page) {
+      case 'outlets':
+        return renderOutletWorkspace();
+      case 'vendors':
+        return <MasterVendors />;
+      case 'categories':
+        return <MasterCategories />;
+      case 'units':
+        return <MasterUnits />;
+      case 'items':
+        return <MasterItems />;
+      case 'vendor_items':
+        return <MasterVendorItems />;
+      default:
+        return null;
+    }
+  };
 
-            <form onSubmit={handleUpdateCompany} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[#707070] font-semibold mb-1">Company Legal Name *</label>
-                <input
-                  required
-                  type="text"
-                  value={companyForm.name}
-                  onChange={(e) => setCompanyForm({ ...companyForm, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                />
-              </div>
-              <div>
-                <label className="block text-[#707070] font-semibold mb-1">Company Code / Tax ID</label>
-                <input
-                  type="text"
-                  value={companyForm.code}
-                  onChange={(e) => setCompanyForm({ ...companyForm, code: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+  if (page === 'home') {
+    return (
+      <>
+        {renderHome()}
+
+        {editingCompany && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Corporate Email</label>
-                  <input
-                    type="email"
-                    value={companyForm.email}
-                    onChange={(e) => setCompanyForm({ ...companyForm, email: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                  />
+                  <h3 className="text-base font-bold text-slate-900">Company Master</h3>
+                  <p className="mt-0.5 text-xs text-slate-500">Update the company profile used by the ERP.</p>
                 </div>
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Head Office Phone</label>
-                  <input
-                    type="text"
-                    value={companyForm.phone}
-                    onChange={(e) => setCompanyForm({ ...companyForm, phone: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[#707070] font-semibold mb-1">HQ Physical Address</label>
-                <input
-                  type="text"
-                  value={companyForm.address}
-                  onChange={(e) => setCompanyForm({ ...companyForm, address: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                />
-              </div>
 
-              <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setEditingCompany(false)}
-                  className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-[#707070] hover:bg-[#FAF8F5]"
+                  disabled={companySaving}
+                  className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-50"
+                  aria-label="Close"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={actionLoading}
-                  className="px-4 py-2 rounded-xl bg-[#C79A3B] hover:bg-[#B8862D] text-white font-semibold disabled:opacity-60"
-                >
-                  {actionLoading ? 'Saving...' : 'Save Changes'}
+                  <X className="h-5 w-5" />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
 
-      {/* Edit Branch Modal */}
-      {editingBranch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-[rgba(45,45,45,0.12)] space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.08)] pb-3">
-              <h3 className="font-bold text-base text-[#1C1C1C] font-['Outfit'] flex items-center gap-2">
-                <Edit3 className="w-4 h-4 text-[#C79A3B]" />
-                Edit Branch: {editingBranch.name}
-              </h3>
-              <button
-                onClick={() => setEditingBranch(null)}
-                className="text-[#707070] hover:text-[#1C1C1C] text-sm font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleEditBranchSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[#707070] font-semibold mb-1">Branch Name *</label>
+              <form onSubmit={handleCompanyUpdate} className="space-y-4 p-5">
                 <input
                   required
-                  type="text"
-                  value={branchEditForm.name}
-                  onChange={(e) => setBranchEditForm({ ...branchEditForm, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                  value={companyForm.name}
+                  onChange={(event) => setCompanyForm({ ...companyForm, name: event.target.value })}
+                  className={inputClass}
+                  placeholder="Company Name"
                 />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Branch Code *</label>
-                  <input
-                    required
-                    type="text"
-                    value={branchEditForm.code}
-                    onChange={(e) => setBranchEditForm({ ...branchEditForm, code: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Branch Type *</label>
-                  <select
-                    value={branchEditForm.type}
-                    onChange={(e) => setBranchEditForm({ ...branchEditForm, type: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                  >
-                    <option value="RESTAURANT">Restaurant Outlet</option>
-                    <option value="HOTEL">Hotel Resort</option>
-                    <option value="HYBRID">Hybrid HQ</option>
-                    <option value="CENTRAL_STORE">Central Store</option>
-                    <option value="DESSERT_KITCHEN">Dessert Kitchen</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-[#707070] font-semibold mb-1">Physical Address</label>
+
                 <input
-                  type="text"
-                  value={branchEditForm.address}
-                  onChange={(e) => setBranchEditForm({ ...branchEditForm, address: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                  required
+                  value={companyForm.code}
+                  onChange={(event) => setCompanyForm({ ...companyForm, code: event.target.value })}
+                  className={inputClass}
+                  placeholder="Company Code"
                 />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Email</label>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <input
                     type="email"
-                    value={branchEditForm.email}
-                    onChange={(e) => setBranchEditForm({ ...branchEditForm, email: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                    value={companyForm.email}
+                    onChange={(event) => setCompanyForm({ ...companyForm, email: event.target.value })}
+                    className={inputClass}
+                    placeholder="Email"
                   />
-                </div>
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Phone</label>
+
                   <input
-                    type="text"
-                    value={branchEditForm.phone}
-                    onChange={(e) => setBranchEditForm({ ...branchEditForm, phone: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
+                    value={companyForm.phone}
+                    onChange={(event) => setCompanyForm({ ...companyForm, phone: event.target.value })}
+                    className={inputClass}
+                    placeholder="Phone"
                   />
+                </div>
+
+                <textarea
+                  rows={3}
+                  value={companyForm.address}
+                  onChange={(event) => setCompanyForm({ ...companyForm, address: event.target.value })}
+                  className={inputClass}
+                  placeholder="Address"
+                />
+
+                <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setEditingCompany(false)}
+                    disabled={companySaving}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={companySaving}
+                    className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {companySaving && <RefreshCw className="h-4 w-4 animate-spin" />}
+                    {companySaving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  const currentPageCard = PAGE_CARDS.find((item) => item.page === page);
+  if (!currentPageCard) {
+    return null;
+  }
+
+  const CurrentIcon = currentPageCard.icon;
+
+  return (
+    <>
+      <div className="min-h-full bg-[#F7F5F1] p-4 md:p-6">
+        <div className="mx-auto max-w-[1500px] space-y-5">
+          {renderFeedback()}
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700">
+                  <CurrentIcon className="h-5 w-5" />
+                </div>
+
+                <div>
+                  <h1 className="font-['Outfit'] text-lg font-bold text-slate-900">{currentPageCard.title}</h1>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {currentPageCard.description}
+                  </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="branch_active"
-                  checked={branchEditForm.is_active}
-                  onChange={(e) => setBranchEditForm({ ...branchEditForm, is_active: e.target.checked })}
-                  className="w-4 h-4 rounded text-[#C79A3B]"
-                />
-                <label htmlFor="branch_active" className="text-[#1C1C1C] font-semibold">
-                  Branch is Active & Operational
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setEditingBranch(null)}
-                  className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-[#707070] hover:bg-[#FAF8F5]"
+                  onClick={goHome}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Project Setup
+                </button>
+
+                <button
+                  type="button"
+                  onClick={loadSetupData}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 text-amber-600 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+
+                {page === 'outlets' && (
+                  <button
+                    type="button"
+                    onClick={openCreateOutlet}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    New Outlet
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {page === 'outlets' ? (
+            renderOutletWorkspace()
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
+              <div className="min-h-[620px] rounded-xl bg-white">
+                {page === 'vendors' && <MasterVendors />}
+                {page === 'categories' && <MasterCategories />}
+                {page === 'units' && <MasterUnits />}
+                {page === 'items' && <MasterItems />}
+                {page === 'vendor_items' && <MasterVendorItems />}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Create Outlet */}
+      {showCreateOutlet && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Create New Outlet</h3>
+                <p className="mt-0.5 text-xs text-slate-500">Add the outlet to the organization master.</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeOutletForm}
+                disabled={savingOutlet}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-50"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateOutlet} className="space-y-4 p-5">
+              <input
+                required
+                value={outletForm.name}
+                onChange={(event) => setOutletForm({ ...outletForm, name: event.target.value })}
+                placeholder="Outlet Name"
+                className={inputClass}
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <input
+                  required
+                  value={outletForm.code}
+                  onChange={(event) => setOutletForm({ ...outletForm, code: event.target.value })}
+                  placeholder="Outlet Code"
+                  className={inputClass}
+                />
+
+                <select
+                  required
+                  value={outletForm.type}
+                  onChange={(event) => setOutletForm({ ...outletForm, type: event.target.value })}
+                  className={inputClass}
+                >
+                  {OUTLET_TYPES.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <input
+                value={outletForm.address}
+                onChange={(event) => setOutletForm({ ...outletForm, address: event.target.value })}
+                placeholder="Address"
+                className={inputClass}
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <input
+                  type="email"
+                  value={outletForm.email}
+                  onChange={(event) => setOutletForm({ ...outletForm, email: event.target.value })}
+                  placeholder="Email"
+                  className={inputClass}
+                />
+
+                <input
+                  value={outletForm.phone}
+                  onChange={(event) => setOutletForm({ ...outletForm, phone: event.target.value })}
+                  placeholder="Phone"
+                  className={inputClass}
+                />
+              </div>
+
+              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                <input
+                  type="checkbox"
+                  checked={outletForm.is_active}
+                  onChange={(event) => setOutletForm({ ...outletForm, is_active: event.target.checked })}
+                  className="h-4 w-4 rounded"
+                />
+                <span className="text-xs font-medium text-slate-800">Outlet is active</span>
+              </label>
+
+              <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                <button
+                  type="button"
+                  onClick={closeOutletForm}
+                  disabled={savingOutlet}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600"
                 >
                   Cancel
                 </button>
+
                 <button
                   type="submit"
-                  disabled={actionLoading}
-                  className="px-4 py-2 rounded-xl bg-[#C79A3B] hover:bg-[#B8862D] text-white font-semibold disabled:opacity-60"
+                  disabled={savingOutlet}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                 >
-                  {actionLoading ? 'Saving...' : 'Save Changes'}
+                  {savingOutlet && <RefreshCw className="h-4 w-4 animate-spin" />}
+                  {savingOutlet ? 'Creating...' : 'Create Outlet'}
                 </button>
               </div>
             </form>
@@ -1170,405 +1082,307 @@ export const OrganizationManager: React.FC = () => {
         </div>
       )}
 
-      {/* Create Entity Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-[rgba(45,45,45,0.12)] space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-[rgba(45,45,45,0.08)] pb-3">
-              <h3 className="font-bold text-base text-[#1C1C1C] font-['Outfit']">
-                Add New {subTab === 'branches' ? 'Branch' : subTab === 'warehouses' ? 'Warehouse' : subTab === 'departments' ? 'Department' : 'Staff Member'}
-              </h3>
+      {/* Edit Outlet */}
+      {editingOutlet && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Edit Outlet</h3>
+                <p className="mt-0.5 text-xs text-slate-500">Update the selected outlet master record.</p>
+              </div>
+
               <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-[#707070] hover:text-[#1C1C1C] text-sm font-bold"
+                type="button"
+                onClick={closeOutletForm}
+                disabled={savingOutlet}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-50"
+                aria-label="Close"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Branch Form */}
-            {subTab === 'branches' && (
-              <form onSubmit={handleCreateBranch} className="space-y-3 text-xs">
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Branch Name *</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="e.g. Apex Rooftop Lounge"
-                    value={branchForm.name}
-                    onChange={(e) => setBranchForm({ ...branchForm, name: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Branch Code *</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g. OUT-ROOFTOP"
-                      value={branchForm.code}
-                      onChange={(e) => setBranchForm({ ...branchForm, code: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Type *</label>
-                    <select
-                      value={branchForm.type}
-                      onChange={(e) => setBranchForm({ ...branchForm, type: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    >
-                      <option value="RESTAURANT">Restaurant Outlet</option>
-                      <option value="HOTEL">Hotel Resort</option>
-                      <option value="HYBRID">Hybrid HQ</option>
-                      <option value="CENTRAL_STORE">Central Store</option>
-                      <option value="DESSERT_KITCHEN">Dessert Kitchen</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Address</label>
-                  <input
-                    type="text"
-                    placeholder="Full physical address"
-                    value={branchForm.address}
-                    onChange={(e) => setBranchForm({ ...branchForm, address: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Email</label>
-                    <input
-                      type="email"
-                      placeholder="outlet@apex.com"
-                      value={branchForm.email}
-                      onChange={(e) => setBranchForm({ ...branchForm, email: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Phone</label>
-                    <input
-                      type="text"
-                      placeholder="+1-555-0199"
-                      value={branchForm.phone}
-                      onChange={(e) => setBranchForm({ ...branchForm, phone: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-[#707070] hover:bg-[#FAF8F5]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={actionLoading}
-                    className="px-4 py-2 rounded-xl bg-[#C79A3B] hover:bg-[#B8862D] text-white font-semibold disabled:opacity-60"
-                  >
-                    {actionLoading ? 'Creating...' : 'Create Branch'}
-                  </button>
-                </div>
-              </form>
-            )}
+            <form onSubmit={handleUpdateOutlet} className="space-y-4 p-5">
+              <input
+                required
+                value={outletForm.name}
+                onChange={(event) => setOutletForm({ ...outletForm, name: event.target.value })}
+                placeholder="Outlet Name"
+                className={inputClass}
+              />
 
-            {/* Warehouse Form */}
-            {subTab === 'warehouses' && (
-              <form onSubmit={handleCreateWarehouse} className="space-y-3 text-xs">
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Warehouse Name *</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="e.g. Dry Food Storage Vault"
-                    value={warehouseForm.name}
-                    onChange={(e) => setWarehouseForm({ ...warehouseForm, name: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Warehouse Code *</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g. WH-DRY-01"
-                      value={warehouseForm.code}
-                      onChange={(e) => setWarehouseForm({ ...warehouseForm, code: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Branch Association *</label>
-                    <select
-                      value={warehouseForm.branch_id}
-                      onChange={(e) => setWarehouseForm({ ...warehouseForm, branch_id: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    >
-                      {branches.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name} [{b.code}]
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="is_central"
-                    checked={warehouseForm.is_central}
-                    onChange={(e) => setWarehouseForm({ ...warehouseForm, is_central: e.target.checked })}
-                    className="w-4 h-4 rounded text-[#C79A3B]"
-                  />
-                  <label htmlFor="is_central" className="text-[#1C1C1C] font-medium">
-                    Central Distribution Store (serves all outlets)
-                  </label>
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-[#707070] hover:bg-[#FAF8F5]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={actionLoading}
-                    className="px-4 py-2 rounded-xl bg-[#C79A3B] hover:bg-[#B8862D] text-white font-semibold disabled:opacity-60"
-                  >
-                    {actionLoading ? 'Creating...' : 'Create Warehouse'}
-                  </button>
-                </div>
-              </form>
-            )}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <input
+                  required
+                  value={outletForm.code}
+                  onChange={(event) => setOutletForm({ ...outletForm, code: event.target.value })}
+                  placeholder="Outlet Code"
+                  className={inputClass}
+                />
 
-            {/* Department Form */}
-            {subTab === 'departments' && (
-              <form onSubmit={handleCreateDepartment} className="space-y-3 text-xs">
-                <div>
-                  <label className="block text-[#707070] font-semibold mb-1">Department Name *</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="e.g. Pastry & Bakery Production"
-                    value={deptForm.name}
-                    onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Department Code *</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g. DEPT-PASTRY"
-                      value={deptForm.code}
-                      onChange={(e) => setDeptForm({ ...deptForm, code: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Assigned Branch</label>
-                    <select
-                      value={deptForm.branch_id}
-                      onChange={(e) => setDeptForm({ ...deptForm, branch_id: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    >
-                      <option value="">All Branches (Corporate Wide)</option>
-                      {branches.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name} [{b.code}]
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-[#707070] hover:bg-[#FAF8F5]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={actionLoading}
-                    className="px-4 py-2 rounded-xl bg-[#C79A3B] hover:bg-[#B8862D] text-white font-semibold disabled:opacity-60"
-                  >
-                    {actionLoading ? 'Creating...' : 'Create Department'}
-                  </button>
-                </div>
-              </form>
-            )}
+                <select
+                  required
+                  value={outletForm.type}
+                  onChange={(event) => setOutletForm({ ...outletForm, type: event.target.value })}
+                  className={inputClass}
+                >
+                  {OUTLET_TYPES.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            {/* Staff Form */}
-            {subTab === 'staff' && (
-              <form onSubmit={handleCreateStaff} className="space-y-3 text-xs">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">First Name *</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="Jane"
-                      value={staffForm.first_name}
-                      onChange={(e) => setStaffForm({ ...staffForm, first_name: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Last Name *</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="Doe"
-                      value={staffForm.last_name}
-                      onChange={(e) => setStaffForm({ ...staffForm, last_name: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Employee Code *</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g. EMP-9021"
-                      value={staffForm.employee_code}
-                      onChange={(e) => setStaffForm({ ...staffForm, employee_code: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Designation *</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g. Head Chef / Storekeeper"
-                      value={staffForm.designation}
-                      onChange={(e) => setStaffForm({ ...staffForm, designation: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Branch Allocation *</label>
-                    <select
-                      required
-                      value={staffForm.branch_id}
-                      onChange={(e) => setStaffForm({ ...staffForm, branch_id: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    >
-                      {branches.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name} [{b.code}]
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Department</label>
-                    <input
-                      type="text"
-                      placeholder="Kitchen / Service"
-                      value={staffForm.department}
-                      onChange={(e) => setStaffForm({ ...staffForm, department: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Email</label>
-                    <input
-                      type="email"
-                      placeholder="staff@apex.com"
-                      value={staffForm.email}
-                      onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Phone</label>
-                    <input
-                      type="text"
-                      placeholder="+1-555-4321"
-                      value={staffForm.phone}
-                      onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Base Monthly Salary ($)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={staffForm.base_salary}
-                      onChange={(e) => setStaffForm({ ...staffForm, base_salary: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#707070] font-semibold mb-1">Hourly Rate ($)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={staffForm.hourly_rate}
-                      onChange={(e) => setStaffForm({ ...staffForm, hourly_rate: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-[rgba(45,45,45,0.15)] focus:border-[#C79A3B] outline-none text-[#1C1C1C]"
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="px-4 py-2 rounded-xl border border-[rgba(45,45,45,0.15)] text-[#707070] hover:bg-[#FAF8F5]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={actionLoading}
-                    className="px-4 py-2 rounded-xl bg-[#C79A3B] hover:bg-[#B8862D] text-white font-semibold disabled:opacity-60"
-                  >
-                    {actionLoading ? 'Registering...' : 'Register Staff'}
-                  </button>
-                </div>
-              </form>
-            )}
+              <input
+                value={outletForm.address}
+                onChange={(event) => setOutletForm({ ...outletForm, address: event.target.value })}
+                placeholder="Address"
+                className={inputClass}
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <input
+                  type="email"
+                  value={outletForm.email}
+                  onChange={(event) => setOutletForm({ ...outletForm, email: event.target.value })}
+                  placeholder="Email"
+                  className={inputClass}
+                />
+
+                <input
+                  value={outletForm.phone}
+                  onChange={(event) => setOutletForm({ ...outletForm, phone: event.target.value })}
+                  placeholder="Phone"
+                  className={inputClass}
+                />
+              </div>
+
+              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                <input
+                  type="checkbox"
+                  checked={outletForm.is_active}
+                  onChange={(event) => setOutletForm({ ...outletForm, is_active: event.target.checked })}
+                  className="h-4 w-4 rounded"
+                />
+                <span className="text-xs font-medium text-slate-800">Outlet is active</span>
+              </label>
+
+              <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                <button
+                  type="button"
+                  onClick={closeOutletForm}
+                  disabled={savingOutlet}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={savingOutlet}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {savingOutlet && <RefreshCw className="h-4 w-4 animate-spin" />}
+                  {savingOutlet ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Delete Branch Confirmation Modal */}
-      <ConfirmModal
-        open={Boolean(deleteBranchTarget)}
-        title="Delete Outlet / Branch"
-        message={`Are you sure you want to delete branch "${deleteBranchTarget?.name}"? If this outlet is referenced by warehouses, staff, purchase orders, requisitions, or transactions, backend dependency protection will block destructive deletion.`}
-        details={deleteBranchReferences}
-        loading={actionLoading}
-        onCancel={() => {
-          setDeleteBranchTarget(null);
-          setDeleteBranchReferences([]);
-        }}
-        onConfirm={handleDeleteBranch}
-      />
-    </div>
+      {/* Company Master */}
+      {editingCompany && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Company Master</h3>
+                <p className="mt-0.5 text-xs text-slate-500">Update the company profile used by the ERP.</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setEditingCompany(false)}
+                disabled={companySaving}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-50"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCompanyUpdate} className="space-y-4 p-5">
+              <input
+                required
+                value={companyForm.name}
+                onChange={(event) => setCompanyForm({ ...companyForm, name: event.target.value })}
+                className={inputClass}
+                placeholder="Company Name"
+              />
+
+              <input
+                required
+                value={companyForm.code}
+                onChange={(event) => setCompanyForm({ ...companyForm, code: event.target.value })}
+                className={inputClass}
+                placeholder="Company Code"
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <input
+                  type="email"
+                  value={companyForm.email}
+                  onChange={(event) => setCompanyForm({ ...companyForm, email: event.target.value })}
+                  className={inputClass}
+                  placeholder="Email"
+                />
+
+                <input
+                  value={companyForm.phone}
+                  onChange={(event) => setCompanyForm({ ...companyForm, phone: event.target.value })}
+                  className={inputClass}
+                  placeholder="Phone"
+                />
+              </div>
+
+              <textarea
+                rows={3}
+                value={companyForm.address}
+                onChange={(event) => setCompanyForm({ ...companyForm, address: event.target.value })}
+                className={inputClass}
+                placeholder="Address"
+              />
+
+              <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEditingCompany(false)}
+                  disabled={companySaving}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={companySaving}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {companySaving && <RefreshCw className="h-4 w-4 animate-spin" />}
+                  {companySaving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation */}
+      {deleteTarget && deleteStage === 'confirm' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Delete Outlet Permanently</h3>
+                  <p className="text-xs text-slate-500">This action cannot be undone.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 px-5 py-5">
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="text-sm text-slate-700">
+                  You are about to permanently delete
+                  <span className="font-semibold text-slate-900"> “{deleteTarget.name}”</span>.
+                </p>
+                <p className="mt-1 text-xs text-slate-500">Only the selected outlet is targeted.</p>
+              </div>
+
+              {deleteError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm text-rose-700">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{deleteError}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeDeleteOutlet}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDeleteOutlet}
+                  className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete Permanently
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Loading */}
+      {deleteTarget && deleteStage === 'deleting' && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 px-6 py-8 text-center text-white shadow-2xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-rose-500/10">
+              <RefreshCw className="h-7 w-7 animate-spin text-rose-400" />
+            </div>
+
+            <h3 className="mt-5 text-lg font-semibold">Deleting Outlet...</h3>
+            <p className="mt-2 text-sm text-slate-300">
+              Permanently deleting “{deleteTarget.name}”. Please wait.
+            </p>
+
+            <div className="mx-auto mt-5 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-slate-700">
+              <div className="h-full w-2/3 animate-pulse rounded-full bg-rose-500" />
+            </div>
+
+            <p className="mt-3 text-xs text-slate-400">Do not close or refresh this page.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Success */}
+      {deleteTarget && deleteStage === 'success' && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-emerald-200 bg-white px-6 py-8 text-center shadow-2xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+              <CheckCircle2 className="h-9 w-9" />
+            </div>
+
+            <h3 className="mt-5 text-lg font-semibold text-slate-900">Delete Successful</h3>
+            <p className="mt-2 text-sm text-slate-500">
+              “{deleteTarget.name}” has been permanently deleted.
+            </p>
+
+            <button
+              type="button"
+              onClick={closeDeleteOutlet}
+              className="mt-6 inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 

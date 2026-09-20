@@ -131,8 +131,22 @@ export const inventoryApi = {
     const res = await apiClient.put<Item>(`/inventory/items/${itemId}`, payload);
     return res.data;
   },
-  deleteItem: async (itemId: string): Promise<{ message: string } | { message: string; id: string; deactivated?: boolean; references?: string[]; deactivate_instead?: boolean }> => {
-    const res = await apiClient.delete(`/inventory/items/${itemId}`);
+  deleteItem: async (
+    itemId: string,
+    options?: { permanent?: boolean },
+  ): Promise<{
+    message: string;
+    id: string;
+    deactivated?: boolean;
+    permanently_deleted?: boolean;
+    references?: string[];
+    deactivate_instead?: boolean;
+  }> => {
+    const res = await apiClient.delete(`/inventory/items/${itemId}`, {
+      params: {
+        permanent: options?.permanent ?? false,
+      },
+    });
     return res.data;
   },
 

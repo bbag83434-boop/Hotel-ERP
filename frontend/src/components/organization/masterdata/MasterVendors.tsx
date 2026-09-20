@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Truck, Plus, RefreshCw, Search, Phone, MessageCircle } from 'lucide-react';
+import { Truck, Plus, RefreshCw, Search, Phone, MessageCircle, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
 import { procurementApi } from '@/api/procurement';
 import {
   FeedbackBanner,
@@ -12,7 +12,6 @@ import {
   SubmitBtn,
   StatusPill,
   EmptyState,
-  ConfirmModal,
   ToggleSwitch,
   CardActionRow,
   EditBtn,
@@ -64,6 +63,8 @@ export const MasterVendors: React.FC = () => {
   const [editForm, setEditForm] = useState({ ...emptyForm });
   const [deleteTarget, setDeleteTarget] = useState<Vendor | null>(null);
   const [deleteReferences, setDeleteReferences] = useState<string[]>([]);
+  const [deleteStage, setDeleteStage] = useState<'confirm' | 'deleting' | 'success'>('confirm');
+  const [deleteError, setDeleteError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,32 +148,60 @@ export const MasterVendors: React.FC = () => {
     }
   };
 
+  const openDelete = (vendor: Vendor) => {
+    setDeleteTarget(vendor);
+    setDeleteReferences([]);
+    setDeleteError('');
+    setDeleteStage('confirm');
+  };
+
+  const closeDelete = () => {
+    if (deleteStage === 'deleting') return;
+    setDeleteTarget(null);
+    setDeleteReferences([]);
+    setDeleteError('');
+    setDeleteStage('confirm');
+  };
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+
     setActionLoading(true);
+    setDeleteError('');
+    setDeleteStage('deleting');
+
     try {
       const res: any = await procurementApi.deleteSupplier(deleteTarget.id);
       const references = res?.references as string[] | undefined;
-      setFeedback({
-        type: references && references.length ? 'error' : 'success',
-        message: references && references.length
-          ? `Cannot delete: ${references.join(' · ')}. Set the vendor Inactive instead.`
-          : (res?.message || 'Vendor deleted successfully.'),
-      });
-      setDeleteTarget(null);
-      setDeleteReferences([]);
+
+      if (references && references.length) {
+        const message = `Vendor cannot be deleted because it is referenced by: ${references.join(' · ')}`;
+        setDeleteReferences(references);
+        setDeleteError(message);
+        setDeleteStage('confirm');
+        return;
+      }
+
       await load();
+      setDeleteStage('success');
+      setFeedback({
+        type: 'success',
+        message: res?.message || `Vendor "${deleteTarget.name}" deleted successfully.`,
+      });
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
+
       if (detail && typeof detail === 'object' && detail.references) {
-        setDeleteReferences(detail.references);
-        setFeedback({
-          type: 'error',
-          message: `${detail.message || 'Cannot delete vendor.'} ${detail.references.join(' · ')}`,
-        });
+        const references = detail.references as string[];
+        setDeleteReferences(references);
+        setDeleteError(
+          `${detail.message || 'Vendor cannot be deleted.'} ${references.join(' · ')}`,
+        );
       } else {
-        setFeedback({ type: 'error', message: ErrDetail(err) });
+        setDeleteError(ErrDetail(err) || 'Vendor deletion failed.');
       }
+
+      setDeleteStage('confirm');
     } finally {
       setActionLoading(false);
     }
@@ -181,6 +210,32 @@ export const MasterVendors: React.FC = () => {
   return (
     <div className="space-y-4">
       <FeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} />
+
+      {/* Vendor Summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <button
+          type="button"
+          onClick={() => setSearch('')}
+          className="p-4 rounded-2xl text-left border border-[#C79A3B] bg-white shadow-md shadow-[#C79A3B]/10"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#707070]">Total Vendors</p>
+          <p className="mt-1 text-2xl font-bold text-[#1C1C1C] font-['Outfit']">{vendors.length}</p>
+        </button>
+
+        <div className="p-4 rounded-2xl text-left border border-[rgba(45,45,45,0.08)] bg-white">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#707070]">Active</p>
+          <p className="mt-1 text-2xl font-bold text-[#2E8B57] font-['Outfit']">
+            {vendors.filter((v) => v.is_active !== false && (v as any).isActive !== false).length}
+          </p>
+        </div>
+
+        <div className="p-4 rounded-2xl text-left border border-[rgba(45,45,45,0.08)] bg-white">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#707070]">Inactive</p>
+          <p className="mt-1 text-2xl font-bold text-[#707070] font-['Outfit']">
+            {vendors.filter((v) => !(v.is_active !== false && (v as any).isActive !== false)).length}
+          </p>
+        </div>
+      </div>
 
       {/* Control Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -216,101 +271,166 @@ export const MasterVendors: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid of Vendors */}
+      {/* ERP Horizontal Vendor Register */}
       {loading ? (
-        <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3">
-          <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
+        <div className="flex min-h-52 flex-col items-center justify-center gap-3 text-xs text-[#707070]">
+          <RefreshCw className="h-6 w-6 animate-spin text-[#C79A3B]" />
           <span>Loading Vendors / Suppliers...</span>
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState
           message={search ? 'No vendors matched your search.' : 'No vendors registered yet.'}
-          icon={<Truck className="w-6 h-6" />}
+          icon={<Truck className="h-6 w-6" />}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {filtered.map((v) => {
-            const isActive = v.is_active !== false && (v as any).isActive !== false;
-            return (
-              <div
-                key={v.id}
-                className={`p-4 rounded-2xl border transition-all space-y-3 bg-white ${
-                  isActive ? 'border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#C79A3B]/40' : 'border-[#D9534F]/20 opacity-75 bg-[#FAF8F5]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit'] truncate">{v.name}</h4>
-                    <p className="text-[11px] font-mono text-[#B8862D] mt-0.5">[{v.code}]</p>
-                  </div>
-                  <StatusPill active={isActive} />
-                </div>
+        <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.09)] bg-white shadow-sm">
+          <div className="min-w-[1000px]">
+            {/* Column Header */}
+            <div className="grid grid-cols-[2fr_1fr_1.35fr_1.7fr_1.35fr_0.95fr_1.3fr] items-center border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] px-4 py-3 text-[10px] font-bold uppercase tracking-[0.06em] text-[#707070]">
+              <div>Vendor</div>
+              <div>Contact Person</div>
+              <div>Phone / WhatsApp</div>
+              <div>Email / Address</div>
+              <div>GST / Payment</div>
+              <div>Status</div>
+              <div className="text-right">Actions</div>
+            </div>
 
-                <div className="space-y-1.5 text-[11px] text-[#707070]">
-                  {v.contact_person && (
-                    <div className="flex items-center gap-1.5 truncate">
-                      <span className="font-medium text-[#1C1C1C]">Contact:</span> {v.contact_person}
+            {/* Rows */}
+            <div className="divide-y divide-[rgba(45,45,45,0.07)]">
+              {filtered.map((v) => {
+                const isActive =
+                  v.is_active !== false && (v as any).isActive !== false;
+
+                return (
+                  <div
+                    key={v.id}
+                    className={`grid grid-cols-[2fr_1fr_1.35fr_1.7fr_1.35fr_0.95fr_1.3fr] items-center px-4 py-3.5 transition-colors ${
+                      isActive
+                        ? 'bg-white hover:bg-[#FFFCF7]'
+                        : 'bg-[#FCFAF8] opacity-80 hover:bg-[#FAF6F2]'
+                    }`}
+                  >
+                    {/* Vendor */}
+                    <div className="min-w-0 pr-4">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-xs font-semibold text-[#1C1C1C]">
+                          {v.name}
+                        </p>
+                        <StatusPill active={isActive} />
+                      </div>
+
+                      <p className="mt-1 font-mono text-[10px] font-semibold text-[#B8862D]">
+                        {v.code}
+                      </p>
                     </div>
-                  )}
-                  {v.phone && (
-                    <div className="flex items-center gap-1.5">
-                      <Phone className="w-3 h-3 text-[#C79A3B] shrink-0" />
-                      <span className="truncate">{v.phone}</span>
-                      {v.whatsapp_number && (
-                        <span className="flex items-center gap-1 text-[#2E8B57] font-semibold shrink-0">
-                          <MessageCircle className="w-3 h-3" /> WhatsApp
-                        </span>
+
+                    {/* Contact Person */}
+                    <div className="min-w-0 pr-3">
+                      <p className="truncate text-[11px] font-medium text-[#454545]">
+                        {v.contact_person || '—'}
+                      </p>
+                    </div>
+
+                    {/* Phone / WhatsApp */}
+                    <div className="min-w-0 space-y-1 pr-3 text-[10px] text-[#707070]">
+                      {v.phone ? (
+                        <div className="flex items-center gap-1.5">
+                          <Phone className="h-3 w-3 shrink-0 text-[#C79A3B]" />
+                          <span className="truncate">{v.phone}</span>
+                        </div>
+                      ) : (
+                        <span className="text-[#B0B0B0]">No phone</span>
+                      )}
+
+                      {v.whatsapp_number ? (
+                        <div className="flex items-center gap-1.5 text-[#2E8B57]">
+                          <MessageCircle className="h-3 w-3 shrink-0" />
+                          <span className="truncate font-semibold">
+                            {v.whatsapp_number}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Email / Address */}
+                    <div className="min-w-0 space-y-1 pr-3 text-[10px] text-[#707070]">
+                      {v.email ? (
+                        <div className="truncate">{v.email}</div>
+                      ) : (
+                        <div className="text-[#B0B0B0]">No email</div>
+                      )}
+
+                      {v.address ? (
+                        <div className="truncate">{v.address}</div>
+                      ) : (
+                        <div className="text-[#B0B0B0]">No address</div>
                       )}
                     </div>
-                  )}
-                  {!v.phone && v.whatsapp_number && (
-                    <div className="flex items-center gap-1.5 text-[#2E8B57] font-semibold">
-                      <MessageCircle className="w-3 h-3" /> {v.whatsapp_number}
-                    </div>
-                  )}
-                  {v.email && <div className="truncate">✉ {v.email}</div>}
-                  {v.address && <div className="truncate">📍 {v.address}</div>}
-                  {v.gst_number && <div className="truncate text-[10px] font-mono">GST: {v.gst_number}</div>}
-                </div>
 
-                <CardActionRow>
-                  <div className="flex items-center gap-2">
-                    <ToggleSwitch
-                      active={isActive}
-                      onChange={() => toggleActive(v)}
-                      title={isActive ? 'Deactivate' : 'Activate'}
-                    />
-                    <span className="text-[10px] text-[#707070]">{isActive ? 'Active' : 'Inactive'}</span>
+                    {/* GST / Payment */}
+                    <div className="min-w-0 space-y-1 pr-3 text-[10px] text-[#707070]">
+                      <div className="truncate">
+                        GST:{' '}
+                        <span className="font-medium text-[#454545]">
+                          {v.gst_number || '—'}
+                        </span>
+                      </div>
+                      <div className="truncate">
+                        Terms:{' '}
+                        <span className="font-medium text-[#454545]">
+                          {v.payment_terms || '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <ToggleSwitch
+                          active={isActive}
+                          onChange={() => toggleActive(v)}
+                          title={isActive ? 'Deactivate' : 'Activate'}
+                        />
+                        <span
+                          className={`text-[10px] font-semibold ${
+                            isActive
+                              ? 'text-[#2E8B57]'
+                              : 'text-[#8A8A8A]'
+                          }`}
+                        >
+                          {isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-end gap-1.5">
+                      <EditBtn
+                        onClick={() => {
+                          setEditing(v);
+                          setEditForm({
+                            name: v.name,
+                            code: v.code,
+                            contact_person: v.contact_person || '',
+                            phone: v.phone || '',
+                            whatsapp_number: v.whatsapp_number || '',
+                            email: v.email || '',
+                            address: v.address || '',
+                            gst_number: v.gst_number || '',
+                            payment_terms: v.payment_terms || '',
+                            is_active: isActive,
+                          });
+                        }}
+                      />
+
+                      <DeleteBtn onClick={() => openDelete(v)} />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <EditBtn
-                      onClick={() => {
-                        setEditing(v);
-                        setEditForm({
-                          name: v.name,
-                          code: v.code,
-                          contact_person: v.contact_person || '',
-                          phone: v.phone || '',
-                          whatsapp_number: v.whatsapp_number || '',
-                          email: v.email || '',
-                          address: v.address || '',
-                          gst_number: v.gst_number || '',
-                          payment_terms: v.payment_terms || '',
-                          is_active: isActive,
-                        });
-                      }}
-                    />
-                    <DeleteBtn
-                      onClick={() => {
-                        setDeleteTarget(v);
-                        setDeleteReferences([]);
-                      }}
-                    />
-                  </div>
-                </CardActionRow>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -531,19 +651,114 @@ export const MasterVendors: React.FC = () => {
         </Modal>
       )}
 
-      {/* Delete Confirmation Modal */}
-      <ConfirmModal
-        open={Boolean(deleteTarget)}
-        title="Delete Vendor"
-        message={`Are you sure you want to delete vendor "${deleteTarget?.name}"? If this vendor has purchase orders, GRNs, or mapped items, backend dependency protection will block destructive deletion.`}
-        details={deleteReferences}
-        loading={actionLoading}
-        onCancel={() => {
-          setDeleteTarget(null);
-          setDeleteReferences([]);
-        }}
-        onConfirm={confirmDelete}
-      />
+      {/* Permanent Delete Confirmation */}
+      {deleteTarget && deleteStage === 'confirm' && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Delete Vendor Permanently</h3>
+                  <p className="text-xs text-slate-500">This action cannot be undone.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 px-5 py-5">
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="text-sm text-slate-700">
+                  You are about to permanently delete
+                  <span className="font-semibold text-slate-900"> “{deleteTarget.name}”</span>.
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  The vendor will be removed after the server confirms the delete operation.
+                </p>
+              </div>
+
+              {deleteError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm text-rose-700">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <p>{deleteError}</p>
+                      {deleteReferences.length > 0 && (
+                        <div className="mt-2 space-y-1 text-xs">
+                          {deleteReferences.map((reference, index) => (
+                            <div key={`${reference}-${index}`}>• {reference}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeDelete}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete Permanently
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Loading */}
+      {deleteTarget && deleteStage === 'deleting' && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 px-6 py-8 text-center text-white shadow-2xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-rose-500/10">
+              <RefreshCw className="h-7 w-7 animate-spin text-rose-400" />
+            </div>
+            <h3 className="mt-5 text-lg font-semibold">Deleting Vendor...</h3>
+            <p className="mt-2 text-sm text-slate-300">
+              Permanently deleting “{deleteTarget.name}”. Please wait.
+            </p>
+            <div className="mx-auto mt-5 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-slate-700">
+              <div className="h-full w-2/3 animate-pulse rounded-full bg-rose-500" />
+            </div>
+            <p className="mt-3 text-xs text-slate-400">Do not close or refresh this page.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Success */}
+      {deleteTarget && deleteStage === 'success' && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-emerald-200 bg-white px-6 py-8 text-center shadow-2xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+              <CheckCircle2 className="h-9 w-9" />
+            </div>
+            <h3 className="mt-5 text-lg font-semibold text-slate-900">Delete Successful</h3>
+            <p className="mt-2 text-sm text-slate-500">
+              “{deleteTarget.name}” has been permanently deleted.
+            </p>
+            <button
+              type="button"
+              onClick={closeDelete}
+              className="mt-6 inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

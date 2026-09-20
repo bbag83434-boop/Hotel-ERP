@@ -201,77 +201,118 @@ export const MasterCategories: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid of Categories */}
+      {/* ERP Horizontal Category Register */}
       {loading ? (
-        <div className="p-12 text-center text-[#707070] text-xs flex flex-col items-center justify-center gap-3">
-          <RefreshCw className="w-6 h-6 animate-spin text-[#C79A3B]" />
+        <div className="flex min-h-52 flex-col items-center justify-center gap-3 text-xs text-[#707070]">
+          <RefreshCw className="h-6 w-6 animate-spin text-[#C79A3B]" />
           <span>Loading Item Categories...</span>
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState
-          message={search ? 'No categories matched your search criteria.' : 'No item categories configured yet.'}
-          icon={<Tags className="w-6 h-6" />}
+          message={
+            search
+              ? 'No categories matched your search criteria.'
+              : 'No item categories configured yet.'
+          }
+          icon={<Tags className="h-6 w-6" />}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {filtered.map((cat) => {
-            const isActive = cat.is_active !== false;
-            return (
-              <div
-                key={cat.id}
-                className={`p-4 rounded-2xl border transition-all space-y-3 bg-white ${
-                  isActive ? 'border-[rgba(45,45,45,0.08)] shadow-sm hover:border-[#C79A3B]/40' : 'border-[#D9534F]/20 opacity-75 bg-[#FAF8F5]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-[#FAF8F5] border border-[rgba(45,45,45,0.08)] flex items-center justify-center text-[#C79A3B]">
-                      <Tags className="w-4 h-4" />
+        <div className="overflow-x-auto rounded-2xl border border-[rgba(45,45,45,0.09)] bg-white shadow-sm">
+          <div className="min-w-[820px]">
+            {/* Column Header */}
+            <div className="grid grid-cols-[1.8fr_1fr_2.8fr_0.9fr_1.25fr] items-center border-b border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] px-4 py-3 text-[10px] font-bold uppercase tracking-[0.06em] text-[#707070]">
+              <div>Category</div>
+              <div>Code</div>
+              <div>Description</div>
+              <div>Status</div>
+              <div className="text-right">Actions</div>
+            </div>
+
+            {/* Rows */}
+            <div className="divide-y divide-[rgba(45,45,45,0.07)]">
+              {filtered.map((cat) => {
+                const isActive = cat.is_active !== false;
+
+                return (
+                  <div
+                    key={cat.id}
+                    className={`grid grid-cols-[1.8fr_1fr_2.8fr_0.9fr_1.25fr] items-center px-4 py-3.5 transition-colors ${
+                      isActive
+                        ? 'bg-white hover:bg-[#FFFCF7]'
+                        : 'bg-[#FCFAF8] opacity-80 hover:bg-[#FAF6F2]'
+                    }`}
+                  >
+                    {/* Category */}
+                    <div className="min-w-0 pr-4">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[rgba(45,45,45,0.08)] bg-[#FAF8F5] text-[#C79A3B]">
+                          <Tags className="h-4 w-4" />
+                        </div>
+
+                        <p className="truncate text-xs font-semibold text-[#1C1C1C]">
+                          {cat.name}
+                        </p>
+                      </div>
                     </div>
+
+                    {/* Code */}
+                    <div className="pr-3">
+                      <span className="font-mono text-[10px] font-semibold text-[#B8862D]">
+                        {cat.code}
+                      </span>
+                    </div>
+
+                    {/* Description */}
+                    <div className="min-w-0 pr-4">
+                      <p className="truncate text-[10px] text-[#707070]">
+                        {cat.description || 'No description provided.'}
+                      </p>
+                    </div>
+
+                    {/* Status */}
                     <div>
-                      <h4 className="font-bold text-sm text-[#1C1C1C] font-['Outfit']">{cat.name}</h4>
-                      <p className="text-[10px] font-mono text-[#B8862D]">[{cat.code}]</p>
+                      <div className="flex items-center gap-2">
+                        <ToggleSwitch
+                          active={isActive}
+                          onChange={() => toggleActive(cat)}
+                          title={isActive ? 'Deactivate Category' : 'Activate Category'}
+                        />
+                        <span
+                          className={`text-[10px] font-semibold ${
+                            isActive ? 'text-[#2E8B57]' : 'text-[#8A8A8A]'
+                          }`}
+                        >
+                          {isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-end gap-1.5">
+                      <EditBtn
+                        onClick={() => {
+                          setEditing(cat);
+                          setEditForm({
+                            name: cat.name,
+                            code: cat.code,
+                            description: cat.description || '',
+                            is_active: isActive,
+                          });
+                        }}
+                      />
+
+                      <DeleteBtn
+                        onClick={() => {
+                          setDeleteTarget(cat);
+                          setDeleteReferences([]);
+                        }}
+                      />
                     </div>
                   </div>
-                  <StatusPill active={isActive} />
-                </div>
-
-                <p className="text-xs text-[#707070] line-clamp-2 min-h-[2rem]">
-                  {cat.description || 'No description provided.'}
-                </p>
-
-                <CardActionRow>
-                  <div className="flex items-center gap-2">
-                    <ToggleSwitch
-                      active={isActive}
-                      onChange={() => toggleActive(cat)}
-                      title={isActive ? 'Deactivate Category' : 'Activate Category'}
-                    />
-                    <span className="text-[10px] text-[#707070]">{isActive ? 'Active' : 'Inactive'}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <EditBtn
-                      onClick={() => {
-                        setEditing(cat);
-                        setEditForm({
-                          name: cat.name,
-                          code: cat.code,
-                          description: cat.description || '',
-                          is_active: isActive,
-                        });
-                      }}
-                    />
-                    <DeleteBtn
-                      onClick={() => {
-                        setDeleteTarget(cat);
-                        setDeleteReferences([]);
-                      }}
-                    />
-                  </div>
-                </CardActionRow>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
